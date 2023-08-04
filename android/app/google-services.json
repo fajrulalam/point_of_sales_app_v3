@@ -1,0 +1,156 @@
+{
+  "project_info": {
+    "project_number": "932379156472",
+    "firebase_url": "https://point-of-sales-app-25e2b-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "point-of-sales-app-25e2b",
+    "storage_bucket": "point-of-sales-app-25e2b.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:932379156472:android:7a961a314266632855c00d",
+        "android_client_info": {
+          "package_name": "com.example.dashboardandinventory"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ1oJuagSPQ_9VWiFONeArwxtUsgLGhCA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:932379156472:android:1c1021fe045a2f4555c00d",
+        "android_client_info": {
+          "package_name": "com.example.dashboardandinventory2"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ1oJuagSPQ_9VWiFONeArwxtUsgLGhCA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:932379156472:android:eec8ef5a37c6a48555c00d",
+        "android_client_info": {
+          "package_name": "com.example.orderstobeserved"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ1oJuagSPQ_9VWiFONeArwxtUsgLGhCA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:932379156472:android:c356ed8a5e37d32d55c00d",
+        "android_client_info": {
+          "package_name": "com.example.point_of_sales_app_v2"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ1oJuagSPQ_9VWiFONeArwxtUsgLGhCA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:932379156472:android:013cd61d44258e9155c00d",
+        "android_client_info": {
+          "package_name": "com.example.point_of_sales_app_v3"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ1oJuagSPQ_9VWiFONeArwxtUsgLGhCA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "932379156472-vbtmhdl5gfu5q2n3e6mtq1q6f30d8jrl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
