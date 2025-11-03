@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -12,6 +13,7 @@ import 'package:point_of_sales_app_v3/AlertDialogs/ConnectPrinterDialog.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/AddOrEditMenu.dart';
 import 'package:point_of_sales_app_v3/Screens/Home.dart';
 import 'package:point_of_sales_app_v3/Services/LoaderWidget.dart';
+import 'package:point_of_sales_app_v3/Services/OrderConfirmationService.dart';
 import 'package:point_of_sales_app_v3/Services/ThousandsSeparatorInputFormatter.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
@@ -42,9 +44,23 @@ class _HomeState extends State<Home> {
   List<MenuObject> menuObjectList_minuman = [];
   List<PesananObject> pesananList = [];
   List<AssetsObject> listGambar = [];
+  List<String> quoteKejujuran = [
+    'Jujur itu menyenangkan',
+    'Jujur itu menyehatkan',
+    'Jujur itu menguntungkan',
+    'Jujur itu membebaskan',
+    'Jujur itu menyelamatkan',
+    'Jujur itu menyatukan',
+    'Jujur itu mempererat persaudaraan',
+    'Jujur itu mempererat persahabatan',
+    'Bukalah hatimu dan bertindaklah jujur',
+    'Jujur itu kewajiban, bukan pilihan',
+    'Jujur itu kebutuhan, bukan keinginan',
+  ];
 
   int totalHarga = 0;
   TextEditingController uangYangDiterimaController = TextEditingController();
+  TextEditingController customerNameController = TextEditingController();
   bool isUangKurang = false;
   bool isTakeAway = false;
 
@@ -61,11 +77,11 @@ class _HomeState extends State<Home> {
 
     getMenu();
     getListGambar();
-    FirebaseFirestore.instance
-        .collection("Canteens")
-        .add({"test": 'halooo'}).then((value) {
-      print('success');
-    });
+    // FirebaseFirestore.instance
+    //     .collection("Canteens")
+    //     .add({"test": 'halooo'}).then((value) {
+    //   print('success');
+    // });
   }
 
   @override
@@ -378,213 +394,214 @@ class _HomeState extends State<Home> {
                       Expanded(
                         flex: 6,
                         child: Container(
-                            decoration: BoxDecoration(
-                              //add border to the bottom
-                              color: Colors.white,
-
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: Colors.grey.shade500,
-                                  width: 1,
-                                ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            border: Border(
+                              bottom: BorderSide(
+                                color: Colors.grey.shade500,
+                                width: 1,
                               ),
                             ),
-                            child: ListView.builder(
-                                itemCount: pesananList.length,
-                                itemBuilder: (BuildContext context, int index) {
-                                  return Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8.0, vertical: 4.0),
-                                    child: Container(
-                                      margin: const EdgeInsets.only(top: 4.0),
-                                      decoration: BoxDecoration(
-                                        //border on the bottom only
-                                        border: Border(
-                                          bottom: BorderSide(
-                                            color: Colors.grey.shade300,
-                                            width: 0.5,
-                                          ),
+                          ),
+                          child: ListView.builder(
+                            itemCount: pesananList.length,
+                            itemBuilder: (BuildContext context, int index) {
+                              final order = pesananList[index];
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8.0, vertical: 4.0),
+                                child: Container(
+                                  margin: const EdgeInsets.only(top: 4.0),
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      bottom: BorderSide(
+                                        color: Colors.grey.shade300,
+                                        width: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      // Item name:
+                                      Text(
+                                        order.namaPesanan,
+                                        style: GoogleFonts.montserrat(
+                                          color: Colors.black87,
+                                          fontWeight: FontWeight.w500,
+                                          letterSpacing: 0.1,
+                                          fontSize: 18,
                                         ),
                                       ),
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.center,
+                                      SizedBox(height: 8),
+                                      // Two counters side by side:
+                                      Row(
                                         children: [
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                pesananList[index].namaPesanan,
-                                                style: GoogleFonts.montserrat(
-                                                    color: Colors.black87,
-                                                    fontWeight: FontWeight.w500,
-                                                    letterSpacing: 0.1,
-                                                    fontSize: 18),
-                                              ),
-                                              Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.center,
-                                                children: [
-                                                  Container(
-                                                    margin:
-                                                        const EdgeInsets.only(
-                                                            bottom: 4.0),
-                                                    height: 30,
-                                                    width: 40,
-                                                    decoration: BoxDecoration(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              30),
-                                                    ),
-                                                    child: Material(
-                                                      color: Colors.transparent,
-                                                      child: InkWell(
-                                                        onLongPress: () {
-                                                          setState(() {
-                                                            //give haptic feedback
-                                                            HapticFeedback
-                                                                .heavyImpact();
-                                                            pesananList[index]
-                                                                .quantity = 0;
-                                                            pesananList
-                                                                .removeAt(
-                                                                    index);
-                                                            getTotal();
-                                                          });
-                                                        },
-                                                        onTap: () {
-                                                          setState(() {
-                                                            pesananList[index]
-                                                                .quantity--;
-                                                            if (pesananList[
-                                                                        index]
-                                                                    .quantity ==
+                                          // Dine In Counter:
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text("Dine In",
+                                                    style: GoogleFonts.poppins(
+                                                        fontSize: 14)),
+                                                Row(
+                                                  children: [
+                                                    IconButton(
+                                                      onPressed: () {
+                                                        setState(() {
+                                                          if (order
+                                                                  .dineInQuantity >
+                                                              0) {
+                                                            order
+                                                                .dineInQuantity--;
+                                                            // If no items remain at all, remove the order:
+                                                            if (order
+                                                                    .totalQuantity ==
                                                                 0) {
-                                                              HapticFeedback
-                                                                  .heavyImpact();
                                                               pesananList
                                                                   .removeAt(
                                                                       index);
                                                             }
-                                                          });
+                                                          }
                                                           getTotal();
-                                                        },
-                                                        child: Center(
-                                                            child: Icon(
-                                                          Icons
-                                                              .remove_circle_outline_rounded,
-                                                          color:
-                                                              Colors.redAccent,
-                                                          size: 24,
-                                                        )),
+                                                        });
+                                                      },
+                                                      icon: Icon(
+                                                        Icons
+                                                            .remove_circle_outline_rounded,
+                                                        color: Colors.redAccent,
+                                                        size: 24,
                                                       ),
                                                     ),
-                                                  ),
-                                                  SizedBox(width: 2),
-                                                  Container(
-                                                    width: 50,
-                                                    height: 30,
-                                                    decoration: BoxDecoration(
-                                                      border: Border.all(
-                                                          color: Colors
-                                                              .grey.shade200,
-                                                          width: 1),
-                                                      color:
-                                                          Colors.grey.shade100,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              8),
-                                                    ),
-                                                    margin:
-                                                        const EdgeInsets.only(
-                                                            top: 4.0,
-                                                            bottom: 12.0),
-                                                    child: Center(
-                                                      child: Text(
-                                                        pesananList[index]
-                                                            .quantity
-                                                            .toString(),
-                                                        style:
-                                                            GoogleFonts.poppins(
-                                                                color: Colors
-                                                                    .black54,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                letterSpacing:
-                                                                    0.1,
-                                                                fontSize: 16),
+                                                    Text(
+                                                      order.dineInQuantity
+                                                          .toString(),
+                                                      style:
+                                                          GoogleFonts.poppins(
+                                                        fontSize: 16,
+                                                        fontWeight:
+                                                            FontWeight.w600,
                                                       ),
                                                     ),
-                                                  ),
-                                                  SizedBox(width: 2),
-                                                  Container(
-                                                    margin:
-                                                        const EdgeInsets.only(
-                                                            bottom: 4.0),
-                                                    height: 30,
-                                                    width: 40,
-                                                    decoration: BoxDecoration(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              30),
-                                                    ),
-                                                    child: Material(
-                                                      color: Colors.transparent,
-                                                      child: GestureDetector(
-                                                        onTapDown: (_) {
-                                                          _startTimer(index);
-                                                        },
-                                                        onTapUp: (_) {
-                                                          _stopTimer();
-                                                        },
-                                                        onTapCancel: () {
-                                                          _stopTimer();
-                                                        },
-                                                        child: InkWell(
-                                                          onTap: () {
-                                                            setState(() {
-                                                              pesananList[index]
-                                                                  .quantity++;
-                                                            });
-                                                            getTotal();
-                                                          },
-                                                          child: Center(
-                                                              child: Icon(
-                                                            Icons
-                                                                .add_circle_outline_rounded,
-                                                            color: Colors.green,
-                                                            size: 24,
-                                                          )),
-                                                        ),
+                                                    IconButton(
+                                                      onPressed: () {
+                                                        setState(() {
+                                                          order
+                                                              .dineInQuantity++;
+                                                          getTotal();
+                                                        });
+                                                      },
+                                                      icon: Icon(
+                                                        Icons
+                                                            .add_circle_outline_rounded,
+                                                        color: Colors.green,
+                                                        size: 24,
                                                       ),
                                                     ),
-                                                  ),
-                                                ],
-                                              )
-                                            ],
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
                                           ),
-                                          Spacer(),
-                                          Container(
-                                            color: Colors.grey.shade200,
-                                            padding: EdgeInsets.symmetric(
-                                                horizontal: 12.0,
-                                                vertical: 5.0),
-                                            margin: EdgeInsets.only(right: 8.0),
-                                            child: Text(
-                                                'Rp ${NumberFormat.decimalPattern().format(pesananList[index].quantity * pesananList[index].harga).replaceAll(',', '.')}',
-                                                style: GoogleFonts.notoSans(
-                                                    color: Colors.black54,
-                                                    fontWeight: FontWeight.w700,
-                                                    letterSpacing: 0.1,
-                                                    fontSize: 16)),
-                                          )
+                                          // Take Away Counter:
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text("Take Away",
+                                                    style: GoogleFonts.poppins(
+                                                        fontSize: 14)),
+                                                Row(
+                                                  children: [
+                                                    IconButton(
+                                                      onPressed: () {
+                                                        setState(() {
+                                                          if (order
+                                                                  .takeAwayQuantity >
+                                                              0) {
+                                                            order
+                                                                .takeAwayQuantity--;
+                                                            if (order
+                                                                    .totalQuantity ==
+                                                                0) {
+                                                              pesananList
+                                                                  .removeAt(
+                                                                      index);
+                                                            }
+                                                          }
+                                                          getTotal();
+                                                        });
+                                                      },
+                                                      icon: Icon(
+                                                        Icons
+                                                            .remove_circle_outline_rounded,
+                                                        color: Colors.redAccent,
+                                                        size: 24,
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      order.takeAwayQuantity
+                                                          .toString(),
+                                                      style:
+                                                          GoogleFonts.poppins(
+                                                        fontSize: 16,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      onPressed: () {
+                                                        setState(() {
+                                                          order
+                                                              .takeAwayQuantity++;
+                                                          getTotal();
+                                                        });
+                                                      },
+                                                      icon: Icon(
+                                                        Icons
+                                                            .add_circle_outline_rounded,
+                                                        color: Colors.green,
+                                                        size: 24,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                         ],
                                       ),
-                                    ),
-                                  );
-                                })),
+                                      SizedBox(height: 8),
+                                      // Display the subtotal for this order line:
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: Container(
+                                          color: Colors.grey.shade200,
+                                          padding: EdgeInsets.symmetric(
+                                              horizontal: 12.0, vertical: 5.0),
+                                          margin: EdgeInsets.only(right: 8.0),
+                                          child: Text(
+                                            'Rp ${NumberFormat.decimalPattern().format(order.subtotal).replaceAll(',', '.')}',
+                                            style: GoogleFonts.notoSans(
+                                              color: Colors.black54,
+                                              fontWeight: FontWeight.w700,
+                                              letterSpacing: 0.1,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
                       ),
                       Expanded(
                         flex: 2,
@@ -592,494 +609,111 @@ class _HomeState extends State<Home> {
                           color: Colors.white,
                           child: Padding(
                             padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text('Total',
-                                        style: GoogleFonts.poppins(
-                                            color: Colors.black87,
-                                            fontWeight: FontWeight.w600,
+                            // Wrap the inner Column in a SingleChildScrollView to avoid overflow.
+                            child: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  // Conditionally display the Biaya Bungkus row.
+                                  if (biayaBungkus > 0) ...[
+                                    Row(
+                                      children: [
+                                        Text(
+                                          'Biaya Bungkus',
+                                          style: GoogleFonts.poppins(
+                                            color: Colors.grey,
+                                            fontWeight: FontWeight
+                                                .w300, // thin text weight
                                             letterSpacing: 0.1,
-                                            fontSize: 18)),
-                                    Spacer(),
-                                    Text(
+                                            fontSize: 18,
+                                          ),
+                                        ),
+                                        Spacer(),
+                                        Text(
+                                          'Rp ${NumberFormat.decimalPattern().format(biayaBungkus).replaceAll(',', '.')}',
+                                          style: GoogleFonts.poppins(
+                                            color: Colors.grey,
+                                            fontWeight: FontWeight.w300,
+                                            letterSpacing: 0.1,
+                                            fontSize: 18,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    SizedBox(height: 4),
+                                  ],
+                                  // Total row remains unchanged.
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'Total',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.black87,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.1,
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                                      Spacer(),
+                                      Text(
                                         'Rp ${NumberFormat.decimalPattern().format(totalHarga).replaceAll(',', '.')}',
                                         style: GoogleFonts.poppins(
-                                            color: Colors.black87,
-                                            fontWeight: FontWeight.w600,
-                                            letterSpacing: 0.1,
-                                            fontSize: 18)),
-                                  ],
-                                ),
-                                Container(
-                                  margin: const EdgeInsets.only(
-                                      left: 16.0, right: 16.0, top: 4),
-                                  child: ElevatedButton(
+                                          color: Colors.black87,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.1,
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  // The BELI button remains at the bottom.
+                                  Container(
+                                    margin: const EdgeInsets.only(
+                                        left: 16.0, right: 16.0, top: 4),
+                                    child: ElevatedButton(
                                       style: ElevatedButton.styleFrom(
-                                          shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12.0)),
-                                          backgroundColor: Colors.teal),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(12.0),
+                                        ),
+                                        backgroundColor: Colors.teal,
+                                      ),
                                       onPressed: () {
-                                        if (pesananList.isEmpty) {
-                                          return;
-                                        }
-
-                                        if (isTakeAway == true) {
-                                          pesananList.forEach((element) {
-                                            jumlahItem += element.quantity;
-                                          });
-
-                                          biayaBungkus =
-                                              (jumlahItem ~/ 4) * 1000;
-                                          print('bungkus ${biayaBungkus}');
-                                          totalHarga += biayaBungkus;
-                                          print('total ${totalHarga}');
-                                        }
-                                        showDialog(
-                                            context: context,
-                                            builder: (BuildContext context) {
-                                              //return alert dialog
-                                              return AlertDialog(
-                                                  title: Center(
-                                                    child: Text(
-                                                      'Konfirmasi Pesanan',
-                                                      style:
-                                                          GoogleFonts.poppins(
-                                                              color: Colors
-                                                                  .black87,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w600,
-                                                              letterSpacing:
-                                                                  0.1,
-                                                              fontSize: 18),
-                                                    ),
-                                                  ),
-                                                  content: Container(
-                                                    height:
-                                                        isTakeAway ? 150 : 110,
-                                                    width: 400,
-                                                    child: Column(
-                                                      children: [
-                                                        Row(
-                                                          mainAxisAlignment:
-                                                              MainAxisAlignment
-                                                                  .center,
-                                                          children: [
-                                                            Text(
-                                                                'Total tagihan: '),
-                                                            SizedBox(width: 8),
-                                                            Text(
-                                                                'Rp ${NumberFormat.decimalPattern().format(totalHarga).replaceAll(',', '.')}',
-                                                                style: GoogleFonts.poppins(
-                                                                    color: Colors
-                                                                        .black87,
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w600,
-                                                                    letterSpacing:
-                                                                        0.1,
-                                                                    fontSize:
-                                                                        16)),
-                                                          ],
-                                                        ),
-                                                        SizedBox(height: 16),
-                                                        if (isTakeAway)
-                                                          Column(
-                                                            children: [
-                                                              Row(
-                                                                mainAxisAlignment:
-                                                                    MainAxisAlignment
-                                                                        .center,
-                                                                children: [
-                                                                  Text(
-                                                                      '(Biaya bungkus: ',
-                                                                      style: GoogleFonts.poppins(
-                                                                          color: Colors
-                                                                              .black87,
-                                                                          fontWeight: FontWeight
-                                                                              .w400,
-                                                                          letterSpacing:
-                                                                              0.1,
-                                                                          fontSize:
-                                                                              14)),
-                                                                  SizedBox(
-                                                                      width: 8),
-                                                                  Text(
-                                                                    'Rp ${NumberFormat.decimalPattern().format(biayaBungkus).replaceAll(',', '.')})',
-                                                                    style: GoogleFonts.poppins(
-                                                                        color: Colors
-                                                                            .black87,
-                                                                        fontWeight:
-                                                                            FontWeight
-                                                                                .w400,
-                                                                        letterSpacing:
-                                                                            0.1,
-                                                                        fontSize:
-                                                                            14),
-                                                                  ),
-                                                                ],
-                                                              ),
-                                                              SizedBox(
-                                                                  height: 16),
-                                                            ],
-                                                          ),
-                                                        Row(
-                                                          children: [
-                                                            Expanded(
-                                                              flex: 7,
-                                                              child: TextField(
-                                                                keyboardType:
-                                                                    TextInputType
-                                                                        .number,
-                                                                inputFormatters: [
-                                                                  FilteringTextInputFormatter
-                                                                      .allow(RegExp(
-                                                                          r'[0-9.]')),
-                                                                  TextInputFormatter
-                                                                      .withFunction(
-                                                                          (oldValue,
-                                                                              newValue) {
-                                                                    final plainNumber = newValue
-                                                                        .text
-                                                                        .replaceAll(
-                                                                            '.',
-                                                                            '');
-                                                                    final format =
-                                                                        NumberFormat(
-                                                                            "#,###",
-                                                                            "id_ID");
-                                                                    final newText =
-                                                                        format.format(
-                                                                            int.parse(plainNumber));
-                                                                    return TextEditingValue(
-                                                                      text:
-                                                                          newText,
-                                                                      selection:
-                                                                          TextSelection.collapsed(
-                                                                              offset: newText.length),
-                                                                    );
-                                                                  }),
-                                                                ],
-                                                                controller:
-                                                                    uangYangDiterimaController,
-                                                                decoration:
-                                                                    InputDecoration(
-                                                                  labelText:
-                                                                      'Uang yang diterima (Rp)',
-                                                                  border:
-                                                                      OutlineInputBorder(
-                                                                    borderRadius:
-                                                                        BorderRadius.circular(
-                                                                            4.0),
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                            ),
-                                                            SizedBox(width: 16),
-                                                            Expanded(
-                                                              flex: 2,
-                                                              child:
-                                                                  ElevatedButton(
-                                                                      //make it the color green
-                                                                      style: ElevatedButton
-                                                                          .styleFrom(
-                                                                        backgroundColor:
-                                                                            Colors.teal,
-                                                                      ),
-                                                                      onPressed:
-                                                                          () {
-                                                                        int uangYangDiterima = int.parse(uangYangDiterimaController.text.replaceAll(
-                                                                            '.',
-                                                                            ''));
-
-                                                                        if (uangYangDiterima >=
-                                                                            totalHarga) {
-                                                                          Navigator.pop(
-                                                                              context,
-                                                                              true);
-                                                                        } else {
-                                                                          //show snacbar with message uang masih kurang
-                                                                          SnackBar
-                                                                              snackBar =
-                                                                              SnackBar(
-                                                                            content:
-                                                                                Text('Uang yang diterima masih kurang'),
-                                                                            backgroundColor:
-                                                                                Colors.redAccent,
-                                                                          );
-
-                                                                          ScaffoldMessenger.of(context)
-                                                                              .showSnackBar(snackBar);
-                                                                        }
-                                                                      },
-                                                                      child: Text(
-                                                                          'OK')),
-                                                            )
-                                                          ],
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ));
-                                            }).then((value) async {
-                                          if (value == true) {
-                                            //show snackbar with message pesanan berhasil
-                                            LoaderWidget.showLoaderDialog(
-                                                context,
-                                                message: "Mohon tunggu...");
-
-                                            Map<String, dynamic> map = {};
-                                            Map<String, dynamic> map_status =
-                                                {};
-
-                                            String namaPesanan_serialized = "";
-                                            String quantityPesanan_serialized =
-                                                "";
-
-                                            for (var element in pesananList) {
-                                              map[element.namaPesanan] =
-                                                  FieldValue.increment(
-                                                      element.quantity);
-
-                                              namaPesanan_serialized +=
-                                                  '${element.namaPesanan}, ';
-                                              quantityPesanan_serialized +=
-                                                  '${element.quantity}, ';
-                                            }
-
-                                            namaPesanan_serialized =
-                                                namaPesanan_serialized
-                                                    .substring(
-                                                        0,
-                                                        namaPesanan_serialized
-                                                                .length -
-                                                            2);
-                                            quantityPesanan_serialized =
-                                                quantityPesanan_serialized
-                                                    .substring(
-                                                        0,
-                                                        quantityPesanan_serialized
-                                                                .length -
-                                                            2);
-
-                                            map['total'] = FieldValue.increment(
-                                                totalHarga);
-                                            map["year"] = getYear();
-                                            map["month"] = getMonth();
-                                            map["date"] = getDate();
-                                            map["customerNumber"] =
-                                                FieldValue.increment(1);
-                                            map["timestamp"] =
-                                                FieldValue.serverTimestamp();
-
-                                            print(map);
-
-                                            FirebaseFirestore fs =
-                                                FirebaseFirestore.instance;
-                                            WriteBatch batch = fs.batch();
-
-                                            DateTime now = DateTime.now();
-                                            String dateNow_formatted =
-                                                DateFormat('yyyy-MM-dd')
-                                                    .format(now);
-
-                                            DocumentReference dailyTransaction =
-                                                fs
-                                                    .collection(
-                                                        "DailyTransaction")
-                                                    .doc(dateNow_formatted);
-                                            batch.set(dailyTransaction, map,
-                                                SetOptions(merge: true));
-
-                                            DocumentReference
-                                                monthlyTransaction = fs
-                                                    .collection(
-                                                        "MonthlyTransaction")
-                                                    .doc(getMonth());
-                                            batch.set(monthlyTransaction, map,
-                                                SetOptions(merge: true));
-
-                                            DocumentReference
-                                                yearlyTransaction = fs
-                                                    .collection(
-                                                        "YearlyTransaction")
-                                                    .doc(getYear());
-                                            batch.set(yearlyTransaction, map,
-                                                SetOptions(merge: true));
-                                            int bungkus_int = 0;
-                                            if (isTakeAway == true)
-                                              bungkus_int = 1;
-
-                                            map_status['customerNumber'] =
-                                                nomorBerikutnya + 1;
-                                            map_status['itemID'] =
-                                                namaPesanan_serialized;
-                                            map_status['quantity'] =
-                                                quantityPesanan_serialized;
-                                            map_status['status'] = 'Serving';
-                                            map_status['bungkus'] = bungkus_int;
-                                            map_status['total'] = totalHarga;
-                                            map_status['waktuPengambilan'] =
-                                                'Tidak Memesan';
-                                            map_status['waktuPesan'] =
-                                                FieldValue.serverTimestamp();
-
-                                            DocumentReference status = fs
-                                                .collection("Status")
-                                                .doc('${nomorBerikutnya + 1}');
-                                            batch.set(status, map_status);
-
-                                            DocumentReference customerNumber =
-                                                fs
-                                                    .collection("Canteens")
-                                                    .doc('canteen375');
-                                            batch.update(customerNumber, {
-                                              'customerNumber':
-                                                  FieldValue.increment(1)
-                                            });
-
-                                            batch.commit().then((value) {
-                                              printReceipt(
-                                                  pesananList,
-                                                  nomorBerikutnya,
-                                                  totalHarga,
-                                                  isTakeAway);
-
-                                              Navigator.pop(context);
-                                              print(
-                                                  'Uang yang diterima controller ${uangYangDiterimaController.text}');
-                                              int uangYangDiterima = int.parse(
-                                                  uangYangDiterimaController
-                                                      .text
-                                                      .replaceAll('.', ''));
-
-                                              showDialog(
-                                                  context: context,
-                                                  builder:
-                                                      ((BuildContext context) {
-                                                    return Dialog(
-                                                      shape:
-                                                          RoundedRectangleBorder(
-                                                              borderRadius:
-                                                                  BorderRadius
-                                                                      .circular(
-                                                                          4)),
-                                                      child: Padding(
-                                                        padding:
-                                                            const EdgeInsets
-                                                                    .symmetric(
-                                                                horizontal: 8,
-                                                                vertical: 4),
-                                                        child: Container(
-                                                          width: 300,
-                                                          height: 150,
-                                                          child: Column(
-                                                            mainAxisAlignment:
-                                                                MainAxisAlignment
-                                                                    .center,
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .center,
-                                                            children: [
-                                                              Text(
-                                                                'Pesanan berhasil',
-                                                                style: GoogleFonts.montserrat(
-                                                                    fontSize:
-                                                                        16,
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w600),
-                                                              ),
-                                                              SizedBox(
-                                                                  height: 16),
-                                                              Text(
-                                                                '${nomorBerikutnya}',
-                                                                style: GoogleFonts.montserrat(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold,
-                                                                    fontSize:
-                                                                        36,
-                                                                    color: Colors
-                                                                        .redAccent
-                                                                        .withOpacity(
-                                                                            0.8)),
-                                                              ),
-                                                              SizedBox(
-                                                                  height: 16),
-                                                              Row(
-                                                                crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .center,
-                                                                mainAxisAlignment:
-                                                                    MainAxisAlignment
-                                                                        .center,
-                                                                children: [
-                                                                  Text(
-                                                                    'Kembalian:',
-                                                                    style: GoogleFonts.montserrat(
-                                                                        fontWeight:
-                                                                            FontWeight
-                                                                                .w500,
-                                                                        fontSize:
-                                                                            14,
-                                                                        color: Colors
-                                                                            .black87
-                                                                            .withOpacity(1)),
-                                                                  ),
-                                                                  SizedBox(
-                                                                      width: 8),
-                                                                  Text(
-                                                                    'Rp ${NumberFormat.decimalPattern().format(uangYangDiterima - totalHarga)}',
-                                                                    style: GoogleFonts.montserrat(
-                                                                        fontWeight:
-                                                                            FontWeight
-                                                                                .w600,
-                                                                        fontSize:
-                                                                            24,
-                                                                        color: Colors
-                                                                            .black87
-                                                                            .withOpacity(1)),
-                                                                  )
-                                                                ],
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    );
-                                                  })).then((value) {
-                                                //clear pesanan list
-                                                pesananList.clear();
-                                                jumlahItem = 0;
-                                                getTotal();
-                                              });
-
-                                              //clear pesanan list
-                                            });
-                                          } else {
-                                            uangYangDiterimaController.clear();
-                                            jumlahItem = 0;
-                                          }
-                                        });
+                                        OrderConfirmationService.showOrderConfirmationDialog(
+                                          context: context,
+                                          pesananList: pesananList,
+                                          totalHarga: totalHarga,
+                                          isTakeAway: isTakeAway,
+                                          biayaBungkus: biayaBungkus,
+                                          customerNameController: customerNameController,
+                                          uangYangDiterimaController: uangYangDiterimaController,
+                                          nomorBerikutnya: nomorBerikutnya,
+                                          quoteKejujuran: quoteKejujuran,
+                                          getTotal: getTotal,
+                                          printReceipt: ({int discountAmount = 0, int originalTotal = 0}) => printReceipt(pesananList, nomorBerikutnya, totalHarga, isTakeAway, discountAmount: discountAmount, originalTotal: originalTotal),
+                                          getYear: getYear,
+                                          getMonth: getMonth,
+                                          getDate: getDate,
+                                          setJumlahItem: (value) => jumlahItem = value,
+                                        );
                                       },
                                       child: Text(
                                         'BELI',
                                         style: GoogleFonts.poppins(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w600,
-                                            letterSpacing: 1,
-                                            fontSize: 18),
-                                      )),
-                                ),
-                              ],
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 1,
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                      )
+                      ),
                     ],
                   ),
                 ),
@@ -1293,13 +927,13 @@ class _HomeState extends State<Home> {
                                                       .collection(
                                                           'MenuCollection')
                                                       .doc(
-                                                          menuObjectList_makanan[
+                                                          menuObjectList_minuman[
                                                                   index]
                                                               .id)
                                                       .delete();
 
                                                   print(
-                                                      'pressed delete minuman');
+                                                      'pressed delete minuman ${menuObjectList_makanan[index].id}');
                                                 },
                                               ),
                                             ],
@@ -1319,10 +953,19 @@ class _HomeState extends State<Home> {
   }
 
   void getTotal() {
-    totalHarga = 0;
-    for (int i = 0; i < pesananList.length; i++) {
-      totalHarga += (pesananList[i].quantity * pesananList[i].harga);
-    }
+    // First, calculate the subtotal for all orders.
+    int subtotal = pesananList.fold(0, (acc, order) => acc + order.subtotal);
+
+    // If the "Bungkus" (take-away) checkbox is ticked,
+    // sum only the takeAwayQuantity from each order.
+
+    int totalTakeAway =
+        pesananList.fold(0, (sum, order) => sum + order.takeAwayQuantity);
+    // For every 4 take-away items, charge 1000.
+    biayaBungkus = (totalTakeAway ~/ 4) * 1000;
+
+    // The final total is the subtotal plus the packaging fee.
+    totalHarga = subtotal + biayaBungkus;
     setState(() {});
   }
 
@@ -1360,91 +1003,92 @@ class _HomeState extends State<Home> {
   Widget makananGridView(
       BuildContext context, List<MenuObject> menuObjectList) {
     return GridView.builder(
-        itemCount: menuObjectList.length,
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: MediaQuery.of(context).size.width ~/ 240,
-          mainAxisSpacing: 8.0,
-          crossAxisSpacing: 8.0,
-          childAspectRatio: 180 / 180,
-        ),
-        itemBuilder: (BuildContext context, int index) {
-          if (menuObjectList.isEmpty) {
-            return Center(
-              child: CircularProgressIndicator(),
-            );
-          }
-
-          return Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.grey.shade300,
-                width: 1,
-              ),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () {
-                  print('tapped ${menuObjectList[index].namaMenu}');
-
-                  //check if the name doesnt exist in the pesananList
-                  if (pesananList
-                      .where((element) =>
-                          element.namaPesanan == menuObjectList[index].namaMenu)
-                      .isEmpty) {
-                    //add the menu to the pesananList
-                    pesananList.add(PesananObject(
-                        namaPesanan: menuObjectList[index].namaMenu,
-                        quantity: 1,
-                        harga: menuObjectList[index].harga,
-                        subtotal: menuObjectList[index].harga * 1));
-                  } else {
-                    //add the quantity of the menu
-                    pesananList
-                        .where((element) =>
-                            element.namaPesanan ==
-                            menuObjectList[index].namaMenu)
-                        .first
-                        .quantity += 1;
-                  }
-
-                  getTotal();
-
-                  setState(() {});
-                },
-                borderRadius: BorderRadius.circular(4),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (menuObjectList[index].imagePath != 'tidak ada')
-                      Container(
-                        height: 110,
-                        width: 110,
-                        child: Image(
-                          image: CachedNetworkImageProvider(
-                              menuObjectList[index].imagePath),
-                          fit: BoxFit.contain,
-                        ),
-                      ),
-
-                    // Image.network(
-                    //   menuObjectList[index].imagePath,
-                    //   height: 100,
-                    //   width: 100,
-                    // ),
-                    Text(
-                      menuObjectList[index].namaMenu,
-                      style: GoogleFonts.montserrat(
-                          fontSize: 16, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+      itemCount: menuObjectList.length,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: MediaQuery.of(context).size.width ~/ 240,
+        mainAxisSpacing: 8.0,
+        crossAxisSpacing: 8.0,
+        childAspectRatio: 180 / 180,
+      ),
+      itemBuilder: (BuildContext context, int index) {
+        if (menuObjectList.isEmpty) {
+          return Center(
+            child: CircularProgressIndicator(),
           );
-        });
+        }
+
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Colors.grey.shade300,
+              width: 1,
+            ),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                print('tapped ${menuObjectList[index].namaMenu}');
+                int orderIndex = pesananList.indexWhere((element) =>
+                    element.namaPesanan == menuObjectList[index].namaMenu);
+
+                if (orderIndex == -1) {
+                  if (isTakeAway) {
+                    // Create a new order with 1 take-away item.
+                    pesananList.add(PesananObject(
+                      namaPesanan: menuObjectList[index].namaMenu,
+                      harga: menuObjectList[index].harga,
+                      dineInQuantity: 0,
+                      takeAwayQuantity: 1,
+                    ));
+                  } else {
+                    // Create a new order with 1 dine-in item.
+                    pesananList.add(PesananObject(
+                      namaPesanan: menuObjectList[index].namaMenu,
+                      harga: menuObjectList[index].harga,
+                      dineInQuantity: 1,
+                      takeAwayQuantity: 0,
+                    ));
+                  }
+                } else {
+                  // Increment the appropriate quantity.
+                  if (isTakeAway) {
+                    pesananList[orderIndex].takeAwayQuantity++;
+                  } else {
+                    pesananList[orderIndex].dineInQuantity++;
+                  }
+                }
+                getTotal();
+                setState(() {});
+              },
+              borderRadius: BorderRadius.circular(4),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (menuObjectList[index].imagePath != 'tidak ada')
+                    Container(
+                      height: 110,
+                      width: 110,
+                      child: Image(
+                        image: CachedNetworkImageProvider(
+                            menuObjectList[index].imagePath),
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  Text(
+                    menuObjectList[index].namaMenu,
+                    style: GoogleFonts.montserrat(
+                        fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   String getYear() {
@@ -1468,14 +1112,17 @@ class _HomeState extends State<Home> {
     return date;
   }
 
-  void _startTimer(int index) {
+  void _startTimer(int index, {bool isTakeAway = false}) {
     timer = Timer.periodic(Duration(milliseconds: 1000), (_) {
-      //haptic feedback
+      // Haptic feedback for each increment.
       HapticFeedback.heavyImpact();
-      // Execute your desired action here
-      print("Long press executed");
       setState(() {
-        pesananList[index].quantity += 10;
+        if (isTakeAway) {
+          pesananList[index].takeAwayQuantity += 10;
+        } else {
+          pesananList[index].dineInQuantity += 10;
+        }
+        getTotal();
       });
     });
   }
@@ -1530,25 +1177,29 @@ class _HomeState extends State<Home> {
   }
 
   void printReceipt(List<PesananObject> pesananList, int nomorBerikutnya,
-      int totalHarga, bool isTakeAway) {
+      int totalHarga, bool isTakeAway, {int discountAmount = 0, int originalTotal = 0}) {
     if (!printerIsConnected) return;
     printer.printCustom("375 Canteen", 3, 1);
     printer.printNewLine();
     printer.printNewLine();
     printer.printCustom("No. $nomorBerikutnya", 3, 1);
     printer.printNewLine();
-    printer.printNewLine();
     printer.print3Column('ITEM.', 'QTY', 'SUBTOTAL', 1);
     pesananList.forEach((element) {
-      printer.print3Column(element.namaPesanan, element.quantity.toString(),
-          element.subtotal.toString(), 1);
+      printer.print3Column(element.namaPesanan,
+          element.totalQuantity.toString(), element.subtotal.toString(), 1);
     });
     if (isTakeAway) {
       printer.print3Column(
           'Bungkus', jumlahItem.toString(), biayaBungkus.toString(), 1);
     }
+    if (discountAmount > 0) {
+      printer.printNewLine();
+      printer.printCustom('SUBTOTAL: Rp $originalTotal', 1, 0);
+      printer.printCustom('DISKON: -Rp $discountAmount', 1, 0);
+    }
     printer.printNewLine();
-    printer.printCustom('Total: Rp. $totalHarga', 2, 0);
+    printer.printCustom('TOT.: Rp $totalHarga', 3, 0);
     printer.printNewLine();
     printer.printNewLine();
     printer.printNewLine();

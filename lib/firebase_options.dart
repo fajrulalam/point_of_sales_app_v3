@@ -68,4 +68,14 @@ class DefaultFirebaseOptions {
     iosClientId: '932379156472-f5c96lnckhk29b2pj0qi4mtfk97h7k8d.apps.googleusercontent.com',
     iosBundleId: 'com.example.pointOfSalesAppV3',
   );
+
+  static const FirebaseOptions eSantrenWeb = FirebaseOptions(
+    apiKey: 'AIzaSyCyU6tlP6wQawmZd4jOwXmbX6VDQNSpC0E',
+    appId: '1:385003370337:web:0dd74d0aee02434ed47720',
+    messagingSenderId: '385003370337',
+    projectId: 'e-santren',
+    authDomain: 'e-santren.firebaseapp.com',
+    storageBucket: 'e-santren.appspot.com',
+    measurementId: 'G-5RVGD6Z9H1',
+  );
 }

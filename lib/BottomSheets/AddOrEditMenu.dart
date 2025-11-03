@@ -93,6 +93,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                                 'Mohon isi semua field dan pilih gambar menu')));
                         return;
                       }
+
+                      Navigator.pop(context);
                       FirebaseFirestore.instance
                           .collection("Canteens")
                           .doc('canteen375')
@@ -108,6 +110,10 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                         'isMakanan':
                             widget.makananOrMinuman == 'Makanan' ? true : false,
                       }).then((value) {
+                        print("should pop");
+                        Navigator.pop(context);
+                      }).catchError((error) {
+                        print("Error saving menu: $error");
                         Navigator.pop(context);
                       });
                     },

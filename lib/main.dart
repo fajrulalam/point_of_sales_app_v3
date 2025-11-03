@@ -6,15 +6,12 @@ import 'firebase_options.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
-      options: const FirebaseOptions(
-    apiKey: 'AIzaSyCZ1oJuagSPQ_9VWiFONeArwxtUsgLGhCA',
-    appId: '1:932379156472:android:013cd61d44258e9155c00d',
-    messagingSenderId: '932379156472',
-    projectId: 'point-of-sales-app-25e2b',
-    databaseURL:
-        'https://point-of-sales-app-25e2b-default-rtdb.asia-southeast1.firebasedatabase.app',
-    storageBucket: 'point-of-sales-app-25e2b.appspot.com',
-  ));
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  await Firebase.initializeApp(
+    name: 'e-santren',
+    options: DefaultFirebaseOptions.eSantrenWeb,
+  );
   runApp(const MyApp());
 }
 
