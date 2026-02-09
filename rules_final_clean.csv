@@ -1,0 +1,124 @@
+antecedents,consequents,confidence
+frozenset({'ayam goreng'}),frozenset({'nasi putih'}),0.5609756098
+frozenset({'nasi putih'}),frozenset({'mie'}),0.6428571429
+frozenset({'nasi goreng'}),frozenset({'teh'}),0.5077720207
+frozenset({'soto ayam'}),frozenset({'teh'}),0.8888888889
+"frozenset({'air putih', 'nasi putih'})",frozenset({'mie'}),0.5625
+"frozenset({'teh', 'ayam goreng'})",frozenset({'nasi putih'}),0.6923076923
+"frozenset({'kerupuk', 'cireng isi'})",frozenset({'gorengan'}),0.5
+"frozenset({'sayur harian', 'cireng isi'})",frozenset({'gorengan'}),0.511627907
+"frozenset({'nasi putih', 'cireng isi'})",frozenset({'mie'}),0.7333333333
+"frozenset({'mie', 'cireng isi'})",frozenset({'teh'}),0.6223404255
+"frozenset({'nasi goreng', 'cireng isi'})",frozenset({'teh'}),0.5833333333
+"frozenset({'nasi putih', 'cireng isi'})",frozenset({'teh'}),0.6333333333
+"frozenset({'sosis goreng', 'cireng isi'})",frozenset({'teh'}),0.5142857143
+"frozenset({'kerupuk', 'es jeruk'})",frozenset({'penyetan'}),0.5833333333
+"frozenset({'es jeruk', 'nasi putih'})",frozenset({'mie'}),0.7368421053
+"frozenset({'es jeruk', 'nasi goreng'})",frozenset({'penyetan'}),0.55
+"frozenset({'float', 'nasi putih'})",frozenset({'mie'}),0.9310344828
+"frozenset({'french fries', 'nasi putih'})",frozenset({'mie'}),0.9230769231
+"frozenset({'french fries', 'mie'})",frozenset({'teh'}),0.5454545455
+"frozenset({'french fries', 'penyetan'})",frozenset({'teh'}),0.5857142857
+"frozenset({'french fries', 'risol mayo'})",frozenset({'tahu krispy'}),0.5625
+"frozenset({'risol mayo', 'tahu krispy'})",frozenset({'french fries'}),0.6428571429
+"frozenset({'french fries', 'sayur harian'})",frozenset({'teh'}),0.6428571429
+"frozenset({'french fries', 'sosis goreng'})",frozenset({'teh'}),0.5106382979
+"frozenset({'nasi putih', 'gorengan'})",frozenset({'mie'}),0.7346938776
+"frozenset({'mie', 'gorengan'})",frozenset({'teh'}),0.5422343324
+"frozenset({'nasi goreng', 'gorengan'})",frozenset({'teh'}),0.5
+"frozenset({'tahu krispy', 'gorengan'})",frozenset({'teh'}),0.5
+"frozenset({'kerupuk', 'teh'})",frozenset({'penyetan'}),0.5094339623
+"frozenset({'nasi putih', 'nasi goreng'})",frozenset({'mie'}),0.9230769231
+"frozenset({'mie', 'nasi goreng'})",frozenset({'teh'}),0.5769230769
+"frozenset({'penyetan', 'nasi putih'})",frozenset({'mie'}),0.6896551724
+"frozenset({'sosis goreng', 'nasi putih'})",frozenset({'mie'}),0.5263157895
+"frozenset({'tahu krispy', 'nasi putih'})",frozenset({'mie'}),0.8095238095
+"frozenset({'teh', 'nasi putih'})",frozenset({'mie'}),0.8187919463
+"frozenset({'mie', 'nasi putih'})",frozenset({'teh'}),0.5648148148
+"frozenset({'mie', 'telur'})",frozenset({'nasi putih'}),0.6666666667
+"frozenset({'penyetan', 'mie'})",frozenset({'teh'}),0.6728971963
+"frozenset({'sayur harian', 'mie'})",frozenset({'teh'}),0.6571428571
+"frozenset({'sosis goreng', 'mie'})",frozenset({'teh'}),0.5875
+"frozenset({'mie', 'tahu krispy'})",frozenset({'teh'}),0.5773195876
+"frozenset({'mie', 'telur'})",frozenset({'teh'}),0.5
+"frozenset({'nasi goreng', 'nasi putih'})",frozenset({'teh'}),0.6923076923
+"frozenset({'penyetan', 'nasi goreng'})",frozenset({'teh'}),0.5769230769
+"frozenset({'nasi goreng', 'tahu krispy'})",frozenset({'teh'}),0.7647058824
+"frozenset({'penyetan', 'nasi putih'})",frozenset({'teh'}),0.5689655172
+"frozenset({'tahu krispy', 'nasi putih'})",frozenset({'teh'}),0.6666666667
+"frozenset({'teh', 'telur'})",frozenset({'nasi putih'}),0.5454545455
+"frozenset({'sayur harian', 'pisang coklat keju'})",frozenset({'penyetan'}),0.5
+"frozenset({'penyetan', 'pisang coklat keju'})",frozenset({'teh'}),0.5
+"frozenset({'penyetan', 'sosis goreng'})",frozenset({'teh'}),0.6231884058
+"frozenset({'penyetan', 'tahu krispy'})",frozenset({'teh'}),0.5940594059
+"frozenset({'sayur harian', 'pisang coklat keju'})",frozenset({'teh'}),0.5555555556
+"frozenset({'tahu krispy', 'pisang coklat keju'})",frozenset({'teh'}),0.6666666667
+"frozenset({'sayur harian', 'tahu krispy'})",frozenset({'teh'}),0.5625
+"frozenset({'air putih', 'es jeruk', 'gorengan'})",frozenset({'penyetan'}),0.9230769231
+"frozenset({'air putih', 'es jeruk', 'penyetan'})",frozenset({'gorengan'}),0.6
+"frozenset({'air putih', 'es jeruk', 'teh'})",frozenset({'penyetan'}),0.75
+"frozenset({'air putih', 'mie', 'gorengan'})",frozenset({'teh'}),0.6538461538
+"frozenset({'air putih', 'penyetan', 'sayur harian'})",frozenset({'gorengan'}),0.5294117647
+"frozenset({'air putih', 'teh', 'sayur harian'})",frozenset({'gorengan'}),0.5263157895
+"frozenset({'air putih', 'sayur harian', 'gorengan'})",frozenset({'teh'}),0.5
+"frozenset({'air putih', 'penyetan', 'mie'})",frozenset({'teh'}),0.7142857143
+"frozenset({'air putih', 'teh', 'sayur harian'})",frozenset({'penyetan'}),0.5263157895
+"frozenset({'air putih', 'penyetan', 'sayur harian'})",frozenset({'teh'}),0.5882352941
+"frozenset({'es jeruk', 'mie', 'cireng isi'})",frozenset({'gorengan'}),0.6
+"frozenset({'penyetan', 'es jeruk', 'cireng isi'})",frozenset({'gorengan'}),0.5789473684
+"frozenset({'teh', 'es jeruk', 'cireng isi'})",frozenset({'gorengan'}),0.5161290323
+"frozenset({'es jeruk', 'cireng isi', 'penyetan'})",frozenset({'teh'}),0.5789473684
+"frozenset({'mie', 'nasi putih', 'cireng isi'})",frozenset({'gorengan'}),0.5
+"frozenset({'nasi putih', 'gorengan', 'cireng isi'})",frozenset({'mie'}),0.8461538462
+"frozenset({'mie', 'gorengan', 'cireng isi'})",frozenset({'teh'}),0.6571428571
+"frozenset({'penyetan', 'sayur harian', 'cireng isi'})",frozenset({'gorengan'}),0.6
+"frozenset({'teh', 'pisang coklat keju', 'cireng isi'})",frozenset({'gorengan'}),0.5625
+"frozenset({'gorengan', 'pisang coklat keju', 'cireng isi'})",frozenset({'teh'}),0.6428571429
+"frozenset({'teh', 'sosis goreng', 'cireng isi'})",frozenset({'gorengan'}),0.5
+"frozenset({'sosis goreng', 'gorengan', 'cireng isi'})",frozenset({'teh'}),0.8181818182
+"frozenset({'tahu krispy', 'gorengan', 'cireng isi'})",frozenset({'teh'}),0.5625
+"frozenset({'teh', 'nasi putih', 'cireng isi'})",frozenset({'mie'}),0.8421052632
+"frozenset({'mie', 'nasi putih', 'cireng isi'})",frozenset({'teh'}),0.7272727273
+"frozenset({'nasi putih', 'cireng isi'})","frozenset({'teh', 'mie'})",0.5333333333
+"frozenset({'penyetan', 'mie', 'cireng isi'})",frozenset({'teh'}),0.7
+"frozenset({'penyetan', 'tahu krispy', 'cireng isi'})",frozenset({'teh'}),0.75
+"frozenset({'french fries', 'es jeruk', 'penyetan'})",frozenset({'teh'}),0.625
+"frozenset({'es jeruk', 'sayur harian', 'gorengan'})",frozenset({'penyetan'}),0.5
+"frozenset({'teh', 'kopi', 'es jeruk'})",frozenset({'penyetan'}),0.5294117647
+"frozenset({'es jeruk', 'kopi', 'penyetan'})",frozenset({'teh'}),0.5
+"frozenset({'es jeruk', 'mie', 'penyetan'})",frozenset({'teh'}),0.5675675676
+"frozenset({'teh', 'sayur harian', 'es jeruk'})",frozenset({'penyetan'}),0.5
+"frozenset({'teh', 'sosis goreng', 'es jeruk'})",frozenset({'penyetan'}),0.6428571429
+"frozenset({'es jeruk', 'sosis goreng', 'penyetan'})",frozenset({'teh'}),0.6923076923
+"frozenset({'penyetan', 'float', 'nasi putih'})",frozenset({'mie'}),0.9090909091
+"frozenset({'teh', 'float', 'nasi putih'})",frozenset({'mie'}),0.8333333333
+"frozenset({'french fries', 'penyetan', 'mie'})",frozenset({'teh'}),0.5625
+"frozenset({'french fries', 'penyetan', 'tahu krispy'})",frozenset({'teh'}),0.6111111111
+"frozenset({'kerupuk', 'teh', 'gorengan'})",frozenset({'penyetan'}),0.5909090909
+"frozenset({'kerupuk', 'penyetan', 'gorengan'})",frozenset({'teh'}),0.52
+"frozenset({'kopi', 'tahu krispy', 'gorengan'})",frozenset({'teh'}),0.6470588235
+"frozenset({'mie', 'teh', 'nasi goreng'})",frozenset({'gorengan'}),0.5333333333
+"frozenset({'teh', 'nasi goreng', 'gorengan'})",frozenset({'mie'}),0.5517241379
+"frozenset({'mie', 'nasi goreng', 'gorengan'})",frozenset({'teh'}),0.6666666667
+"frozenset({'penyetan', 'nasi putih', 'gorengan'})",frozenset({'mie'}),0.6470588235
+"frozenset({'teh', 'nasi putih', 'gorengan'})",frozenset({'mie'}),0.7777777778
+"frozenset({'penyetan', 'mie', 'gorengan'})",frozenset({'teh'}),0.7368421053
+"frozenset({'gorengan', 'mie', 'pisang coklat keju'})",frozenset({'teh'}),0.625
+"frozenset({'mie', 'tahu krispy', 'gorengan'})",frozenset({'teh'}),0.6666666667
+"frozenset({'penyetan', 'nasi putih', 'gorengan'})",frozenset({'teh'}),0.5294117647
+"frozenset({'penyetan', 'gorengan', 'pisang coklat keju'})",frozenset({'teh'}),0.6315789474
+"frozenset({'penyetan', 'sosis goreng', 'gorengan'})",frozenset({'teh'}),0.8461538462
+"frozenset({'penyetan', 'tahu krispy', 'gorengan'})",frozenset({'teh'}),0.7333333333
+"frozenset({'penyetan', 'kopi', 'mie'})",frozenset({'teh'}),0.65
+"frozenset({'penyetan', 'kopi', 'tahu krispy'})",frozenset({'teh'}),0.5789473684
+"frozenset({'teh', 'nasi putih', 'penyetan'})",frozenset({'mie'}),0.7878787879
+"frozenset({'mie', 'penyetan', 'nasi putih'})",frozenset({'teh'}),0.65
+"frozenset({'teh', 'tahu krispy', 'nasi putih'})",frozenset({'mie'}),0.9285714286
+"frozenset({'mie', 'tahu krispy', 'nasi putih'})",frozenset({'teh'}),0.7647058824
+"frozenset({'tahu krispy', 'nasi putih'})","frozenset({'teh', 'mie'})",0.619047619
+"frozenset({'penyetan', 'mie', 'pisang coklat keju'})",frozenset({'teh'}),0.6923076923
+"frozenset({'penyetan', 'sosis goreng', 'mie'})",frozenset({'teh'}),0.8333333333
+"frozenset({'mie', 'penyetan', 'tahu krispy'})",frozenset({'teh'}),0.652173913
+"frozenset({'teh', 'sosis goreng', 'tahu krispy'})",frozenset({'penyetan'}),0.5
+"frozenset({'penyetan', 'sosis goreng', 'tahu krispy'})",frozenset({'teh'}),0.9
+"frozenset({'penyetan', 'mie', 'gorengan', 'cireng isi'})",frozenset({'teh'}),0.8181818182

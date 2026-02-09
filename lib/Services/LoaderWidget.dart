@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 class LoaderWidget {
   static showLoaderDialog(BuildContext context, {String? message}) {
     AlertDialog alert = AlertDialog(
-      content: new Row(
+      content: Row(
         children: [
-          CircularProgressIndicator(),
+          const CircularProgressIndicator(),
           Container(
-              margin: EdgeInsets.only(left: 7),
+              margin: const EdgeInsets.only(left: 7),
               child: Text(message == null ? "Loading..." : '$message...')),
         ],
       ),

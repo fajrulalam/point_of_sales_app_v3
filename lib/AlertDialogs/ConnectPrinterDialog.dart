@@ -30,7 +30,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Container(
+          child: SizedBox(
             width: 300,
             height: 150,
             child: Column(
@@ -68,11 +68,11 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
+                            const Icon(
                               Icons.save,
                               color: Colors.white,
                             ),
-                            SizedBox(
+                            const SizedBox(
                               width: 4,
                             ),
                             Text('Simpan',
@@ -102,6 +102,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog> {
                   ],
                 ),
                 Visibility(
+                    visible: printReceipt,
                     child: Column(
                       children: [
                         Row(
@@ -169,8 +170,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog> {
                         ),
                         //green indicator if the printer is connected
                       ],
-                    ),
-                    visible: printReceipt),
+                    )),
               ],
             ),
           ),
@@ -191,7 +191,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog> {
 
   Future<void> testPrinter(String invoice) async {
     if (printerIsConnected) {
-      await Future.delayed(Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 500));
 
       /**
        * SIZE

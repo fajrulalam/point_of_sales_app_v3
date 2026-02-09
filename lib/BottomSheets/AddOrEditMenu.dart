@@ -57,7 +57,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: EdgeInsets.only(),
+      margin: const EdgeInsets.only(),
       height: MediaQuery.of(context).size.height * 0.85,
       width:
           MediaQuery.of(context).size.width * 0.8, // Set the desired width here
@@ -66,7 +66,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
           child: Column(children: [
             Row(
               children: [
-                Spacer(),
+                const Spacer(),
                 Text(
                   widget.query == 'add'
                       ? 'Tambah Menu'
@@ -74,7 +74,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                   style: GoogleFonts.montserrat(
                       fontSize: 24, fontWeight: FontWeight.bold),
                 ),
-                Spacer(),
+                const Spacer(),
                 Container(
                   width: 70,
                   height: 40,
@@ -88,7 +88,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                       if (namaMakananController.text == '' ||
                           hargaMakananController.text == '' ||
                           selectedImageIndex == -1) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                             content: Text(
                                 'Mohon isi semua field dan pilih gambar menu')));
                         return;
@@ -117,7 +117,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                         Navigator.pop(context);
                       });
                     },
-                    child: Center(
+                    child: const Center(
                         child: Icon(
                       Icons.save,
                       size: 20,
@@ -127,7 +127,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                 )
               ],
             ),
-            SizedBox(
+            const SizedBox(
               height: 16,
             ),
             Row(
@@ -136,11 +136,11 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                   child: TextField(
                     controller: namaMakananController,
                     decoration: InputDecoration(
-                        border: OutlineInputBorder(),
+                        border: const OutlineInputBorder(),
                         labelText: 'Nama ${widget.makananOrMinuman}'),
                   ),
                 ),
-                SizedBox(
+                const SizedBox(
                   width: 16,
                 ),
                 Expanded(
@@ -161,16 +161,16 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                       }),
                     ],
                     decoration: InputDecoration(
-                        border: OutlineInputBorder(),
+                        border: const OutlineInputBorder(),
                         labelText: 'Harga ${widget.makananOrMinuman} (Rp.)'),
                   ),
                 ),
               ],
             ),
-            SizedBox(
+            const SizedBox(
               height: 16,
             ),
-            Container(
+            SizedBox(
               height: 300,
               child: GridView.builder(
                 itemCount: listGambar.length,
@@ -182,7 +182,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                 ),
                 itemBuilder: (BuildContext context, int index) {
                   if (listGambar.isEmpty) {
-                    return Center(
+                    return const Center(
                       child: CircularProgressIndicator(),
                     );
                   }
@@ -210,7 +210,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Container(
+                            SizedBox(
                               height: 110,
                               width: 110,
                               child: Image(

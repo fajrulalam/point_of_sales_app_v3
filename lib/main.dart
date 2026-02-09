@@ -12,6 +12,10 @@ Future<void> main() async {
     name: 'e-santren',
     options: DefaultFirebaseOptions.eSantrenWeb,
   );
+
+  // Note: Recommendation system initialization is now handled in Home screen
+  // to show snackbar notification after rules are fetched
+
   runApp(const MyApp());
 }
 
@@ -26,7 +30,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData.light().copyWith(
           colorScheme:
               ThemeData().colorScheme.copyWith(primary: Colors.black87),
-          appBarTheme: AppBarTheme(
+          appBarTheme: const AppBarTheme(
               backgroundColor: Colors.white,
               elevation: 1,
               titleTextStyle: TextStyle(
@@ -34,9 +38,9 @@ class MyApp extends StatelessWidget {
                   fontWeight: FontWeight.w500,
                   fontSize: 18))),
       initialRoute: Home.id,
-      locale: Locale('id'),
+      locale: const Locale('id'),
       routes: {
-        Home.id: (context) => Home(),
+        Home.id: (context) => const Home(),
       },
     );
   }
