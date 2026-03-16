@@ -97,20 +97,20 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.teal.shade50,
+                  color: const Color(0xFFE8F5E9),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.rule, size: 18, color: Colors.teal.shade700),
+                    Icon(Icons.rule, size: 18, color: const Color(0xFF2E7D32)),
                     const SizedBox(width: 8),
                     Text(
                       'Total rules: ${_rules.length}',
                       style: GoogleFonts.poppins(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: Colors.teal.shade700,
+                        color: const Color(0xFF2E7D32),
                       ),
                     ),
                     if (_searchQuery.isNotEmpty) ...[
@@ -119,7 +119,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                         '(Showing ${_filteredRules.length})',
                         style: GoogleFonts.poppins(
                           fontSize: 14,
-                          color: Colors.teal.shade600,
+                          color: const Color(0xFF1B5E20),
                         ),
                       ),
                     ],
@@ -428,7 +428,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
 
   Color _getConfidenceColor(double confidence) {
     if (confidence >= 0.8) return Colors.green.shade600;
-    if (confidence >= 0.6) return Colors.teal.shade500;
+    if (confidence >= 0.6) return const Color(0xFF81C784);
     if (confidence >= 0.4) return Colors.orange.shade500;
     return Colors.grey.shade500;
   }

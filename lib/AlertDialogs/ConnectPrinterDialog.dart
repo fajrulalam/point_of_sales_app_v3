@@ -27,154 +27,122 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: SizedBox(
-            width: 300,
-            height: 150,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              crossAxisAlignment: CrossAxisAlignment.end,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Container(
+        width: 400,
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      child: Center(
-                        child: Text(
-                          'Connect to printer',
-                          style: GoogleFonts.poppins(
-                              fontSize: 16, fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ),
-                    InkWell(
-                      onTap: () {
-                        if (printerIsConnected) {
-                          Navigator.pop(context, selectedDevice);
-                        } else {
-                          Navigator.pop(context);
-                        }
-                      },
-                      child: Container(
-                        width: 90,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.blueAccent,
-                          border: Border.all(color: Colors.grey, width: 0.5),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.save,
-                              color: Colors.white,
-                            ),
-                            const SizedBox(
-                              width: 4,
-                            ),
-                            Text('Simpan',
-                                style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white)),
-                            //toggle switch
-                            // Switch(
-                            //   value: printReceipt,
-                            //   onChanged: (value) async {
-                            //     setState(() {
-                            //       printReceipt = !printReceipt;
-                            //     });
-                            //
-                            //     if (printReceipt == false) {
-                            //       await printer.disconnect();
-                            //       checkIfPrinterIsConnected();
-                            //       setState(() {});
-                            //     }
-                            //   },
-                            // ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
+                Text(
+                  'Connect to printer',
+                  style: GoogleFonts.poppins(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
                 ),
-                Visibility(
-                    visible: printReceipt,
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 1,
-                              child: DropdownButton<BluetoothDevice>(
-                                  hint: const Text('Pilih printer'),
-                                  value: selectedDevice,
-                                  items: devices
-                                      .map((e) => DropdownMenuItem(
-                                          child: Text(e.name!), value: e))
-                                      .toList(),
-                                  onChanged: (device) {
-                                    setState(() {
-                                      selectedDevice = device;
-                                      printer.connect(selectedDevice!);
-                                      checkIfPrinterIsConnected();
-                                    });
-                                  }),
-                            ),
-                            SizedBox(width: 30),
-                            Container(
-                              height: 12,
-                              width: 12,
-                              decoration: BoxDecoration(
-                                color: printerIsConnected
-                                    ? Colors.green
-                                    : Colors.grey,
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: printerIsConnected
-                                        ? Colors.green.withOpacity(0.3)
-                                        : Colors.grey.withOpacity(0.3),
-                                    spreadRadius: 2,
-                                    blurRadius: 5,
-                                    offset: Offset(0, 0),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        Container(
-                          width: 150,
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey, width: 0.5),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          padding:
-                              EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                          child: InkWell(
-                              onTap: () {
-                                testPrinter('test');
-                              },
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.print),
-                                  SizedBox(width: 4),
-                                  Text("Coba Printer"),
-                                ],
-                              )),
-                        ),
-                        //green indicator if the printer is connected
-                      ],
-                    )),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    if (printerIsConnected) {
+                      Navigator.pop(context, selectedDevice);
+                    } else {
+                      Navigator.pop(context);
+                    }
+                  },
+                  icon: const Icon(Icons.save, size: 18),
+                  label: const Text('Simpan'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueAccent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                ),
               ],
             ),
-          ),
-        ));
+            const SizedBox(height: 24),
+            Visibility(
+              visible: printReceipt,
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.black),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<BluetoothDevice>(
+                              hint: const Text('Pilih printer'),
+                              value: selectedDevice,
+                              isExpanded: true,
+                              items: devices
+                                  .map((e) => DropdownMenuItem(
+                                      child: Text(e.name ?? 'Unknown Device'),
+                                      value: e))
+                                  .toList(),
+                              onChanged: (device) {
+                                setState(() {
+                                  selectedDevice = device;
+                                  printer.connect(selectedDevice!);
+                                  checkIfPrinterIsConnected();
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          height: 12,
+                          width: 12,
+                          decoration: BoxDecoration(
+                            color: printerIsConnected ? Colors.green : Colors.grey,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: (printerIsConnected ? Colors.green : Colors.grey)
+                                    .withOpacity(0.3),
+                                spreadRadius: 2,
+                                blurRadius: 5,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Center(
+                    child: OutlinedButton.icon(
+                      onPressed: () => testPrinter('test'),
+                      icon: const Icon(Icons.print),
+                      label: const Text("Coba Printer"),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 32, vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> checkIfPrinterIsConnected() async {

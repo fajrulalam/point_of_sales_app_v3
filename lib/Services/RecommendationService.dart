@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:excel/excel.dart';
 import 'package:point_of_sales_app_v3/Models/RecommendationModels.dart';
@@ -201,8 +202,11 @@ class RecommendationService {
 
     try {
       print('🔄 Initializing recommendation system...');
+      
+      // 1. Wait for authentication if not ready
+      await _waitForAuth();
 
-      // 1. Load configuration from Firestore
+      // 2. Load configuration from Firestore
       _config = await _loadConfig();
 
       if (!_config!.enabled) {
@@ -260,19 +264,43 @@ class RecommendationService {
   /// Load configuration from Firestore
   Future<RecommendationConfig> _loadConfig() async {
     try {
+      print('🔄 Loading recommendation config from Firestore...');
       final doc = await FirebaseFirestore.instance
           .collection('config')
           .doc('recommendations')
           .get();
 
       if (doc.exists && doc.data() != null) {
-        return RecommendationConfig.fromFirestore(doc.data()!);
+        final config = RecommendationConfig.fromFirestore(doc.data()!);
+        print('✅ Config loaded: version=${config.version}, file=${config.csvFileName}');
+        return config;
+      } else {
+        print('⚠️ Config document does not exist in Firestore, using defaults');
       }
     } catch (e) {
-      print('⚠️ Error loading config, using defaults: $e');
+      print('⚠️ Error loading config from Firestore: $e');
+      print('💡 This is likely due to permissions. Using default config.');
     }
 
-    return RecommendationConfig.defaultConfig();
+    final defaultConfig = RecommendationConfig.defaultConfig();
+    print('ℹ️ Using default config: version=${defaultConfig.version}, file=${defaultConfig.csvFileName}');
+    return defaultConfig;
+  }
+
+  /// Wait for Firebase Auth to be initialized/signed in
+  Future<void> _waitForAuth() async {
+    int attempts = 0;
+    while (FirebaseAuth.instance.currentUser == null && attempts < 10) {
+      print('⏳ Waiting for Firebase Authentication... (attempt ${attempts + 1})');
+      await Future.delayed(const Duration(milliseconds: 1000));
+      attempts++;
+    }
+    
+    if (FirebaseAuth.instance.currentUser != null) {
+      print('✅ Authenticated as: ${FirebaseAuth.instance.currentUser?.uid}');
+    } else {
+      print('⚠️ Authentication timeout after 10s. Proceeding anyway...');
+    }
   }
 
   /// Download rules file from Firebase Storage and update local database

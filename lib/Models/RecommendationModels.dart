@@ -87,7 +87,7 @@ class RecommendationConfig {
   factory RecommendationConfig.fromFirestore(Map<String, dynamic> data) {
     return RecommendationConfig(
       version: data['version'] as String? ?? '1.0.0',
-      csvFileName: data['csvFileName'] as String? ?? 'rules_jan2025.csv',
+      csvFileName: data['csvFileName'] as String? ?? 'rules_filtered.csv',
       matchThreshold: (data['matchThreshold'] as num?)?.toDouble() ?? 1.0,
       minConfidence: (data['minConfidence'] as num?)?.toDouble() ?? 0.5,
       maxRecommendations: data['maxRecommendations'] as int? ?? 5,
@@ -101,7 +101,7 @@ class RecommendationConfig {
   factory RecommendationConfig.defaultConfig() {
     return RecommendationConfig(
       version: '1.0.0',
-      csvFileName: 'rules_jan2025.csv',
+      csvFileName: 'rules_filtered.csv',
       matchThreshold: 0,
       minConfidence: 0.5,
       maxRecommendations: 5,

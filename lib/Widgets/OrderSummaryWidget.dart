@@ -83,7 +83,7 @@ class OrderSummaryWidget extends StatelessWidget {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12.0),
                     ),
-                    backgroundColor: Colors.teal,
+                    backgroundColor: const Color(0xFF2E7D32),
                   ),
                   onPressed: onBuyPressed,
                   child: Text(

@@ -1,14 +1,19 @@
 import 'dart:async';
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Classes/Assets.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
+import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
+import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
 
 class HomeController extends ChangeNotifier {
+  // Callback for showing error messages (e.g., snackbars)
+  Function(String message, {bool isError})? onShowMessage;
   // State variables
   Color orderButtonColor = Colors.white;
   Color menuButtonColor = Colors.grey.shade300;
@@ -23,6 +28,7 @@ class HomeController extends ChangeNotifier {
   List<MenuObject> menuObjectList_minuman = [];
   List<PesananObject> pesananList = [];
   List<AssetsObject> listGambar = [];
+  List<String> categoryOrder = []; // Category display order from MenuConfig
 
   List<String> quoteKejujuran = [
     'Jujur itu menyenangkan',
@@ -52,9 +58,19 @@ class HomeController extends ChangeNotifier {
   Timer? timer;
 
   // Initialize controller
-  void initialize() {
+  Future<void> initialize() async {
+    // Wait for authentication if not ready
+    int authAttempts = 0;
+    while (FirebaseAuth.instance.currentUser == null && authAttempts < 5) {
+      await Future.delayed(const Duration(milliseconds: 1000));
+      authAttempts++;
+    }
+
     getMenu();
     getListGambar();
+    
+    // Check for missed perishable resets from previous days
+    EndOfDayService.checkAndAutoResetPerishables();
   }
 
   // Menu Management
@@ -82,6 +98,21 @@ class HomeController extends ChangeNotifier {
           .toList();
       notifyListeners();
     });
+
+    // Fetch category order from MenuConfig
+    FirebaseFirestore.instance
+        .collection('Canteens')
+        .doc('canteen375')
+        .collection('Metadata')
+        .doc('MenuConfig')
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.exists) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        categoryOrder = List<String>.from(data['categoryOrder'] ?? []);
+        notifyListeners();
+      }
+    });
   }
 
   Future<void> getListGambar() async {
@@ -92,10 +123,41 @@ class HomeController extends ChangeNotifier {
   }
 
   // Order Management
-  void addToOrder(MenuObject menu, bool isTakeAway) {
+  Future<void> addToOrder(MenuObject menu, bool isTakeAway) async {
     int orderIndex = pesananList
         .indexWhere((element) => element.namaPesanan == menu.namaMenu);
 
+    // Calculate what the new quantity would be
+    int newQuantity = 1;
+    if (orderIndex != -1) {
+      newQuantity = pesananList[orderIndex].totalQuantity + 1;
+    }
+
+    // Check if this quantity is available
+    final inventoryService = InventoryService();
+    final availability = await inventoryService.checkMenuAvailability(
+      menu,
+      newQuantity,
+    );
+
+    if (!availability.isAvailable) {
+      // Data missing error (e.g. ingredient not found) - still block
+      onShowMessage?.call(
+        'Tidak bisa menambah ${menu.namaMenu}: ${availability.message}',
+        isError: true,
+      );
+      return;
+    }
+
+    if (availability.hasWarning) {
+      // Show warning but proceed
+      onShowMessage?.call(
+        'Peringatan: ${availability.message}',
+        isError: false,
+      );
+    }
+
+    // If available, add to order
     if (orderIndex == -1) {
       if (isTakeAway) {
         pesananList.add(PesananObject(
@@ -122,7 +184,42 @@ class HomeController extends ChangeNotifier {
     getTotal();
   }
 
-  void incrementDineIn(int index) {
+  Future<void> incrementDineIn(int index) async {
+    // Find the menu object for this order
+    final menuItem = menuObjectList.firstWhere(
+      (menu) => menu.namaMenu == pesananList[index].namaPesanan,
+      orElse: () => menuObjectList.first,
+    );
+
+    // Calculate the new quantity we're trying to reach
+    final newQuantity = pesananList[index].dineInQuantity + 1;
+    final totalNewQuantity = newQuantity + pesananList[index].takeAwayQuantity;
+
+    // Check if this quantity is available
+    final inventoryService = InventoryService();
+    final availability = await inventoryService.checkMenuAvailability(
+      menuItem,
+      totalNewQuantity,
+    );
+
+    if (!availability.isAvailable) {
+      // Data missing error (e.g. ingredient not found) - still block
+      onShowMessage?.call(
+        'Tidak bisa menambah ${menuItem.namaMenu}: ${availability.message}',
+        isError: true,
+      );
+      return; // Don't increment
+    }
+
+    if (availability.hasWarning) {
+      // Show warning but proceed
+      onShowMessage?.call(
+        'Peringatan: ${availability.message}',
+        isError: false,
+      );
+    }
+
+    // If available (or warned), increment
     pesananList[index].dineInQuantity++;
     getTotal();
   }
@@ -137,7 +234,42 @@ class HomeController extends ChangeNotifier {
     getTotal();
   }
 
-  void incrementTakeAway(int index) {
+  Future<void> incrementTakeAway(int index) async {
+    // Find the menu object for this order
+    final menuItem = menuObjectList.firstWhere(
+      (menu) => menu.namaMenu == pesananList[index].namaPesanan,
+      orElse: () => menuObjectList.first,
+    );
+
+    // Calculate the new quantity we're trying to reach
+    final newQuantity = pesananList[index].takeAwayQuantity + 1;
+    final totalNewQuantity = newQuantity + pesananList[index].dineInQuantity;
+
+    // Check if this quantity is available
+    final inventoryService = InventoryService();
+    final availability = await inventoryService.checkMenuAvailability(
+      menuItem,
+      totalNewQuantity,
+    );
+
+    if (!availability.isAvailable) {
+      // Data missing error (e.g. ingredient not found) - still block
+      onShowMessage?.call(
+        'Tidak bisa menambah ${menuItem.namaMenu}: ${availability.message}',
+        isError: true,
+      );
+      return; // Don't increment
+    }
+
+    if (availability.hasWarning) {
+      // Show warning but proceed
+      onShowMessage?.call(
+        'Peringatan: ${availability.message}',
+        isError: false,
+      );
+    }
+
+    // If available (or warned), increment
     pesananList[index].takeAwayQuantity++;
     getTotal();
   }
@@ -162,12 +294,12 @@ class HomeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Add recommended item (via association rules)
+  // Add recommended item (kept for potential future use)
   void addRecommendedItem(String itemName, int quantity) {
     // Find the menu item by name (case-insensitive)
     final menuItem = menuObjectList.firstWhere(
       (menu) => menu.namaMenu.toLowerCase() == itemName.toLowerCase(),
-      orElse: () => menuObjectList.first, // Fallback (shouldn't happen)
+      orElse: () => menuObjectList.first,
     );
 
     // Check if item already exists in order
@@ -175,14 +307,12 @@ class HomeController extends ChangeNotifier {
         element.namaPesanan.toLowerCase() == itemName.toLowerCase());
 
     if (orderIndex == -1) {
-      // Add new item with viaAssociationRules = true
       if (isTakeAway) {
         pesananList.add(PesananObject(
           namaPesanan: menuItem.namaMenu,
           harga: menuItem.harga,
           dineInQuantity: 0,
           takeAwayQuantity: quantity,
-          viaAssociationRules: true,
         ));
       } else {
         pesananList.add(PesananObject(
@@ -190,21 +320,14 @@ class HomeController extends ChangeNotifier {
           harga: menuItem.harga,
           dineInQuantity: quantity,
           takeAwayQuantity: 0,
-          viaAssociationRules: true,
         ));
       }
-      print(
-          '✅ Added recommended item: ${menuItem.namaMenu} (via association rules)');
     } else {
-      // Item exists, increment quantity and mark as via association rules
       if (isTakeAway) {
         pesananList[orderIndex].takeAwayQuantity += quantity;
       } else {
         pesananList[orderIndex].dineInQuantity += quantity;
       }
-      pesananList[orderIndex].viaAssociationRules = true;
-      print(
-          '✅ Incremented recommended item: ${menuItem.namaMenu} (via association rules)');
     }
 
     getTotal();
@@ -214,9 +337,31 @@ class HomeController extends ChangeNotifier {
   // Price Calculations
   void getTotal() {
     int subtotal = pesananList.fold(0, (acc, order) => acc + order.subtotal);
-    int totalTakeAway =
-        pesananList.fold(0, (sum, order) => sum + order.takeAwayQuantity);
-    biayaBungkus = (totalTakeAway ~/ 4) * 1000;
+    
+    int totalPackages = 0;
+    for (var order in pesananList) {
+      if (order.takeAwayQuantity > 0) {
+        // Find corresponding MenuObject to get its unitsPerPackage
+        final menu = menuObjectList.firstWhere(
+          (m) => m.namaMenu == order.namaPesanan,
+          orElse: () => MenuObject(
+            id: '', 
+            namaMenu: order.namaPesanan, 
+            harga: order.harga, 
+            isMakanan: true, 
+            imagePath: '', 
+            unitsPerPackage: 1
+          ),
+        );
+        
+        // Calculate packages for this item: ceil(quantity / unitsPerPackage)
+        int packagesNeeded = (order.takeAwayQuantity / menu.unitsPerPackage).ceil();
+        totalPackages += packagesNeeded;
+      }
+    }
+
+    jumlahItem = totalPackages; // Use this to track total physical packages for takeaway
+    biayaBungkus = (totalPackages ~/ 4) * 1000;
     totalHarga = subtotal + biayaBungkus;
     notifyListeners();
   }
@@ -380,7 +525,7 @@ class HomeController extends ChangeNotifier {
         .update({'customerNumber': 0});
 
     final recentlyServed =
-        await FirebaseFirestore.instance.collection("RecentyServed").get();
+        await FirebaseFirestore.instance.collection("RecentlyServed").get();
 
     for (var doc in recentlyServed.docs) {
       await doc.reference.delete();

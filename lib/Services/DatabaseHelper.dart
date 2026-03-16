@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:point_of_sales_app_v3/Models/RecommendationModels.dart';
+import 'package:point_of_sales_app_v3/Models/Member.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -20,9 +21,60 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 4,
       onCreate: _createDB,
+      onUpgrade: _onUpgrade,
     );
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE members (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          phoneNumber TEXT NOT NULL,
+          memberId TEXT,
+          points INTEGER DEFAULT 0,
+          createdAt TEXT
+        )
+      ''');
+      await db.execute('''
+        CREATE INDEX idx_member_name ON members(name)
+      ''');
+    }
+    if (oldVersion < 4) {
+      // Simplest way for a cache table: drop and recreate
+      await db.execute('DROP TABLE IF EXISTS members');
+      await _createMembersTable(db);
+    }
+  }
+
+  Future<void> _createMembersTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE members (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        phoneNumber TEXT NOT NULL,
+        memberId TEXT,
+        points INTEGER DEFAULT 0,
+        createdAt TEXT,
+        category TEXT,
+        asrama TEXT,
+        dateOfBirth TEXT,
+        email TEXT,
+        faculty TEXT,
+        gender TEXT,
+        institution TEXT,
+        major TEXT,
+        residence TEXT,
+        unitEducation TEXT,
+        workLocation TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX idx_member_name ON members(name)
+    ''');
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -44,7 +96,9 @@ class DatabaseHelper {
       )
     ''');
 
-    // Create index for faster queries
+    await _createMembersTable(db);
+
+    // Create initial index
     await db.execute('''
       CREATE INDEX idx_antecedents ON rules(antecedents)
     ''');
@@ -138,5 +192,52 @@ class DatabaseHelper {
     final path = join(dbPath, 'recommendations.db');
     await databaseFactory.deleteDatabase(path);
     _database = null;
+  }
+
+  // Member Operations
+  Future<void> insertMembers(List<Member> members) async {
+    final db = await database;
+    final batch = db.batch();
+
+    for (var member in members) {
+      batch.insert(
+        'members', 
+        member.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+
+    await batch.commit(noResult: true);
+  }
+
+  Future<void> insertMember(Member member) async {
+    final db = await database;
+    await db.insert(
+      'members',
+      member.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Member>> getAllMembers() async {
+    final db = await database;
+    final result = await db.query('members', orderBy: 'name ASC');
+    return result.map((map) => Member.fromMap(map)).toList();
+  }
+
+  Future<void> clearMembers() async {
+    final db = await database;
+    await db.delete('members');
+  }
+
+  Future<List<Member>> searchMembers(String query) async {
+    final db = await database;
+    final result = await db.query(
+      'members',
+      where: 'name LIKE ? OR phoneNumber LIKE ?',
+      whereArgs: ['%$query%', '%$query%'],
+      orderBy: 'name ASC',
+    );
+    return result.map((map) => Member.fromMap(map)).toList();
   }
 }

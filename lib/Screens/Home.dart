@@ -1,16 +1,27 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:point_of_sales_app_v3/AlertDialogs/ConnectPrinterDialog.dart';
 import 'package:point_of_sales_app_v3/Controllers/HomeController.dart';
+import 'package:point_of_sales_app_v3/Screens/LoginScreen.dart';
 import 'package:point_of_sales_app_v3/Services/OrderConfirmationService.dart';
 import 'package:point_of_sales_app_v3/Services/RecommendationService.dart';
+import 'package:point_of_sales_app_v3/Services/MemberService.dart';
+import 'package:point_of_sales_app_v3/Services/SelfOrderService.dart';
+import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 import 'package:point_of_sales_app_v3/Widgets/MenuManagementWidget.dart';
 import 'package:point_of_sales_app_v3/Widgets/OrderListWidget.dart';
 import 'package:point_of_sales_app_v3/Widgets/OrderSummaryWidget.dart';
 import 'package:point_of_sales_app_v3/Widgets/OrderingViewWidget.dart';
 import 'package:point_of_sales_app_v3/Widgets/RulesTableDialog.dart';
 import 'package:point_of_sales_app_v3/Widgets/SidebarWidget.dart';
+import 'package:point_of_sales_app_v3/Screens/InventoryScreen.dart';
+import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
+import 'package:point_of_sales_app_v3/Screens/MarketingScreen.dart';
+import 'package:point_of_sales_app_v3/Screens/ShoppingScreen.dart';
+import 'package:point_of_sales_app_v3/Screens/SelfOrdersScreen.dart';
 
 class Home extends StatefulWidget {
   const Home({Key? key}) : super(key: key);
@@ -24,82 +35,81 @@ class _HomeState extends State<Home> {
   late HomeController controller;
   TextEditingController uangYangDiterimaController = TextEditingController();
   TextEditingController customerNameController = TextEditingController();
+  String _activeRoute = 'pos'; // 'pos', 'inventory', 'shopping', 'members', 'selforders'
+  
+  // Self-orders
+  final SelfOrderService _selfOrderService = SelfOrderService.instance;
+  StreamSubscription<int>? _selfOrdersCountSubscription;
+  int _pendingSelfOrdersCount = 0;
 
   @override
   void initState() {
     super.initState();
     controller = HomeController();
     controller.addListener(_onControllerUpdate);
+    
+    // Set up message callback for showing snackbars
+    controller.onShowMessage = (message, {bool isError = false}) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                isError ? Icons.error : Icons.info,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  message,
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: isError ? Colors.red.shade700 : Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      );
+    };
+    
     controller.initialize();
     
+    // Initialize members cache
+    MemberService.instance.initializeCache();
+
     // Initialize recommendation service and show snackbar
     _initializeRecommendationService();
+    
+    // Subscribe to self-orders count stream for badge
+    _selfOrdersCountSubscription = _selfOrderService.getUnpaidOrderCountStream().listen(
+      (count) {
+        if (mounted) {
+          setState(() {
+            _pendingSelfOrdersCount = count;
+          });
+        }
+      },
+      onError: (error) {
+        print('Error listening to self-orders count: $error');
+      },
+    );
   }
 
   Future<void> _initializeRecommendationService() async {
-    // Wait for the widget to be fully built before showing snackbar
+    // HIDDEN: Recommendation feature UI is hidden but backend remains for thesis documentation
+    // Initialize silently without showing snackbar
     await Future.delayed(const Duration(milliseconds: 500));
     
     if (!mounted) return;
     
-    final result = await RecommendationService.instance.initialize();
-    
-    if (!mounted) return;
-    
-    if (result.success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.check_circle, color: Colors.white, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Recommendation rules fetched: ${result.ruleCount}',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: Colors.teal.shade600,
-          duration: const Duration(seconds: 4),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          action: SnackBarAction(
-            label: 'Check rules',
-            textColor: Colors.white,
-            onPressed: () {
-              RulesTableDialog.show(context);
-            },
-          ),
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.error_outline, color: Colors.white, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Failed to fetch recommendation rules: ${result.errorMessage ?? "Unknown error"}',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: Colors.red.shade600,
-          duration: const Duration(seconds: 5),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      );
-    }
+    // Still initialize the service (backend kept for documentation)
+    await RecommendationService.instance.initialize();
   }
 
   @override
@@ -108,6 +118,7 @@ class _HomeState extends State<Home> {
     controller.dispose();
     uangYangDiterimaController.dispose();
     customerNameController.dispose();
+    _selfOrdersCountSubscription?.cancel();
     super.dispose();
   }
 
@@ -124,6 +135,7 @@ class _HomeState extends State<Home> {
         statusBarIconBrightness: Brightness.dark,
       ),
       child: Scaffold(
+        resizeToAvoidBottomInset: false,
         body: Row(
           children: [
             // Sidebar
@@ -135,18 +147,45 @@ class _HomeState extends State<Home> {
               menuButtonOffset: controller.menuButtonOffset_y,
               printButtonOffset: controller.printButtonOffset_y,
               printerIsConnected: controller.printerIsConnected,
-              onOrderPressed: () => controller.changeButtonColors('order'),
-              onMenuPressed: () => controller.changeButtonColors('menu'),
+              selfOrdersCount: _pendingSelfOrdersCount,
+              onOrderPressed: () {
+                setState(() => _activeRoute = 'pos');
+                controller.changeButtonColors('order');
+              },
+              onMenuPressed: () {
+                setState(() => _activeRoute = 'pos');
+                controller.changeButtonColors('menu');
+              },
               onPrintPressed: () => _handlePrintPressed(),
               onPrintLongPress: () => _handlePrintLongPress(),
               onResetPressed: () => controller.resetCustomerNumber(),
-              onRulesPressed: () => RulesTableDialog.show(context),
+              // HIDDEN: Recommendation feature UI hidden but backend kept for thesis documentation
+              onRulesPressed: null,
+              onInventoryPressed: () => _navigateToInventory(),
+              onShoppingPressed: () => _navigateToShopping(),
+              onSelfOrdersPressed: () => _navigateToSelfOrders(),
+              onMembersPressed: () => _navigateToMembers(),
+              onLogoutPressed: _handleLogout,
             ),
             // Main Content Area
-            if (controller.menuButtonColor == Colors.grey.shade300)
-              ..._buildOrderingView(),
-            if (controller.menuButtonColor == Colors.white)
-              _buildMenuManagementView(),
+            if (_activeRoute == 'pos') ...[
+              if (controller.menuButtonColor == Colors.grey.shade300)
+                ..._buildOrderingView(),
+              if (controller.menuButtonColor == Colors.white)
+                _buildMenuManagementView(),
+            ] else if (_activeRoute == 'inventory')
+              const Expanded(flex: 12, child: InventoryScreen())
+            else if (_activeRoute == 'shopping')
+              const Expanded(flex: 12, child: ShoppingScreen())
+            else if (_activeRoute == 'selforders')
+              Expanded(
+                flex: 12,
+                child: SelfOrdersScreen(
+                  onAcceptOrder: _handleAcceptSelfOrder,
+                ),
+              )
+            else if (_activeRoute == 'members')
+              const Expanded(flex: 12, child: MarketingScreen()),
           ],
         ),
       ),
@@ -161,6 +200,7 @@ class _HomeState extends State<Home> {
         child: OrderingViewWidget(
           menuObjectList_makanan: controller.menuObjectList_makanan,
           menuObjectList_minuman: controller.menuObjectList_minuman,
+          categoryOrder: controller.categoryOrder,
           isTakeAway: controller.isTakeAway,
           onTakeAwayChanged: (value) => controller.setTakeAway(value),
           onMenuTap: (menu) =>
@@ -189,7 +229,7 @@ class _HomeState extends State<Home> {
                 flex: 1,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.teal.shade100,
+                    color: const Color(0xFFE8F5E9),
                     border: Border(
                       bottom: BorderSide(
                         color: Colors.grey.shade300,
@@ -262,6 +302,7 @@ class _HomeState extends State<Home> {
         menuObjectList_makanan: controller.menuObjectList_makanan,
         menuObjectList_minuman: controller.menuObjectList_minuman,
         listGambar: controller.listGambar,
+        categoryOrder: controller.categoryOrder,
       ),
     );
   }
@@ -308,7 +349,6 @@ class _HomeState extends State<Home> {
       customerNameController: customerNameController,
       uangYangDiterimaController: uangYangDiterimaController,
       nomorBerikutnya: controller.nomorBerikutnya,
-      quoteKejujuran: controller.quoteKejujuran,
       getTotal: controller.getTotal,
       printReceipt: ({int discountAmount = 0, int originalTotal = 0}) async =>
           await controller.printReceipt(
@@ -326,5 +366,98 @@ class _HomeState extends State<Home> {
       addRecommendedItem: controller.addRecommendedItem,
       menuItems: menuItemNames,
     );
+  }
+
+  void _navigateToInventory() {
+    setState(() => _activeRoute = 'inventory');
+  }
+
+  void _navigateToMembers() {
+    setState(() => _activeRoute = 'members');
+  }
+
+  void _navigateToShopping() {
+    setState(() => _activeRoute = 'shopping');
+  }
+
+  void _navigateToSelfOrders() {
+    setState(() => _activeRoute = 'selforders');
+  }
+
+  void _handleAcceptSelfOrder(SelfOrder order) {
+    // Convert self-order to pesanan list and process
+    final pesananList = _selfOrderService.convertToPesananList(order);
+    final isTakeAway = _selfOrderService.isTakeAwayOrder(order);
+    
+    // Pre-fill customer name
+    customerNameController.text = order.memberName;
+    
+    // Get all available menu item names for filtering recommendations
+    final menuItemNames = controller.menuObjectList
+        .map((menu) => menu.namaMenu)
+        .toList();
+
+    OrderConfirmationService.showSelfOrderConfirmationDialog(
+      context: context,
+      selfOrder: order,
+      pesananList: pesananList,
+      totalHarga: order.total,
+      isTakeAway: isTakeAway,
+      biayaBungkus: order.takeAwayFee,
+      customerNameController: customerNameController,
+      uangYangDiterimaController: uangYangDiterimaController,
+      nomorBerikutnya: controller.nomorBerikutnya,
+      getTotal: controller.getTotal,
+      printReceipt: ({int discountAmount = 0, int originalTotal = 0}) async =>
+          await controller.printReceipt(
+        pesananList,
+        controller.nomorBerikutnya,
+        order.total,
+        isTakeAway,
+        discountAmount: discountAmount,
+        originalTotal: originalTotal,
+      ),
+      getYear: controller.getYear,
+      getMonth: controller.getMonth,
+      getDate: controller.getDate,
+      setJumlahItem: (value) => controller.jumlahItem = value,
+      addRecommendedItem: controller.addRecommendedItem,
+      menuItems: menuItemNames,
+      onOrderCompleted: () {
+        // Clear the customer name after order is completed
+        customerNameController.clear();
+        uangYangDiterimaController.clear();
+      },
+    );
+  }
+
+  Future<void> _handleLogout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Apakah Anda yakin ingin logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await FirebaseAuth.instance.signOut();
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          LoginScreen.id, 
+          (route) => false
+        );
+      }
+    }
   }
 }
