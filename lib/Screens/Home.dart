@@ -27,6 +27,7 @@ import 'package:point_of_sales_app_v3/Screens/MarketingScreen.dart';
 import 'package:point_of_sales_app_v3/Screens/ShoppingScreen.dart';
 import 'package:point_of_sales_app_v3/Screens/LiveTabsScreen.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/FinancialReportBottomSheet.dart';
+import 'package:point_of_sales_app_v3/BottomSheets/QuickExpenseBottomSheet.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class Home extends StatefulWidget {
@@ -194,6 +195,7 @@ class _HomeState extends State<Home> {
           onShoppingPressed: () => _navigateToShopping(),
           onSelfOrdersPressed: () => _navigateToSelfOrders(),
           onMembersPressed: () => _navigateToMembers(),
+          onQuickExpensePressed: () => _showQuickExpense(),
           onFinancialReportPressed: () => _showFinancialReport(),
           onTestingModeToggled: _handleTestingModeToggle,
           onLogoutPressed: _handleLogout,
@@ -544,6 +546,17 @@ Widget _buildMainContent() {
         uangYangDiterimaController.clear();
       },
     );
+  }
+
+  void _showQuickExpense() {
+    final prevRoute = _activeRoute;
+    setState(() => _activeRoute = 'quick_expense');
+
+    QuickExpenseBottomSheet.show(context).then((_) {
+      if (mounted) {
+        setState(() => _activeRoute = prevRoute);
+      }
+    });
   }
 
   void _showFinancialReport() {

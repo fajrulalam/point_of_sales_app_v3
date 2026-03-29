@@ -26,6 +26,7 @@ class SidebarWidget extends StatefulWidget {
   final VoidCallback? onSelfOrdersPressed;
   final VoidCallback? onLogoutPressed;
   final VoidCallback? onFinancialReportPressed;
+  final VoidCallback? onQuickExpensePressed;
   final VoidCallback? onTestingModeToggled;
 
   // New controlled state props
@@ -55,6 +56,7 @@ class SidebarWidget extends StatefulWidget {
     this.onSelfOrdersPressed,
     this.onLogoutPressed,
     this.onFinancialReportPressed,
+    this.onQuickExpensePressed,
     this.onTestingModeToggled,
   }) : super(key: key);
 
@@ -169,6 +171,14 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                               label: 'Marketing',
                               routeKey: 'members',
                               onTap: widget.onMembersPressed!,
+                              showLabels: showLabels,
+                            ),
+                          if (widget.onQuickExpensePressed != null)
+                            _navItem(
+                              icon: Icons.receipt_long_rounded,
+                              label: 'Pengeluaran',
+                              routeKey: 'quick_expense',
+                              onTap: widget.onQuickExpensePressed!,
                               showLabels: showLabels,
                             ),
                           if (widget.onFinancialReportPressed != null)

@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:point_of_sales_app_v3/BottomSheets/EditCategoryBottomSheet.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Widgets/MenuGridWidget.dart';
 import 'package:point_of_sales_app_v3/Widgets/SidebarWidget.dart' show kDarkTeal;
-import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class OrderingViewWidget extends StatefulWidget {
   final List<MenuObject> menuObjectList_makanan;
@@ -31,293 +27,300 @@ class OrderingViewWidget extends StatefulWidget {
 }
 
 class _OrderingViewWidgetState extends State<OrderingViewWidget> {
-  String? selectedCategoryMakanan;
-  String? selectedCategoryMinuman;
+  // 0 = Makanan, 1 = Minuman
+  int _topTabIndex = 0;
+  String? _selectedCategory; // null = "Semua"
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<MenuObject> get _currentItems =>
+      _topTabIndex == 0 ? widget.menuObjectList_makanan : widget.menuObjectList_minuman;
+
+  List<String> get _currentCategories {
+    final categories = _currentItems.map((e) => e.category).toSet().toList();
+    categories.sort((a, b) {
+      final indexA = widget.categoryOrder.indexOf(a);
+      final indexB = widget.categoryOrder.indexOf(b);
+      if (indexA != -1 && indexB != -1) return indexA.compareTo(indexB);
+      if (indexA != -1) return -1;
+      if (indexB != -1) return 1;
+      return a.compareTo(b);
+    });
+    return categories;
+  }
+
+  List<MenuObject> get _filteredItems {
+    // Search overrides category filter
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      final allItems = [
+        ...widget.menuObjectList_makanan,
+        ...widget.menuObjectList_minuman,
+      ];
+      return allItems
+          .where((m) => m.namaMenu.toLowerCase().contains(query))
+          .toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    }
+
+    if (_selectedCategory != null) {
+      // Single category: sort by sortOrder only
+      return _currentItems
+          .where((m) => m.category == _selectedCategory)
+          .toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    }
+
+    // "Semua": sort by categoryOrder first, then sortOrder within each category
+    final catOrder = widget.categoryOrder;
+    return List<MenuObject>.from(_currentItems)
+      ..sort((a, b) {
+        final catA = catOrder.indexOf(a.category);
+        final catB = catOrder.indexOf(b.category);
+        // Unknown categories go to end
+        final orderA = catA == -1 ? 999 : catA;
+        final orderB = catB == -1 ? 999 : catB;
+        if (orderA != orderB) return orderA.compareTo(orderB);
+        return a.sortOrder.compareTo(b.sortOrder);
+      });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       color: Colors.white,
-      child: DefaultTabController(
-        length: 2,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            TabBar(
-              labelColor: const Color(0xFF1A1A1A),
-              labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
-              unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
-              unselectedLabelColor: Colors.grey.shade500,
-              indicatorSize: TabBarIndicatorSize.tab,
-              indicator: BoxDecoration(
-                color: kDarkTeal.withOpacity(0.08),
-                border: Border(
-                  bottom: BorderSide(
-                    color: kDarkTeal,
-                    width: 3,
+      child: Column(
+        children: [
+          // === TOP LAYER: Makanan / Minuman + Search ===
+          _buildTopBar(),
+          // === SECOND LAYER: Category chips (hidden during search) ===
+          if (_searchQuery.isEmpty) _buildCategoryChips(),
+          // === MENU ITEMS GRID ===
+          Expanded(
+            child: _filteredItems.isEmpty
+                ? _buildEmptyState()
+                : MenuGridWidget(
+                    menuObjectList: _filteredItems,
+                    onMenuTap: widget.onMenuTap,
                   ),
-                ),
-              ),
-              tabs: const [
-                Tab(text: 'Makanan'),
-                Tab(text: 'Minuman'),
-              ],
-            ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _buildSubCategoryView(
-                    items: widget.menuObjectList_makanan,
-                    selectedCategory: selectedCategoryMakanan,
-                    onCategorySelected: (category) {
-                      setState(() {
-                        selectedCategoryMakanan = category;
-                      });
-                    },
-                    onBack: () {
-                      setState(() {
-                        selectedCategoryMakanan = null;
-                      });
-                    },
-                  ),
-                  _buildSubCategoryView(
-                    items: widget.menuObjectList_minuman,
-                    selectedCategory: selectedCategoryMinuman,
-                    onCategorySelected: (category) {
-                      setState(() {
-                        selectedCategoryMinuman = category;
-                      });
-                    },
-                    onBack: () {
-                      setState(() {
-                        selectedCategoryMinuman = null;
-                      });
-                    },
-                  ),
-                ],
-              ),
-            ),
-            const Divider(),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                const Spacer(),
-                Checkbox(
-                  value: widget.isTakeAway,
-                  onChanged: (value) => widget.onTakeAwayChanged(value ?? false),
-                ),
-                GestureDetector(
-                  onTap: () => widget.onTakeAwayChanged(!widget.isTakeAway),
-                  child: const Text('Bungkus'),
-                ),
-                const SizedBox(width: 24),
-              ],
-            ),
-          ],
+          ),
+          // === BUNGKUS CHECKBOX ===
+          const Divider(height: 1),
+          _buildTakeAwayRow(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        children: [
+          // Makanan / Minuman toggle
+          _buildTopTab('Makanan', 0),
+          const SizedBox(width: 4),
+          _buildTopTab('Minuman', 1),
+          const SizedBox(width: 16),
+          // Search bar
+          Expanded(child: _buildSearchBar()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopTab(String label, int index) {
+    final isActive = _searchQuery.isEmpty && _topTabIndex == index;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _topTabIndex = index;
+          _selectedCategory = null;
+          _searchQuery = '';
+          _searchController.clear();
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: isActive ? kDarkTeal : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: isActive ? Colors.white : Colors.grey.shade600,
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildSubCategoryView({
-    required List<MenuObject> items,
-    required String? selectedCategory,
-    required Function(String) onCategorySelected,
-    required VoidCallback onBack,
-  }) {
-    if (selectedCategory == null) {
-      // Show Category Grid
-      final categories = items.map((e) => e.category).toSet().toList();
-      
-      // Sort by position in categoryOrder, unknowns go to end
-      categories.sort((a, b) {
-        final indexA = widget.categoryOrder.indexOf(a);
-        final indexB = widget.categoryOrder.indexOf(b);
-        
-        // If both are in the order list, sort by their position
-        if (indexA != -1 && indexB != -1) return indexA.compareTo(indexB);
-        // If only a is in list, a comes first
-        if (indexA != -1) return -1;
-        // If only b is in list, b comes first
-        if (indexB != -1) return 1;
-        // If neither is in list, sort alphabetically
-        return a.compareTo(b);
-      });
-
-      return GridView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: categories.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 4,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 1.0,
-        ),
-        itemBuilder: (context, index) {
-          final category = categories[index];
-          return _CategoryCard(
-            category: category,
-            onTap: () => onCategorySelected(category),
-            onLongPress: () async {
-              await showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                ),
-                builder: (context) => EditCategoryBottomSheet(categoryName: category),
-              );
-              // Trigger rebuild if necessary, though StreamBuilder/FutureBuilder in card handles image.
-              // If name changed, parent widget might need set state to refresh list, but 
-              // OrderingViewWidget gets lists from parent. Parent needs to refresh.
-              // For now, we assume simple image edits.
-              // If name changed, the category list derived from items might be stale until parent refreshes data.
-              
-            },
-          );
+  Widget _buildSearchBar() {
+    return SizedBox(
+      height: 40,
+      child: TextField(
+        controller: _searchController,
+        onChanged: (value) {
+          setState(() => _searchQuery = value.trim());
         },
-      );
-    } else {
-      // Show Items Grid for Selected Category
-      final filteredItems =
-          items.where((e) => e.category == selectedCategory).toList();
-
-      return Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                IconButton(
-                  onPressed: onBack,
-                  icon: const Icon(Icons.arrow_back_ios),
-                  color: kDarkTeal,
-                ),
-                Text(
-                  selectedCategory,
-                  style: GoogleFonts.poppins(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: kDarkTeal,
-                  ),
-                ),
-              ],
-            ),
+        style: GoogleFonts.poppins(fontSize: 14),
+        decoration: InputDecoration(
+          hintText: 'Cari menu...',
+          hintStyle: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade400),
+          prefixIcon: Icon(Icons.search, size: 20, color: Colors.grey.shade500),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear, size: 18),
+                  onPressed: () {
+                    setState(() {
+                      _searchController.clear();
+                      _searchQuery = '';
+                    });
+                  },
+                )
+              : null,
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide.none,
           ),
-          Expanded(
-            child: MenuGridWidget(
-              menuObjectList: filteredItems,
-              onMenuTap: widget.onMenuTap,
-            ),
-          ),
-        ],
-      );
-    }
-  }
-}
-
-class _CategoryCard extends StatelessWidget {
-  final String category;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
-
-  const _CategoryCard({
-    required this.category,
-    required this.onTap,
-    required this.onLongPress,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection(Col.name('Categories')).doc(category).snapshots(),
-      builder: (context, snapshot) {
-        String? imagePath;
-        if (snapshot.hasData && snapshot.data!.exists) {
-           final data = snapshot.data!.data() as Map<String, dynamic>;
-           if (data.containsKey('imagePath')) {
-             imagePath = data['imagePath'];
-           }
-        }
-
-        return InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Stack(
-              children: [
-                // Background Image or Gradient
-                Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: imagePath != null
-                        ? CachedNetworkImage(
-                            imageUrl: imagePath,
-                            fit: BoxFit.cover,
-                            placeholder: (context, url) => Container(color: Colors.grey.shade200),
-                            errorWidget: (context, url, error) => _buildDefaultGradient(),
-                          )
-                        : _buildDefaultGradient(),
-                  ),
-                ),
-                // Overlay for Readability
-                Positioned.fill(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      color: Colors.black.withOpacity(0.3),
-                    ),
-                  ),
-                ),
-                // Category Name
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(
-                      category,
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.poppins(
-                        color: Colors.white,
-                        fontSize: 14, // Smaller font for 4-column grid
-                        fontWeight: FontWeight.bold,
-                        shadows: [
-                          const Shadow(color: Colors.black54, blurRadius: 4, offset: Offset(0, 2)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+        ),
+      ),
     );
   }
 
-  Widget _buildDefaultGradient() {
+  Widget _buildCategoryChips() {
+    final categories = _currentCategories;
+    final allCount = _currentItems.length;
+
     return Container(
+      height: 48,
+      padding: const EdgeInsets.only(top: 4, bottom: 4),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [kDarkTeal.withOpacity(0.7), kDarkTeal],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          // "Semua" chip
+          _buildCategoryChip('Semua', allCount, null),
+          ...categories.map((cat) {
+            final count = _currentItems.where((m) => m.category == cat).length;
+            return _buildCategoryChip(cat, count, cat);
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryChip(String label, int count, String? categoryValue) {
+    final isActive = _selectedCategory == categoryValue;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: GestureDetector(
+        onTap: () {
+          setState(() => _selectedCategory = categoryValue);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: isActive ? kDarkTeal.withValues(alpha: 0.1) : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isActive ? kDarkTeal : Colors.grey.shade300,
+              width: isActive ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                  color: isActive ? kDarkTeal : Colors.grey.shade700,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: isActive ? kDarkTeal : Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$count',
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: isActive ? Colors.white : Colors.grey.shade700,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildTakeAwayRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Checkbox(
+            value: widget.isTakeAway,
+            onChanged: (value) => widget.onTakeAwayChanged(value ?? false),
+          ),
+          GestureDetector(
+            onTap: () => widget.onTakeAwayChanged(!widget.isTakeAway),
+            child: const Text('Bungkus'),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.search_off, size: 48, color: Colors.grey.shade400),
+          const SizedBox(height: 12),
+          Text(
+            _searchQuery.isNotEmpty
+                ? 'Tidak ada menu "$_searchQuery"'
+                : 'Tidak ada menu dalam kategori ini',
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              color: Colors.grey.shade500,
+            ),
+          ),
+        ],
       ),
     );
   }

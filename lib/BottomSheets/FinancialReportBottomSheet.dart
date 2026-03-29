@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:point_of_sales_app_v3/BottomSheets/QuickExpenseBottomSheet.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class FinancialReportBottomSheet extends StatefulWidget {
@@ -19,15 +20,18 @@ class _FinancialReportBottomSheetState
   final _qrisController = TextEditingController();
   final _onlineController = TextEditingController();
 
-  final List<_ExpenseEntry> _expenses = [_ExpenseEntry()];
-
   int? _systemTotal;
   bool _isLoadingTotal = true;
+
+  // Expenses fetched from Firestore
+  List<Map<String, dynamic>> _todayExpenses = [];
+  bool _isLoadingExpenses = true;
 
   @override
   void initState() {
     super.initState();
     _fetchSystemTotal();
+    _fetchTodayExpenses();
   }
 
   @override
@@ -35,9 +39,6 @@ class _FinancialReportBottomSheetState
     _cashController.dispose();
     _qrisController.dispose();
     _onlineController.dispose();
-    for (var e in _expenses) {
-      e.dispose();
-    }
     super.dispose();
   }
 
@@ -68,15 +69,48 @@ class _FinancialReportBottomSheetState
     }
   }
 
+  Future<void> _fetchTodayExpenses() async {
+    try {
+      final today = DateTime.now();
+      final startOfDay = DateTime(today.year, today.month, today.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+
+      final snap = await FirebaseFirestore.instance
+          .collection(Col.name('Expenses'))
+          .where('timestamp',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+          .where('timestamp', isLessThan: Timestamp.fromDate(endOfDay))
+          .orderBy('timestamp', descending: true)
+          .get();
+
+      if (mounted) {
+        setState(() {
+          _todayExpenses = snap.docs.map((d) => d.data()).toList();
+          _isLoadingExpenses = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _todayExpenses = [];
+          _isLoadingExpenses = false;
+        });
+      }
+    }
+  }
+
   String _maskRevenue(int value) {
     if (value == 0) return 'Rp 0';
-    final formatted =
-        NumberFormat.decimalPattern('id_ID').format(value);
+    final formatted = NumberFormat.decimalPattern('id_ID').format(value);
     if (formatted.length <= 1) return 'Rp $formatted';
 
     final first = formatted[0];
     final rest = formatted.substring(1).replaceAll(RegExp(r'[0-9]'), '*');
     return 'Rp $first$rest';
+  }
+
+  String _fmt(int value) {
+    return NumberFormat.decimalPattern('id_ID').format(value);
   }
 
   int _parseFormattedNumber(String text) {
@@ -99,6 +133,21 @@ class _FinancialReportBottomSheetState
     }),
   ];
 
+  // Compute expense totals from Firestore data
+  int get _expensesCash => _todayExpenses
+      .where((e) => e['sourceAccount'] == 'Cash')
+      .fold(0, (sum, e) => sum + ((e['amount'] ?? 0) as int));
+
+  int get _expensesQris => _todayExpenses
+      .where((e) => e['sourceAccount'] == 'QRIS')
+      .fold(0, (sum, e) => sum + ((e['amount'] ?? 0) as int));
+
+  int get _expensesOnline => _todayExpenses
+      .where((e) => e['sourceAccount'] == 'Online')
+      .fold(0, (sum, e) => sum + ((e['amount'] ?? 0) as int));
+
+  int get _expensesTotal => _expensesCash + _expensesQris + _expensesOnline;
+
   Future<void> _submitReport() async {
     final inputCash = _parseFormattedNumber(_cashController.text);
     final inputQris = _parseFormattedNumber(_qrisController.text);
@@ -106,57 +155,37 @@ class _FinancialReportBottomSheetState
 
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     final fs = FirebaseFirestore.instance;
-    final doc = await fs.collection(Col.name('DailyTransaction')).doc(today).get();
+    final doc =
+        await fs.collection(Col.name('DailyTransaction')).doc(today).get();
 
     final data = doc.data() ?? {};
     final grossCash = (data['totalCash'] ?? 0) as int;
     final grossQris = (data['totalQris'] ?? 0) as int;
     final grossOnline = (data['totalOnline'] ?? 0) as int;
 
-    // Parse explicitly mapped expenses and deduct per-account securely!
-    final validExpenses = _expenses.where((e) =>
-        e.categoryController.text.isNotEmpty &&
-        e.amountController.text.isNotEmpty).toList();
-
-    int expensesCash = 0;
-    int expensesQris = 0;
-    int expensesOnline = 0;
-
-    final parsedExpenses = <Map<String, dynamic>>[];
-    for (var e in validExpenses) {
-      final amount = _parseFormattedNumber(e.amountController.text);
-      final source = e.sourceAccount;
-      if (source == 'Cash') expensesCash += amount;
-      if (source == 'QRIS') expensesQris += amount;
-      if (source == 'Online') expensesOnline += amount;
-      
-      parsedExpenses.add({
-        'category': e.categoryController.text,
-        'canteenId': 'canteen375_plazaUnipdu', // Hardcoded for now, ideally should be dynamic
-        'amount': amount,
-        'sourceAccount': source,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-    }
+    final expensesCash = _expensesCash;
+    final expensesQris = _expensesQris;
+    final expensesOnline = _expensesOnline;
 
     final netExpectedCash = grossCash - expensesCash;
     final netExpectedQris = grossQris - expensesQris;
 
     final cashMatch = inputCash == netExpectedCash;
     final qrisMatch = inputQris == netExpectedQris;
-    // Online: delta is always auto-classified as platform commission
     final platformCommission = grossOnline - inputOnline;
-    const onlineMatch = true; // Never warn for Online
+    const onlineMatch = true;
     final allMatch = cashMatch && qrisMatch && onlineMatch;
 
     // Fetch previous day's closing balance for running saldo
-    final prevSnap = await fs.collection(Col.name('DailyTransaction'))
+    final prevSnap = await fs
+        .collection(Col.name('DailyTransaction'))
         .where(FieldPath.documentId, isLessThan: today)
         .orderBy(FieldPath.documentId, descending: true)
         .limit(1)
         .get();
 
-    final prevData = prevSnap.docs.isNotEmpty ? prevSnap.docs.first.data() : {};
+    final prevData =
+        prevSnap.docs.isNotEmpty ? prevSnap.docs.first.data() : {};
     final prevClosingCash = (prevData['closingCash'] ?? 0) as int;
     final prevClosingQris = (prevData['closingQris'] ?? 0) as int;
     final prevClosingOnline = (prevData['closingOnline'] ?? 0) as int;
@@ -164,9 +193,6 @@ class _FinancialReportBottomSheetState
     final discrepancyCash = (grossCash - expensesCash) - inputCash;
     final discrepancyQris = (grossQris - expensesQris) - inputQris;
 
-    // Closing = previous closing + actual income - expenses
-    // actualCash = inputCash (physical count), which already absorbs any discrepancy
-    // For online: actual received = grossOnline - platformCommission
     final closingCash = prevClosingCash + inputCash - expensesCash;
     final closingQris = prevClosingQris + inputQris - expensesQris;
     final closingOnline = prevClosingOnline + inputOnline - expensesOnline;
@@ -191,10 +217,10 @@ class _FinancialReportBottomSheetState
     );
 
     if (result == 'save' && mounted) {
-      final batch = fs.batch();
-      final reportRef = fs.collection(Col.name('DailyTransaction')).doc(today);
+      final reportRef =
+          fs.collection(Col.name('DailyTransaction')).doc(today);
 
-      batch.update(reportRef, {
+      await reportRef.update({
         'grossCash': grossCash,
         'grossQris': grossQris,
         'grossOnline': grossOnline,
@@ -212,14 +238,6 @@ class _FinancialReportBottomSheetState
         'closingOnline': closingOnline,
         'timestamp': FieldValue.serverTimestamp(),
       });
-
-      // Write strictly to the subcollection separating array limits
-      for (var expense in parsedExpenses) {
-        final expenseRef = fs.collection(Col.name('Expenses')).doc(); 
-        batch.set(expenseRef, expense);
-      }
-
-      await batch.commit();
 
       if (mounted) {
         Navigator.pop(context);
@@ -305,7 +323,7 @@ class _FinancialReportBottomSheetState
                   const SizedBox(height: 24),
                   _buildSection2IncomeInput(),
                   const SizedBox(height: 24),
-                  _buildSection3ExpenditureInput(),
+                  _buildSection3ExpensesSummary(),
                   const SizedBox(height: 32),
                   _buildSubmitButton(),
                   const SizedBox(height: 20),
@@ -429,146 +447,202 @@ class _FinancialReportBottomSheetState
     );
   }
 
-  Widget _buildSection3ExpenditureInput() {
+  Widget _buildSection3ExpensesSummary() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Pengeluaran Hari Ini',
-          style: GoogleFonts.poppins(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: Colors.black87,
-          ),
+        Row(
+          children: [
+            Text(
+              'Pengeluaran Hari Ini',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: () async {
+                await QuickExpenseBottomSheet.show(context);
+                // Refresh expenses after returning
+                _fetchTodayExpenses();
+              },
+              icon: const Icon(Icons.add_circle_outline, size: 18),
+              label: Text(
+                'Tambah',
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.orange.shade700,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 4),
-        Text(
-          'Tambahkan pengeluaran berdasarkan kategori',
-          style: GoogleFonts.poppins(
-            fontSize: 12,
-            color: Colors.grey.shade600,
-          ),
-        ),
-        const SizedBox(height: 16),
-        ..._expenses.asMap().entries.map((entry) {
-          final index = entry.key;
-          final expense = entry.value;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(12),
+        const SizedBox(height: 8),
+        if (_isLoadingExpenses)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          )
+        else if (_todayExpenses.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade300),
-              borderRadius: BorderRadius.circular(10),
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
             ),
             child: Column(
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: expense.categoryController,
-                        decoration: InputDecoration(
-                          labelText: 'Kategori (mis. Kerupuk)',
-                          labelStyle: GoogleFonts.poppins(fontSize: 13),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          isDense: true,
-                        ),
-                        style: GoogleFonts.poppins(fontSize: 14),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: _expenses.length > 1
-                          ? () {
-                              setState(() {
-                                _expenses[index].dispose();
-                                _expenses.removeAt(index);
-                              });
-                            }
-                          : null,
-                      icon: Icon(
-                        Icons.remove_circle,
-                        color: _expenses.length > 1
-                            ? Colors.red.shade400
-                            : Colors.grey.shade300,
-                      ),
-                    ),
-                  ],
+                Icon(Icons.receipt_long_outlined,
+                    size: 32, color: Colors.grey.shade400),
+                const SizedBox(height: 8),
+                Text(
+                  'Belum ada pengeluaran hari ini',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    color: Colors.grey.shade500,
+                  ),
                 ),
-                const SizedBox(height: 10),
+              ],
+            ),
+          )
+        else ...[
+          // Summary by source
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: Column(
+              children: [
+                _expenseSummaryRow(
+                    'Cash', _expensesCash, Icons.payments_outlined, Colors.green),
+                if (_expensesQris > 0) ...[
+                  const SizedBox(height: 6),
+                  _expenseSummaryRow(
+                      'QRIS', _expensesQris, Icons.qr_code_2, Colors.blue),
+                ],
+                if (_expensesOnline > 0) ...[
+                  const SizedBox(height: 6),
+                  _expenseSummaryRow(
+                      'Online', _expensesOnline, Icons.language, Colors.purple),
+                ],
+                const Divider(height: 16),
                 Row(
                   children: [
-                    Expanded(
-                      flex: 5,
-                      child: TextField(
-                        controller: expense.amountController,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: _currencyFormatter,
-                        decoration: InputDecoration(
-                          labelText: 'Jumlah (Rp)',
-                          labelStyle: GoogleFonts.poppins(fontSize: 13),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          isDense: true,
-                        ),
-                        style: GoogleFonts.poppins(fontSize: 14),
+                    Text(
+                      'Total Pengeluaran',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.orange.shade800,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 4,
-                      child: DropdownButtonFormField<String>(
-                        value: expense.sourceAccount,
-                        decoration: InputDecoration(
-                          labelText: 'Sumber Dana',
-                          labelStyle: GoogleFonts.poppins(fontSize: 13),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 12),
-                        ),
-                        items: ['Cash', 'QRIS', 'Online']
-                            .map((acc) => DropdownMenuItem(
-                                  value: acc,
-                                  child: Text(acc,
-                                      style: GoogleFonts.poppins(fontSize: 13)),
-                                ))
-                            .toList(),
-                        onChanged: (val) {
-                          if (val != null) {
-                            setState(() => expense.sourceAccount = val);
-                          }
-                        },
+                    const Spacer(),
+                    Text(
+                      'Rp ${_fmt(_expensesTotal)}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange.shade800,
                       ),
                     ),
                   ],
                 ),
               ],
             ),
-          );
-        }),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () {
-              setState(() {
-                _expenses.add(_ExpenseEntry());
-              });
-            },
-            icon: const Icon(Icons.add_circle_outline, size: 20),
-            label: Text(
-              'Tambah Pengeluaran',
-              style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          const SizedBox(height: 10),
+          // Individual expense items
+          ...List.generate(_todayExpenses.length, (i) {
+            final expense = _todayExpenses[i];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    _sourceIcon(expense['sourceAccount'] ?? 'Cash'),
+                    size: 16,
+                    color: Colors.grey.shade500,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      expense['category'] ?? '-',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'Rp ${_fmt((expense['amount'] ?? 0) as int)}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          Text(
+            '${_todayExpenses.length} pengeluaran tercatat',
+            style: GoogleFonts.poppins(
+              fontSize: 11,
+              color: Colors.grey.shade400,
             ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _expenseSummaryRow(
+      String label, int amount, IconData icon, Color color) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade700),
+        ),
+        const Spacer(),
+        Text(
+          'Rp ${_fmt(amount)}',
+          style: GoogleFonts.poppins(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: Colors.orange.shade700,
           ),
         ),
       ],
     );
+  }
+
+  IconData _sourceIcon(String source) {
+    switch (source) {
+      case 'QRIS':
+        return Icons.qr_code_2;
+      case 'Online':
+        return Icons.language;
+      default:
+        return Icons.payments_outlined;
+    }
   }
 
   Widget _buildSubmitButton() {
@@ -594,17 +668,6 @@ class _FinancialReportBottomSheetState
         ),
       ),
     );
-  }
-}
-
-class _ExpenseEntry {
-  final categoryController = TextEditingController();
-  final amountController = TextEditingController();
-  String sourceAccount = 'Cash';
-
-  void dispose() {
-    categoryController.dispose();
-    amountController.dispose();
   }
 }
 
