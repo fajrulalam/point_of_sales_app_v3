@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:point_of_sales_app_v3/Services/ShoppingService.dart';
+import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 class ShoppingScreen extends StatefulWidget {
   const ShoppingScreen({Key? key}) : super(key: key);
@@ -25,18 +27,40 @@ class _ShoppingScreenState extends State<ShoppingScreen> with SingleTickerProvid
       appBar: AppBar(
         title: Text(
           'Belanja',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.white),
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFF1A1A1A)),
         ),
-        backgroundColor: const Color(0xFF2E7D32),
-        foregroundColor: Colors.white,
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(icon: Icon(Icons.people), text: 'Daftar Supplier'),
-            Tab(icon: Icon(Icons.list_alt), text: 'Pesanan Belanja'),
-          ],
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A1A1A),
+        elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: const Color(0xFF1A1A1A),
+              unselectedLabelColor: Colors.grey.shade500,
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: const BoxDecoration(
+                color: Color(0xFFE8F5E9),
+                border: Border(
+                  bottom: BorderSide(
+                    color: Color(0xFF2E7D32),
+                    width: 3,
+                  ),
+                ),
+              ),
+              labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+              unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
+              tabs: const [
+                Tab(text: 'Daftar Supplier'),
+                Tab(text: 'Pesanan Belanja'),
+              ],
+            ),
+          ),
         ),
       ),
       body: TabBarView(
@@ -50,328 +74,613 @@ class _ShoppingScreenState extends State<ShoppingScreen> with SingleTickerProvid
   }
 }
 
-class SuppliersView extends StatelessWidget {
+class SuppliersView extends StatefulWidget {
   const SuppliersView({Key? key}) : super(key: key);
 
   @override
+  State<SuppliersView> createState() => _SuppliersViewState();
+}
+
+class _SuppliersViewState extends State<SuppliersView> {
+  String? _selectedSupplierId;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              ElevatedButton.icon(
-                onPressed: () => _showAddSupplierDialog(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Tambah Supplier'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2E7D32),
-                  foregroundColor: Colors.white,
+    return Container(
+      color: Colors.grey.shade100,
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Left Pane: Suppliers
+          SizedBox(
+            width: 280,
+            child: _buildSuppliersPane(),
+          ),
+          const SizedBox(width: 16),
+          // Right Pane: Items
+          Expanded(child: _buildItemsPane()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSuppliersPane() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          _buildSearchBar(),
+          _buildSuppliersHeader(),
+          Expanded(child: _buildSuppliersList()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (value) => setState(() => _searchQuery = value.toLowerCase()),
+        decoration: InputDecoration(
+          hintText: 'Cari nama barang...',
+          hintStyle: GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 14),
+          prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
+          filled: true,
+          fillColor: Colors.grey.shade50,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSuppliersHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            'SUPPLIERS',
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const Spacer(),
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, color: Colors.grey.shade600, size: 20),
+            onSelected: (value) {
+              if (value == 'add') {
+                _showAddSupplierDialog(context);
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'add',
+                child: Row(
+                  children: [
+                    Icon(Icons.add, size: 20),
+                    SizedBox(width: 8),
+                    Text('Tambah Supplier'),
+                  ],
                 ),
               ),
             ],
           ),
-        ),
-        Expanded(
-          child: StreamBuilder<List<Supplier>>(
-            stream: ShoppingService.getSuppliersStream(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('Error: ${snapshot.error}'));
-              }
-              final suppliers = snapshot.data ?? [];
-              if (suppliers.isEmpty) {
-                return const Center(child: Text('Belum ada supplier. Silahkan tambah.'));
-              }
+        ],
+      ),
+    );
+  }
 
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: suppliers.length,
-                itemBuilder: (context, index) {
-                  final supplier = suppliers[index];
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    child: ExpansionTile(
-                      title: Text(
-                        supplier.name,
-                        style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text('${supplier.items.length} Barang'),
-                      children: [
-                        ...supplier.items.map((item) => ListTile(
-                              dense: true,
-                              title: Text(item.name),
-                              subtitle: Text('Unit: ${item.unit}'),
-                              trailing: item.isPerishable
-                                  ? const Chip(
-                                      label: Text('Perishable', style: TextStyle(fontSize: 10)),
-                                      backgroundColor: Colors.orangeAccent,
-                                    )
-                                  : null,
-                            )),
-                        Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              TextButton.icon(
-                                onPressed: () => ShoppingService.deleteSupplier(supplier.id),
-                                icon: const Icon(Icons.delete, color: Colors.red),
-                                label: const Text('Hapus', style: TextStyle(color: Colors.red)),
-                              ),
-                              ElevatedButton.icon(
-                                onPressed: () => _showEditSupplierDialog(context, supplier),
-                                icon: const Icon(Icons.edit),
-                                label: const Text('Edit'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange,
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                              ElevatedButton.icon(
-                                onPressed: () => _showCreateOrderDialog(context, supplier),
-                                icon: const Icon(Icons.shopping_cart),
-                                label: const Text('Buat Pesanan'),
-                              ),
-                            ],
-                          ),
-                        )
-                      ],
+  Widget _buildSuppliersList() {
+    return StreamBuilder<List<Supplier>>(
+      stream: ShoppingService.getSuppliersStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final suppliers = snapshot.data ?? [];
+        if (suppliers.isEmpty) {
+          return Center(
+            child: Text('Belum ada supplier.', style: GoogleFonts.poppins(color: Colors.grey.shade500)),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: suppliers.length,
+          itemBuilder: (context, index) {
+            final supplier = suppliers[index];
+            final isSelected = _selectedSupplierId == supplier.id;
+
+            return InkWell(
+              onTap: () => setState(() => _selectedSupplierId = supplier.id),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: isSelected ? const Color(0xFFE8F5E9) : Colors.transparent,
+                  border: Border(
+                    left: BorderSide(
+                      color: isSelected ? const Color(0xFF2E7D32) : Colors.transparent,
+                      width: 3,
                     ),
-                  );
-                },
-              );
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        supplier.name,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                          color: isSelected ? const Color(0xFF1B5E20) : Colors.black87,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isSelected ? const Color(0xFF2E7D32) : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${supplier.items.length}',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isSelected ? Colors.white : Colors.grey.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildItemsPane() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: _selectedSupplierId == null
+          ? _buildNoSupplierSelected()
+          : _buildSupplierDetails(),
+    );
+  }
+
+  Widget _buildNoSupplierSelected() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inventory_2, size: 64, color: Colors.grey.shade300),
+          const SizedBox(height: 16),
+          Text(
+            'Pilih supplier untuk melihat item',
+            style: GoogleFonts.poppins(color: Colors.grey.shade500),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSupplierDetails() {
+    return StreamBuilder<List<Supplier>>(
+      stream: ShoppingService.getSuppliersStream(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox.shrink();
+        final suppliers = snapshot.data!;
+        final supplier = suppliers.firstWhere(
+          (s) => s.id == _selectedSupplierId,
+          orElse: () => Supplier(id: '', name: '', items: []),
+        );
+
+        if (supplier.id.isEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _selectedSupplierId != null) {
+              setState(() => _selectedSupplierId = null);
+            }
+          });
+          return const SizedBox.shrink();
+        }
+
+        List<SupplierItem> items = supplier.items;
+        if (_searchQuery.isNotEmpty) {
+          items = items.where((item) => item.name.toLowerCase().contains(_searchQuery)).toList();
+        }
+
+        return Column(
+          children: [
+            _buildItemsHeader(supplier),
+            Expanded(child: _buildItemsList(supplier, items)),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildItemsHeader(Supplier supplier) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            'ITEMS - ${supplier.name.toUpperCase()}',
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade600,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const Spacer(),
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, color: Colors.grey.shade600, size: 20),
+            onSelected: (value) {
+              if (value == 'add_item') {
+                _showAddOrEditItemDialog(context, supplier);
+              } else if (value == 'edit_supplier') {
+                _showEditSupplierNameDialog(context, supplier);
+              } else if (value == 'delete_supplier') {
+                _confirmDeleteSupplier(context, supplier);
+              } else if (value == 'create_order') {
+                _showCreateOrderDialog(context, supplier);
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'add_item',
+                child: Row(children: [Icon(Icons.add_box, size: 20), SizedBox(width: 8), Text('Tambah Barang')]),
+              ),
+              const PopupMenuItem(
+                value: 'create_order',
+                child: Row(children: [Icon(Icons.shopping_cart, size: 20), SizedBox(width: 8), Text('Buat Pesanan')]),
+              ),
+              const PopupMenuItem(
+                value: 'edit_supplier',
+                child: Row(children: [Icon(Icons.edit, size: 20), SizedBox(width: 8), Text('Edit Nama Supplier')]),
+              ),
+              PopupMenuItem(
+                value: 'delete_supplier',
+                child: Row(children: [Icon(Icons.delete, size: 20, color: Colors.red), SizedBox(width: 8), Text('Hapus Supplier', style: TextStyle(color: Colors.red))]),
+              ),
+            ],
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildItemsList(Supplier supplier, List<SupplierItem> items) {
+    if (items.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.inventory, size: 64, color: Colors.grey.shade300),
+            const SizedBox(height: 16),
+            Text(
+              _searchQuery.isNotEmpty ? 'Barang tidak ditemukan' : 'Belum ada barang di supplier ini',
+              style: GoogleFonts.poppins(color: Colors.grey.shade500),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return _buildItemCard(supplier, item);
+      },
+    );
+  }
+
+  Widget _buildItemCard(Supplier supplier, SupplierItem item) {
+    final originalIndex = supplier.items.indexOf(item);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.inventory_2, color: Color(0xFF2E7D32)),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text(
+                      'Unit: ${item.unit}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    if (item.isPerishable) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Perishable',
+                          style: GoogleFonts.poppins(fontSize: 10, color: Colors.deepOrange),
+                        ),
+                      )
+                    ]
+                  ],
+                ),
+              ],
+            ),
+          ),
+          OutlinedButton(
+            onPressed: () => _showAddOrEditItemDialog(context, supplier, editItem: item, itemIndex: originalIndex),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF2E7D32),
+              side: const BorderSide(color: Color(0xFF2E7D32)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Edit'),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: Icon(Icons.close, color: Colors.red.shade400),
+            tooltip: 'Hapus',
+            onPressed: () {
+              List<SupplierItem> updatedItems = List.from(supplier.items);
+              updatedItems.removeAt(originalIndex);
+              ShoppingService.updateSupplier(supplier.id, supplier.name, updatedItems);
             },
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   void _showAddSupplierDialog(BuildContext context) {
     final nameController = TextEditingController();
-    List<SupplierItem> items = [];
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final itemNameController = TextEditingController();
-          final itemUnitController = TextEditingController(text: 'pcs');
-          bool isPerishable = false;
-
-          return AlertDialog(
-            title: Text('Tambah Supplier', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-            content: SizedBox(
-              width: 500,
-              height: 400,
-              child: Column(
-                children: [
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(labelText: 'Nama Supplier', border: OutlineInputBorder()),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: itemNameController,
-                          decoration: const InputDecoration(labelText: 'Nama Barang', isDense: true),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 1,
-                        child: TextField(
-                          controller: itemUnitController,
-                          decoration: const InputDecoration(labelText: 'Unit', isDense: true),
-                        ),
-                      ),
-                      Checkbox(
-                        value: isPerishable,
-                        onChanged: (v) => setDialogState(() => isPerishable = v ?? false),
-                      ),
-                      const Text('Perish?'),
-                      IconButton(
-                        icon: const Icon(Icons.add_circle, color: Color(0xFF2E7D32)),
-                        onPressed: () {
-                          if (itemNameController.text.isNotEmpty) {
-                            setDialogState(() {
-                              items.add(SupplierItem(
-                                name: itemNameController.text,
-                                unit: itemUnitController.text,
-                                isPerishable: isPerishable,
-                              ));
-                              itemNameController.clear();
-                              itemUnitController.text = 'pcs';
-                              isPerishable = false;
-                            });
-                          }
-                        },
-                      )
-                    ],
-                  ),
-                  const Divider(),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: items.length,
-                      itemBuilder: (context, index) {
-                        return ListTile(
-                          title: Text(items[index].name),
-                          subtitle: Text('Unit: ${items[index].unit} | Perishable: ${items[index].isPerishable}\n(Tekan untuk mengedit)'),
-                          isThreeLine: true,
-                          onTap: () {
-                            setDialogState(() {
-                              itemNameController.text = items[index].name;
-                              itemUnitController.text = items[index].unit;
-                              isPerishable = items[index].isPerishable;
-                              items.removeAt(index);
-                            });
-                          },
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              setDialogState(() {
-                                items.removeAt(index);
-                              });
-                            },
-                          ),
-                        );
-                      },
-                    ),
-                  )
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
-              ElevatedButton(
-                onPressed: () async {
-                  if (nameController.text.isNotEmpty) {
-                    await ShoppingService.addSupplier(nameController.text, items);
-                    if (context.mounted) Navigator.pop(context);
-                  }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
-                child: const Text('Simpan'),
-              ),
-            ],
-          );
-        },
+      builder: (context) => AlertDialog(
+        title: Text('Tambah Supplier', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(labelText: 'Nama Supplier', border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameController.text.isNotEmpty) {
+                await ShoppingService.addSupplier(nameController.text, []);
+                if (context.mounted) Navigator.pop(context);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+            child: const Text('Simpan'),
+          ),
+        ],
       ),
     );
   }
 
-  void _showEditSupplierDialog(BuildContext context, Supplier supplier) {
+  void _showEditSupplierNameDialog(BuildContext context, Supplier supplier) {
     final nameController = TextEditingController(text: supplier.name);
-    List<SupplierItem> items = List.from(supplier.items);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Edit Nama Supplier', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(labelText: 'Nama Supplier', border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameController.text.isNotEmpty) {
+                await ShoppingService.updateSupplier(supplier.id, nameController.text, supplier.items);
+                if (context.mounted) Navigator.pop(context);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteSupplier(BuildContext context, Supplier supplier) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Hapus Supplier', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text('Apakah Anda yakin ingin menghapus supplier ${supplier.name}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () async {
+              await ShoppingService.deleteSupplier(supplier.id);
+              if (mounted) {
+                setState(() => _selectedSupplierId = null);
+                Navigator.pop(context);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddOrEditItemDialog(BuildContext context, Supplier supplier, {SupplierItem? editItem, int? itemIndex}) {
+    final nameController = TextEditingController(text: editItem?.name ?? '');
+    final unitController = TextEditingController(text: editItem?.unit ?? 'pcs');
+    bool isPerishable = editItem?.isPerishable ?? false;
+    String? linkedInventoryId = editItem?.inventoryItemId;
+
+    final inventoryItems = InventoryService().allInventoryItems.values.toList();
+    inventoryItems.sort((a, b) => a.name.compareTo(b.name));
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          final itemNameController = TextEditingController();
-          final itemUnitController = TextEditingController(text: 'pcs');
-          bool isPerishable = false;
-
           return AlertDialog(
-            title: Text('Edit Supplier', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-            content: SizedBox(
-              width: 500,
-              height: 400,
-              child: Column(
-                children: [
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(labelText: 'Nama Supplier', border: OutlineInputBorder()),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: itemNameController,
-                          decoration: const InputDecoration(labelText: 'Nama Barang', isDense: true),
-                        ),
+            title: Text(editItem == null ? 'Tambah Barang' : 'Edit Barang', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  decoration: const InputDecoration(labelText: 'Tautan Inventory (Opsional)', border: OutlineInputBorder()),
+                  value: linkedInventoryId,
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('Tidak ditautkan')),
+                    ...inventoryItems.map((inv) => DropdownMenuItem(
+                      value: inv.id,
+                      child: Text(inv.name),
+                    )),
+                  ],
+                  onChanged: (val) {
+                    setDialogState(() {
+                      linkedInventoryId = val;
+                      if (val != null) {
+                        final inv = inventoryItems.firstWhere((i) => i.id == val);
+                        nameController.text = inv.name;
+                        unitController.text = inv.unit.isEmpty ? 'pcs' : inv.unit;
+                        isPerishable = inv.isPerishable;
+                      }
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(labelText: 'Nama Barang', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: unitController,
+                        decoration: const InputDecoration(labelText: 'Unit', border: OutlineInputBorder()),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 1,
-                        child: TextField(
-                          controller: itemUnitController,
-                          decoration: const InputDecoration(labelText: 'Unit', isDense: true),
-                        ),
-                      ),
-                      Checkbox(
-                        value: isPerishable,
-                        onChanged: (v) => setDialogState(() => isPerishable = v ?? false),
-                      ),
-                      const Text('Perish?'),
-                      IconButton(
-                        icon: const Icon(Icons.add_circle, color: Color(0xFF2E7D32)),
-                        onPressed: () {
-                          if (itemNameController.text.isNotEmpty) {
-                            setDialogState(() {
-                              items.add(SupplierItem(
-                                name: itemNameController.text,
-                                unit: itemUnitController.text,
-                                isPerishable: isPerishable,
-                              ));
-                              itemNameController.clear();
-                              itemUnitController.text = 'pcs';
-                              isPerishable = false;
-                            });
-                          }
-                        },
-                      )
-                    ],
-                  ),
-                  const Divider(),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: items.length,
-                      itemBuilder: (context, index) {
-                        return ListTile(
-                          title: Text(items[index].name),
-                          subtitle: Text('Unit: ${items[index].unit} | Perishable: ${items[index].isPerishable}\n(Tekan untuk mengedit)'),
-                          isThreeLine: true,
-                          onTap: () {
-                            setDialogState(() {
-                              itemNameController.text = items[index].name;
-                              itemUnitController.text = items[index].unit;
-                              isPerishable = items[index].isPerishable;
-                              items.removeAt(index);
-                            });
-                          },
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              setDialogState(() {
-                                items.removeAt(index);
-                              });
-                            },
-                          ),
-                        );
-                      },
                     ),
-                  )
-                ],
-              ),
+                    const SizedBox(width: 16),
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: isPerishable,
+                          onChanged: (v) => setDialogState(() => isPerishable = v ?? false),
+                        ),
+                        const Text('Perishable'),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
             ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
               ElevatedButton(
                 onPressed: () async {
                   if (nameController.text.isNotEmpty) {
-                    await ShoppingService.updateSupplier(supplier.id, nameController.text, items);
+                    List<SupplierItem> updatedItems = List.from(supplier.items);
+                    final newItem = SupplierItem(
+                      name: nameController.text,
+                      unit: unitController.text,
+                      isPerishable: isPerishable,
+                      inventoryItemId: linkedInventoryId,
+                    );
+
+                    if (editItem == null) {
+                      updatedItems.add(newItem);
+                    } else if (itemIndex != null) {
+                      updatedItems[itemIndex] = newItem;
+                    }
+
+                    await ShoppingService.updateSupplier(supplier.id, supplier.name, updatedItems);
                     if (context.mounted) Navigator.pop(context);
                   }
                 },
@@ -444,6 +753,7 @@ class SuppliersView extends StatelessWidget {
                     quantity: qty,
                     unit: supplier.items[i].unit,
                     isPerishable: supplier.items[i].isPerishable,
+                    inventoryItemId: supplier.items[i].inventoryItemId,
                   ));
                 }
               }
@@ -453,10 +763,60 @@ class SuppliersView extends StatelessWidget {
                 return;
               }
 
-              await ShoppingService.createOrder(supplier.id, supplier.name, borderItems);
+              final ShoppingOrder newOrder = await ShoppingService.createOrder(supplier.id, supplier.name, borderItems);
               if (context.mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Order berhasil dibuat')));
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    title: Row(
+                      children: [
+                        const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+                        const SizedBox(width: 8),
+                        Text('Order Berhasil Dibuat', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ],
+                    ),
+                    content: Text(
+                      'Pesanan ke ${supplier.name} berhasil disimpan.\nIngin mengirim PDF ke WhatsApp?',
+                      style: GoogleFonts.poppins(fontSize: 14),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: Text('Lewati', style: GoogleFonts.poppins(color: Colors.grey)),
+                      ),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.send, size: 18),
+                        label: Text('Kirim ke WhatsApp', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF25D366),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          try {
+                            final pdfPath = await ShoppingService.saveOrderAsImage(newOrder);
+                            final orderMessage = newOrder.items
+                                .map((item) => '(${item.quantity}${item.unit}) ${item.name}')
+                                .join('\n');
+                            await Share.shareXFiles(
+                              [XFile(pdfPath, mimeType: 'image/jpeg')],
+                              text: orderMessage,
+                            );
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Gagal membagikan PDF: $e')),
+                              );
+                            }
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                );
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
@@ -556,7 +916,11 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                   final order = orders[index];
                   final dateStr = DateFormat('dd MMM yyyy HH:mm').format(order.date);
                   
-                  return Card(
+                  return GestureDetector(
+                    onLongPress: order.status != 'completed'
+                        ? () => _showDeleteOrderDialog(context, order)
+                        : null,
+                    child: Card(
                     margin: const EdgeInsets.only(bottom: 12),
                     color: order.status == 'completed' ? Colors.green.shade50 : Colors.white,
                     child: ExpansionTile(
@@ -577,10 +941,16 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
                               ElevatedButton.icon(
-                                onPressed: () => ShoppingService.generateOrderPdf(order),
-                                icon: const Icon(Icons.picture_as_pdf),
-                                label: const Text('PDF'),
+                                onPressed: () => ShoppingService.openOrderAsImage(order),
+                                icon: const Icon(Icons.image),
+                                label: const Text('Gambar'),
                                 style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () => _shareOrder(context, order),
+                                icon: const Icon(Icons.send),
+                                label: const Text('Share'),
+                                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366), foregroundColor: Colors.white),
                               ),
                               if (order.status != 'completed') ...[
                                 ElevatedButton.icon(
@@ -601,6 +971,7 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                         )
                       ],
                     ),
+                    ),
                   );
                 },
               );
@@ -609,6 +980,69 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
         ),
       ],
     );
+  }
+
+  void _showDeleteOrderDialog(BuildContext context, ShoppingOrder order) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_outline, color: Colors.red),
+            const SizedBox(width: 8),
+            Text('Hapus Pesanan?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(
+          'Pesanan ke ${order.supplierName} akan dihapus secara permanen.',
+          style: GoogleFonts.poppins(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.delete, size: 18),
+            label: Text('Hapus', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await ShoppingService.deleteOrder(order.id);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Pesanan berhasil dihapus')),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _shareOrder(BuildContext context, ShoppingOrder order) async {
+    try {
+      final pdfPath = await ShoppingService.saveOrderAsImage(order);
+      final orderMessage = order.items
+          .map((item) => '(${item.quantity}${item.unit}) ${item.name}')
+          .join('\n');
+      await Share.shareXFiles(
+        [XFile(pdfPath, mimeType: 'image/jpeg')],
+        text: orderMessage,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal membagikan PDF: $e')),
+        );
+      }
+    }
   }
 
   void _showCorrectionDialog(BuildContext context, ShoppingOrder order) {
@@ -666,6 +1100,7 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                   quantity: qty,
                   unit: order.items[i].unit,
                   isPerishable: order.items[i].isPerishable,
+                  inventoryItemId: order.items[i].inventoryItemId,
                 ));
               }
 

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,32 +22,73 @@ class EndOfDayService {
       }
 
       final metadataRef = _firestore
-          .collection('Canteens')
+          .collection(Col.name('Canteens'))
           .doc(canteenId)
           .collection('Metadata')
           .doc('InventoryLogs');
 
-      final doc = await metadataRef.get();
       final today = _getTodayDateString();
-      
-      if (doc.exists) {
-        final lastResetDate = doc.data()?['last_reset_date'] as String?;
-        if (lastResetDate == today) {
-          print('✅ Perishables already reset for today ($today)');
-          return;
-        }
-      }
 
-      // If we're here, either it's the first time or target date is reached
-      print('🔄 Triggering automated perishable reset for $today');
-      await autoResetPerishables();
+      // Fetch perishables first because query cannot be done inside transaction
+      final perishablesSnapshot = await _firestore
+          .collection(Col.name('Canteens'))
+          .doc(canteenId)
+          .collection('Inventory')
+          .where('isPerishable', isEqualTo: true)
+          .get();
+
+      if (perishablesSnapshot.docs.isEmpty) return;
+
+      await _firestore.runTransaction((transaction) async {
+        final metadataDoc = await transaction.get(metadataRef);
+        
+        // Ensure data() is not null before checking field
+        if (metadataDoc.exists && metadataDoc.data() != null) {
+          final lastResetDate = metadataDoc.data()!['last_reset_date'] as String?;
+          if (lastResetDate == today) {
+            print('✅ Perishables already reset for today ($today)');
+            return; // Abort silently if already reset by another device
+          }
+        }
+
+        print('🔄 Triggering automated perishable reset for $today via Transaction');
+
+        for (var doc in perishablesSnapshot.docs) {
+          final data = doc.data();
+          final int currentStock = (data['stock'] ?? 0) as int;
+          final itemName = data['name'] ?? '';
+
+          if (currentStock > 0) {
+            // Fix Fragile logId Generation: use doc.id instead of itemName
+            final logId = '${today}_${doc.id}';
+            final logRef = _firestore
+                .collection(Col.name('Canteens'))
+                .doc(canteenId)
+                .collection('DailyStockLogs')
+                .doc(logId);
+
+            transaction.set(logRef, {
+              'date': today,
+              'inventoryItemId': doc.id,
+              'inventoryItemName': itemName,
+              'isPerishable': true,
+              'stockWasted': currentStock,
+              'endingStock': 0,
+              'lastUpdated': FieldValue.serverTimestamp(),
+              'autoReset': true,
+            }, SetOptions(merge: true));
+
+            transaction.update(doc.reference, {'stock': 0});
+          }
+        }
+
+        transaction.set(metadataRef, {
+          'last_reset_date': today,
+          'last_updated': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      });
       
-      // Update the last reset date
-      await metadataRef.set({
-        'last_reset_date': today,
-        'last_updated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      
+      print('✅ Auto-reset perishables completed safely for $today');
     } catch (e) {
       print('❌ Error in checkAndAutoResetPerishables: $e');
     }
@@ -59,7 +101,7 @@ class EndOfDayService {
 
     // Get all perishable items
     final perishablesSnapshot = await _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('Inventory')
         .where('isPerishable', isEqualTo: true)
@@ -93,67 +135,7 @@ class EndOfDayService {
     }
   }
 
-  /// Automatically reset perishables at end of day (to be called by scheduler)
-  static Future<void> autoResetPerishables() async {
-    try {
-      final perishablesSnapshot = await _firestore
-          .collection('Canteens')
-          .doc(canteenId)
-          .collection('Inventory')
-          .where('isPerishable', isEqualTo: true)
-          .get();
 
-      final batch = _firestore.batch();
-      final today = _getTodayDateString();
-
-      for (var doc in perishablesSnapshot.docs) {
-        final data = doc.data();
-        final int currentStock = (data['stock'] ?? 0) as int;
-        final itemName = data['name'] ?? '';
-
-        if (currentStock > 0) {
-          // Log the waste
-          final logId = '${today}_$itemName';
-          final logRef = _firestore
-              .collection('Canteens')
-              .doc(canteenId)
-              .collection('DailyStockLogs')
-              .doc(logId);
-
-          batch.set(logRef, {
-            'date': today,
-            'inventoryItemId': doc.id,
-            'inventoryItemName': itemName,
-            'isPerishable': true,
-            'stockWasted': currentStock,
-            'endingStock': 0,
-            'lastUpdated': FieldValue.serverTimestamp(),
-            'autoReset': true,
-          }, SetOptions(merge: true));
-
-          // Reset stock to 0
-          batch.update(doc.reference, {'stock': 0});
-        }
-      }
-
-      await batch.commit();
-      
-      // Update the last reset date metadata so we don't auto-reset again today
-      await _firestore
-          .collection('Canteens')
-          .doc(canteenId)
-          .collection('Metadata')
-          .doc('InventoryLogs')
-          .set({
-        'last_reset_date': today,
-        'last_updated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      
-      print('✅ Auto-reset perishables completed for $today');
-    } catch (e) {
-      print('❌ Error auto-resetting perishables: $e');
-    }
-  }
 
   /// Helper to get today's date as string
   static String _getTodayDateString() {
@@ -202,12 +184,12 @@ class _EndOfDayDialogState extends State<_EndOfDayDialog> {
 
       for (var item in widget.perishables) {
         final inputWaste = int.tryParse(_controllers[item.id]!.text) ?? 0;
-        final actualWaste = inputWaste;
+        final actualWaste = inputWaste < 0 ? 0 : inputWaste; // Prevent negative inputs
 
-        // Log the waste
-        final logId = '${today}_${item.name}';
+        // Log the waste using unique ID
+        final logId = '${today}_${item.id}';
         final logRef = FirebaseFirestore.instance
-            .collection('Canteens')
+            .collection(Col.name('Canteens'))
             .doc(EndOfDayService.canteenId)
             .collection('DailyStockLogs')
             .doc(logId);
@@ -224,7 +206,7 @@ class _EndOfDayDialogState extends State<_EndOfDayDialog> {
 
         // Reset stock to 0
         final itemRef = FirebaseFirestore.instance
-            .collection('Canteens')
+            .collection(Col.name('Canteens'))
             .doc(EndOfDayService.canteenId)
             .collection('Inventory')
             .doc(item.id);
@@ -239,7 +221,7 @@ class _EndOfDayDialogState extends State<_EndOfDayDialog> {
 
       // Update the last reset date metadata so auto-reset doesn't trigger today
       await FirebaseFirestore.instance
-          .collection('Canteens')
+          .collection(Col.name('Canteens'))
           .doc(EndOfDayService.canteenId)
           .collection('Metadata')
           .doc('InventoryLogs')

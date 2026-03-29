@@ -1,17 +1,22 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:point_of_sales_app_v3/Classes/Assets.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
+import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
+import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/AddOrEditMenu.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class MenuManagementWidget extends StatefulWidget {
   final List<MenuObject> menuObjectList_makanan;
   final List<MenuObject> menuObjectList_minuman;
   final List<AssetsObject> listGambar;
   final List<String> categoryOrder;
+  final Function(AssetsObject)? onDeleteCatalogImage;
 
   const MenuManagementWidget({
     Key? key,
@@ -19,6 +24,7 @@ class MenuManagementWidget extends StatefulWidget {
     required this.menuObjectList_minuman,
     required this.listGambar,
     this.categoryOrder = const [],
+    this.onDeleteCatalogImage,
   }) : super(key: key);
 
   @override
@@ -35,11 +41,19 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
   String _searchQuery = '';
   String _optionSearchQuery = '';
   final _optionGroupService = OptionGroupService();
+  Timer? _debounceTimer;
+  Timer? _optionDebounceTimer;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadInventory();
+  }
+
+  Future<void> _loadInventory() async {
+    await InventoryService().refreshInventoryCache();
+    if (mounted) setState(() {});
   }
 
   @override
@@ -47,16 +61,30 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
     _tabController.dispose();
     _searchController.dispose();
     _optionSearchController.dispose();
+    _debounceTimer?.cancel();
+    _optionDebounceTimer?.cancel();
     super.dispose();
   }
 
   List<MenuObject> get _allMenuItems =>
       [...widget.menuObjectList_makanan, ...widget.menuObjectList_minuman];
 
+  List<MenuObject> get _allFilteredMenuItems {
+    if (_searchQuery.isEmpty) return _allMenuItems;
+    return _allMenuItems.where((item) {
+      return item.namaMenu.toLowerCase().contains(_searchQuery) ||
+          item.category.toLowerCase().contains(_searchQuery);
+    }).toList();
+  }
+
   Map<String, List<MenuObject>> get _groupedByCategory {
     final grouped = <String, List<MenuObject>>{};
     for (var item in _allMenuItems) {
       grouped.putIfAbsent(item.category, () => []).add(item);
+    }
+    // Sort items within each category by sortOrder
+    for (var key in grouped.keys) {
+      grouped[key]!.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     }
     return grouped;
   }
@@ -72,6 +100,34 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       return a.compareTo(b);
     });
     return categories;
+  }
+
+  Map<String, List<MenuObject>> get _filteredGroupedByCategory {
+    if (_searchQuery.isEmpty) return _groupedByCategory;
+
+    final filteredMap = <String, List<MenuObject>>{};
+    _groupedByCategory.forEach((category, items) {
+      final filteredItems = items.where((item) {
+        return item.namaMenu.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+            item.category.toLowerCase().contains(_searchQuery.toLowerCase());
+      }).toList();
+      filteredMap[category] = filteredItems;
+    });
+    return filteredMap;
+  }
+
+  void _onSearchChanged(String value) {
+    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) setState(() => _searchQuery = value.toLowerCase());
+    });
+  }
+
+  void _onOptionSearchChanged(String value) {
+    if (_optionDebounceTimer?.isActive ?? false) _optionDebounceTimer!.cancel();
+    _optionDebounceTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) setState(() => _optionSearchQuery = value.toLowerCase());
+    });
   }
 
   @override
@@ -100,12 +156,20 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       color: Colors.white,
       child: TabBar(
         controller: _tabController,
-        labelColor: const Color(0xFF1A1A1A),
-        unselectedLabelColor: Colors.grey.shade500,
-        indicatorColor: const Color(0xFF2E7D32),
-        indicatorWeight: 3,
-        labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
-        unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
+      labelColor: const Color(0xFF1A1A1A),
+      unselectedLabelColor: Colors.grey.shade500,
+      indicatorSize: TabBarIndicatorSize.tab,
+      indicator: const BoxDecoration(
+        color: Color(0xFFE8F5E9),
+        border: Border(
+          bottom: BorderSide(
+            color: Color(0xFF2E7D32),
+            width: 3,
+          ),
+        ),
+      ),
+      labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+      unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
         tabs: const [
           Tab(text: 'MENU OVERVIEW'),
           Tab(text: 'OPTION GROUPS'),
@@ -151,9 +215,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       ),
       child: Column(
         children: [
-          _buildSearchBar(_searchController, 'Cari nama menu...', (value) {
-            setState(() => _searchQuery = value.toLowerCase());
-          }),
+          _buildSearchBar(_searchController, 'Cari nama menu...', _onSearchChanged),
           _buildCategoryHeader(),
           Expanded(child: _buildCategoryList()),
         ],
@@ -172,6 +234,15 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
           hintText: hint,
           hintStyle: GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 14),
           prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
+          suffixIcon: controller.text.isNotEmpty
+              ? IconButton(
+                  icon: Icon(Icons.clear, color: Colors.grey.shade400),
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                  },
+                )
+              : null,
           filled: true,
           fillColor: Colors.grey.shade50,
           border: OutlineInputBorder(
@@ -249,7 +320,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       itemCount: categories.length,
       itemBuilder: (context, index) {
         final category = categories[index];
-        final itemCount = _groupedByCategory[category]?.length ?? 0;
+        final itemCount = _filteredGroupedByCategory[category]?.length ?? 0;
         final isSelected = _selectedCategory == category;
 
         return InkWell(
@@ -347,30 +418,56 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                 _addOrEditMenu(context, query: 'add', makananOrMinuman: 'Makanan');
               } else if (value == 'add_minuman') {
                 _addOrEditMenu(context, query: 'add', makananOrMinuman: 'Minuman');
+              } else if (value == 'reorder_items') {
+                _showItemReorderDialog();
               }
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'add_makanan',
-                child: Row(
-                  children: [
-                    Icon(Icons.restaurant, size: 20),
-                    SizedBox(width: 8),
-                    Text('Tambah Makanan'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'add_minuman',
-                child: Row(
-                  children: [
-                    Icon(Icons.local_cafe, size: 20),
-                    SizedBox(width: 8),
-                    Text('Tambah Minuman'),
-                  ],
-                ),
-              ),
-            ],
+            itemBuilder: (context) {
+              // Determine if selected category is all Makanan or all Minuman
+              bool? categoryIsMakanan;
+              if (_selectedCategory != null) {
+                final categoryItems = _groupedByCategory[_selectedCategory] ?? [];
+                if (categoryItems.isNotEmpty) {
+                  categoryIsMakanan = categoryItems.first.isMakanan;
+                }
+              }
+
+              return [
+                if (_selectedCategory != null)
+                  const PopupMenuItem(
+                    value: 'reorder_items',
+                    child: Row(
+                      children: [
+                        Icon(Icons.swap_vert, size: 20),
+                        SizedBox(width: 8),
+                        Text('Atur Urutan'),
+                      ],
+                    ),
+                  ),
+                if (categoryIsMakanan != false)
+                  const PopupMenuItem(
+                    value: 'add_makanan',
+                    child: Row(
+                      children: [
+                        Icon(Icons.restaurant, size: 20),
+                        SizedBox(width: 8),
+                        Text('Tambah Makanan'),
+                      ],
+                    ),
+                  ),
+                if (categoryIsMakanan != true)
+                  const PopupMenuItem(
+                    value: 'add_minuman',
+                    child: Row(
+                      children: [
+                        Icon(Icons.local_cafe, size: 20),
+                        SizedBox(width: 8),
+                        Text('Tambah Minuman'),
+                      ],
+                    ),
+                  ),
+              ];
+            },
           ),
         ],
       ),
@@ -379,18 +476,11 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
   Widget _buildItemsList() {
     List<MenuObject> items;
-    
-    if (_selectedCategory != null) {
-      items = _groupedByCategory[_selectedCategory] ?? [];
-    } else {
-      items = _allMenuItems;
-    }
 
-    if (_searchQuery.isNotEmpty) {
-      items = items.where((item) {
-        return item.namaMenu.toLowerCase().contains(_searchQuery) ||
-            item.category.toLowerCase().contains(_searchQuery);
-      }).toList();
+    if (_selectedCategory != null) {
+      items = _filteredGroupedByCategory[_selectedCategory] ?? [];
+    } else {
+      items = _allFilteredMenuItems;
     }
 
     if (items.isEmpty) {
@@ -419,6 +509,10 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
   }
 
   Widget _buildItemCard(MenuObject item) {
+    final isPortrait = item.imageAspectRatio == '3:4';
+    final imgWidth = 72.0;
+    final imgHeight = isPortrait ? 96.0 : 72.0;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
@@ -433,8 +527,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Container(
-              width: 72,
-              height: 72,
+              width: imgWidth,
+              height: imgHeight,
               color: Colors.grey.shade100,
               child: item.imagePath != 'tidak ada'
                   ? CachedNetworkImage(
@@ -467,7 +561,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                         ),
                       ),
                     ),
-                    if (item.isFeatured)
+                    if (item.isRecommended)
                       Icon(Icons.star, color: Colors.amber.shade600, size: 20),
                   ],
                 ),
@@ -480,10 +574,10 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                     color: const Color(0xFF2E7D32),
                   ),
                 ),
-                if (item.description.isNotEmpty) ...[
+                if (item.menuDescription.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
-                    item.description,
+                    item.menuDescription,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.poppins(
@@ -585,9 +679,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               ),
             ),
           ),
-          _buildSearchBar(_optionSearchController, 'Search by option group name', (value) {
-            setState(() => _optionSearchQuery = value.toLowerCase());
-          }),
+          _buildSearchBar(_optionSearchController, 'Search by option group name', _onOptionSearchChanged),
           _buildOptionGroupsHeader(),
           Expanded(child: _buildOptionGroupsList()),
         ],
@@ -807,6 +899,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                 group.statusLabel,
                 group.isRequired ? Colors.red : Colors.green,
               ),
+              _buildSelectionRuleBadge(group),
               if (group.linkedMenuItems.isNotEmpty)
                 _buildLinkedToBadge(group.linkedMenuItems),
             ],
@@ -830,6 +923,36 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
           fontSize: 12,
           fontWeight: FontWeight.w500,
           color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectionRuleBadge(OptionGroup group) {
+    String label;
+    if (group.minSelection > 0 && group.maxSelection > 0 && group.minSelection == group.maxSelection) {
+      label = 'Pilih tepat ${group.minSelection}';
+    } else if (group.minSelection > 0 && group.maxSelection == 0) {
+      label = 'Pilih minimal ${group.minSelection}';
+    } else if (group.minSelection == 0 && group.maxSelection > 0) {
+      label = 'Pilih maksimal ${group.maxSelection}';
+    } else {
+      label = 'Bebas pilih';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.poppins(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: Colors.orange.shade800,
         ),
       ),
     );
@@ -868,7 +991,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
     final names = <String>[];
     for (final id in menuIds) {
       final doc = await FirebaseFirestore.instance
-          .collection('Canteens')
+          .collection(Col.name('Canteens'))
           .doc('canteen375')
           .collection('MenuCollection')
           .doc(id)
@@ -946,14 +1069,54 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      option.formattedPrice,
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        color: option.priceAdjustment > 0
-                            ? const Color(0xFF2E7D32)
-                            : Colors.grey.shade600,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          option.formattedPrice,
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            color: option.priceAdjustment > 0
+                                ? const Color(0xFF2E7D32)
+                                : option.priceAdjustment < 0
+                                    ? const Color(0xFFE65100)
+                                    : Colors.grey.shade600,
+                          ),
+                        ),
+                        if (option.ingredients.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE3F2FD),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.inventory_2_outlined, size: 12, color: Colors.blue.shade700),
+                                  const SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                      option.ingredients.map((ing) {
+                                        final item = InventoryService().allInventoryItems[ing.inventoryItemId];
+                                        return item != null ? item.name : 'Unknown';
+                                      }).join(', '),
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 11,
+                                        color: Colors.blue.shade700,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
@@ -1001,6 +1164,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
         makananOrMinuman: makananOrMinuman,
         menuObject: menuObject,
         listGambar: widget.listGambar,
+        onDeleteCatalogImage: widget.onDeleteCatalogImage,
       ),
     );
   }
@@ -1029,13 +1193,28 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
     );
   }
 
-  void _deleteMenu(String menuId) {
-    FirebaseFirestore.instance
-        .collection('Canteens')
-        .doc('canteen375')
-        .collection('MenuCollection')
-        .doc(menuId)
-        .delete();
+  void _deleteMenu(String menuId) async {
+    final firestore = FirebaseFirestore.instance;
+    final canteenDoc = firestore.collection(Col.name('Canteens')).doc('canteen375');
+
+    // 1. Delete the Menu
+    await canteenDoc.collection('MenuCollection').doc(menuId).delete();
+
+    // 2. Scrub the menuId from all Option Groups to prevent Ghost Links
+    final linkedGroups = await canteenDoc
+        .collection('OptionGroups')
+        .where('linkedMenuItems', arrayContains: menuId)
+        .get();
+
+    if (linkedGroups.docs.isNotEmpty) {
+      WriteBatch batch = firestore.batch();
+      for (var groupDoc in linkedGroups.docs) {
+        batch.update(groupDoc.reference, {
+          'linkedMenuItems': FieldValue.arrayRemove([menuId]),
+        });
+      }
+      await batch.commit();
+    }
   }
 
   void _showCategoryReorderDialog() {
@@ -1076,7 +1255,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             ElevatedButton(
               onPressed: () async {
                 await FirebaseFirestore.instance
-                    .collection('Canteens')
+                    .collection(Col.name('Canteens'))
                     .doc('canteen375')
                     .collection('Metadata')
                     .doc('MenuConfig')
@@ -1084,6 +1263,119 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                 Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+              child: const Text('Simpan', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showItemReorderDialog() {
+    if (_selectedCategory == null) return;
+
+    final items = List<MenuObject>.from(
+      _groupedByCategory[_selectedCategory] ?? [],
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(
+            'Atur Urutan: $_selectedCategory',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+          ),
+          content: SizedBox(
+            width: 400,
+            height: 400,
+            child: items.isEmpty
+                ? Center(
+                    child: Text(
+                      'Tidak ada item di kategori ini',
+                      style: GoogleFonts.poppins(color: Colors.grey),
+                    ),
+                  )
+                : ReorderableListView.builder(
+                    itemCount: items.length,
+                    onReorder: (oldIndex, newIndex) {
+                      setDialogState(() {
+                        if (newIndex > oldIndex) newIndex--;
+                        final item = items.removeAt(oldIndex);
+                        items.insert(newIndex, item);
+                      });
+                    },
+                    itemBuilder: (context, index) {
+                      final item = items[index];
+                      return ListTile(
+                        key: Key(item.id),
+                        leading: const Icon(Icons.drag_handle),
+                        title: Text(
+                          item.namaMenu,
+                          style: GoogleFonts.poppins(fontSize: 14),
+                        ),
+                        subtitle: Text(
+                          'Rp${_formatCurrency(item.harga)}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            color: const Color(0xFF2E7D32),
+                          ),
+                        ),
+                        trailing: Text(
+                          '${index + 1}',
+                          style: GoogleFonts.poppins(
+                            color: Colors.grey,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final firestore = FirebaseFirestore.instance;
+                final batch = firestore.batch();
+                final collection = firestore
+                    .collection(Col.name('Canteens'))
+                    .doc('canteen375')
+                    .collection('MenuCollection');
+
+                for (int i = 0; i < items.length; i++) {
+                  batch.update(
+                    collection.doc(items[i].id),
+                    {'sortOrder': i},
+                  );
+                  // Update local model too
+                  items[i].sortOrder = i;
+                }
+
+                await batch.commit();
+                if (mounted) setState(() {});
+                Navigator.pop(context);
+
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Urutan item di $_selectedCategory berhasil disimpan',
+                      style: GoogleFonts.poppins(),
+                    ),
+                    backgroundColor: const Color(0xFF2E7D32),
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+              ),
               child: const Text('Simpan', style: TextStyle(color: Colors.white)),
             ),
           ],
@@ -1115,7 +1407,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               if (controller.text.isNotEmpty) {
                 final newOrder = [...widget.categoryOrder, controller.text];
                 await FirebaseFirestore.instance
-                    .collection('Canteens')
+                    .collection(Col.name('Canteens'))
                     .doc('canteen375')
                     .collection('Metadata')
                     .doc('MenuConfig')
@@ -1133,32 +1425,115 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
   void _showCreateOptionGroupDialog() {
     final nameController = TextEditingController();
+    final valueController = TextEditingController(text: '1');
     bool isRequired = false;
+    String? selectionRule;
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text('Buat Option Group Baru', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nama Group',
-                  hintText: 'Contoh: Tambah Mie, Level Pedas',
-                  border: OutlineInputBorder(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Group',
+                    hintText: 'Contoh: Tambah Mie, Level Pedas',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              SwitchListTile(
-                title: const Text('Wajib dipilih'),
-                subtitle: const Text('Pelanggan harus memilih salah satu'),
-                value: isRequired,
-                onChanged: (v) => setDialogState(() => isRequired = v),
-              ),
-            ],
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Wajib dipilih'),
+                  subtitle: const Text('Pelanggan harus memilih salah satu'),
+                  value: isRequired,
+                  onChanged: (v) => setDialogState(() => isRequired = v),
+                ),
+                const Divider(),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Aturan Pemilihan',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Biarkan tidak dipilih jika pelanggan bebas memilih berapa saja.',
+                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Minimal'),
+                      selected: selectionRule == 'at_least',
+                      selectedColor: const Color(0xFFE8F5E9),
+                      onSelected: (selected) {
+                        setDialogState(() {
+                          selectionRule = selected ? 'at_least' : null;
+                        });
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('Tepat'),
+                      selected: selectionRule == 'exactly',
+                      selectedColor: const Color(0xFFE8F5E9),
+                      onSelected: (selected) {
+                        setDialogState(() {
+                          selectionRule = selected ? 'exactly' : null;
+                        });
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('Maksimal'),
+                      selected: selectionRule == 'at_most',
+                      selectedColor: const Color(0xFFE8F5E9),
+                      onSelected: (selected) {
+                        setDialogState(() {
+                          selectionRule = selected ? 'at_most' : null;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+                if (selectionRule != null) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Text(
+                        selectionRule == 'at_least'
+                            ? 'Pilih minimal'
+                            : selectionRule == 'exactly'
+                                ? 'Pilih tepat'
+                                : 'Pilih maksimal',
+                        style: GoogleFonts.poppins(fontSize: 14),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 60,
+                        child: TextField(
+                          controller: valueController,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text('opsi', style: GoogleFonts.poppins(fontSize: 14)),
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -1168,10 +1543,27 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             ElevatedButton(
               onPressed: () async {
                 if (nameController.text.isNotEmpty) {
+                  int minSel = 0;
+                  int maxSel = 0;
+                  final val = int.tryParse(valueController.text) ?? 1;
+
+                  if (selectionRule == 'at_least') {
+                    minSel = val;
+                    maxSel = 0;
+                  } else if (selectionRule == 'exactly') {
+                    minSel = val;
+                    maxSel = val;
+                  } else if (selectionRule == 'at_most') {
+                    minSel = 0;
+                    maxSel = val;
+                  }
+
                   await _optionGroupService.createOptionGroup(OptionGroup(
                     id: '',
                     name: nameController.text,
                     isRequired: isRequired,
+                    minSelection: minSel,
+                    maxSelection: maxSel,
                   ));
                 }
                 Navigator.pop(context);
@@ -1189,40 +1581,138 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
     final nameController = TextEditingController(text: group.name);
     bool isRequired = group.isRequired;
 
+    // Derive the current rule from minSelection/maxSelection
+    String? selectionRule;
+    int selectionValue = 1;
+    if (group.minSelection > 0 && group.maxSelection > 0 && group.minSelection == group.maxSelection) {
+      selectionRule = 'exactly';
+      selectionValue = group.minSelection;
+    } else if (group.minSelection > 0 && group.maxSelection == 0) {
+      selectionRule = 'at_least';
+      selectionValue = group.minSelection;
+    } else if (group.minSelection == 0 && group.maxSelection > 0) {
+      selectionRule = 'at_most';
+      selectionValue = group.maxSelection;
+    }
+    // else: no rule (both 0)
+
+    final valueController = TextEditingController(text: selectionValue.toString());
+
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text('Edit Option Group', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nama Group',
-                  border: OutlineInputBorder(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Group',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              SwitchListTile(
-                title: const Text('Wajib dipilih'),
-                value: isRequired,
-                onChanged: (v) => setDialogState(() => isRequired = v),
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _showLinkMenuItemsDialog(group);
-                },
-                icon: const Icon(Icons.link),
-                label: const Text('Kelola Link Menu Items'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.blue,
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Wajib dipilih'),
+                  value: isRequired,
+                  onChanged: (v) => setDialogState(() => isRequired = v),
                 ),
-              ),
-            ],
+                const Divider(),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Aturan Pemilihan',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Biarkan tidak dipilih jika pelanggan bebas memilih berapa saja.',
+                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Minimal'),
+                      selected: selectionRule == 'at_least',
+                      selectedColor: const Color(0xFFE8F5E9),
+                      onSelected: (selected) {
+                        setDialogState(() {
+                          selectionRule = selected ? 'at_least' : null;
+                        });
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('Tepat'),
+                      selected: selectionRule == 'exactly',
+                      selectedColor: const Color(0xFFE8F5E9),
+                      onSelected: (selected) {
+                        setDialogState(() {
+                          selectionRule = selected ? 'exactly' : null;
+                        });
+                      },
+                    ),
+                    ChoiceChip(
+                      label: const Text('Maksimal'),
+                      selected: selectionRule == 'at_most',
+                      selectedColor: const Color(0xFFE8F5E9),
+                      onSelected: (selected) {
+                        setDialogState(() {
+                          selectionRule = selected ? 'at_most' : null;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+                if (selectionRule != null) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Text(
+                        selectionRule == 'at_least'
+                            ? 'Pilih minimal'
+                            : selectionRule == 'exactly'
+                                ? 'Pilih tepat'
+                                : 'Pilih maksimal',
+                        style: GoogleFonts.poppins(fontSize: 14),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 60,
+                        child: TextField(
+                          controller: valueController,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text('opsi', style: GoogleFonts.poppins(fontSize: 14)),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _showLinkMenuItemsDialog(group);
+                  },
+                  icon: const Icon(Icons.link),
+                  label: const Text('Kelola Link Menu Items'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.blue,
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -1249,10 +1739,27 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             ElevatedButton(
               onPressed: () async {
                 if (nameController.text.isNotEmpty) {
+                  int minSel = 0;
+                  int maxSel = 0;
+                  final val = int.tryParse(valueController.text) ?? 1;
+
+                  if (selectionRule == 'at_least') {
+                    minSel = val;
+                    maxSel = 0;
+                  } else if (selectionRule == 'exactly') {
+                    minSel = val;
+                    maxSel = val;
+                  } else if (selectionRule == 'at_most') {
+                    minSel = 0;
+                    maxSel = val;
+                  }
+
                   await _optionGroupService.updateOptionGroup(OptionGroup(
                     id: group.id,
                     name: nameController.text,
                     isRequired: isRequired,
+                    minSelection: minSel,
+                    maxSelection: maxSel,
                     options: group.options,
                     linkedMenuItems: group.linkedMenuItems,
                   ));
@@ -1346,67 +1853,251 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
     );
   }
 
-  void _showAddOptionDialog(OptionGroup group) {
-    final nameController = TextEditingController();
-    final priceController = TextEditingController(text: '0');
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Tambah Opsi'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+  Widget _buildIngredientLinkingSection(
+    List<MenuIngredient> ingredients,
+    void Function(void Function()) setDialogState,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Nama Opsi',
-                hintText: 'Contoh: Telur Dadar, Sawi',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: priceController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Tambahan Harga (Rp)',
-                hintText: '0 untuk gratis',
-                border: OutlineInputBorder(),
-              ),
+            Icon(Icons.inventory_2_outlined, size: 16, color: Colors.grey.shade700),
+            const SizedBox(width: 6),
+            Text(
+              'Bahan Baku',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (nameController.text.isNotEmpty) {
-                final newOptions = [
-                  ...group.options,
-                  OptionItem(
-                    id: DateTime.now().millisecondsSinceEpoch.toString(),
-                    name: nameController.text,
-                    priceAdjustment: int.tryParse(priceController.text) ?? 0,
+        const SizedBox(height: 4),
+        Text(
+          'Hubungkan opsi ini ke bahan baku untuk pelacakan stok otomatis.',
+          style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+        ),
+        const SizedBox(height: 12),
+        ...ingredients.asMap().entries.map((entry) {
+          final idx = entry.key;
+          final ing = entry.value;
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF5F5F5),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        ing.inventoryItemName,
+                        style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
+                      ),
+                      Text(
+                        'Qty: ${ing.quantityNeeded}',
+                        style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                      ),
+                    ],
                   ),
-                ];
-                await _optionGroupService.updateOptionGroup(OptionGroup(
-                  id: group.id,
-                  name: group.name,
-                  isRequired: group.isRequired,
-                  options: newOptions,
-                  linkedMenuItems: group.linkedMenuItems,
-                ));
-              }
-              Navigator.pop(context);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-            child: const Text('Tambah', style: TextStyle(color: Colors.white)),
+                ),
+                IconButton(
+                  icon: Icon(Icons.close, size: 18, color: Colors.red.shade400),
+                  onPressed: () => setDialogState(() => ingredients.removeAt(idx)),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          );
+        }),
+        const SizedBox(height: 4),
+        StreamBuilder<List<InventoryItem>>(
+          stream: InventoryService().getInventoryStream(),
+          builder: (context, snapshot) {
+            final items = snapshot.data ?? [];
+            return OutlinedButton.icon(
+              onPressed: items.isEmpty
+                  ? null
+                  : () => _showAddIngredientPicker(items, ingredients, setDialogState),
+              icon: const Icon(Icons.add, size: 18),
+              label: Text(
+                'Tambah Bahan',
+                style: GoogleFonts.poppins(fontSize: 13),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF2E7D32),
+                side: const BorderSide(color: Color(0xFF2E7D32)),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  void _showAddIngredientPicker(
+    List<InventoryItem> inventoryItems,
+    List<MenuIngredient> ingredients,
+    void Function(void Function()) setParentState,
+  ) {
+    InventoryItem? selectedItem;
+    final qtyController = TextEditingController(text: '1');
+
+    // Filter out items that are already linked
+    final linkedIds = ingredients.map((i) => i.inventoryItemId).toSet();
+    final available = inventoryItems.where((i) => !linkedIds.contains(i.id)).toList();
+
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Semua bahan baku sudah ditambahkan.', style: GoogleFonts.poppins()),
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setPickerState) => AlertDialog(
+          title: Text('Pilih Bahan Baku', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<InventoryItem>(
+                value: selectedItem,
+                decoration: const InputDecoration(
+                  labelText: 'Bahan Baku',
+                  border: OutlineInputBorder(),
+                ),
+                items: available.map((item) {
+                  return DropdownMenuItem(
+                    value: item,
+                    child: Text('${item.name} (${item.stock} ${item.unit})'),
+                  );
+                }).toList(),
+                onChanged: (val) => setPickerState(() => selectedItem = val),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: qtyController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Jumlah Dibutuhkan',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: selectedItem == null
+                  ? null
+                  : () {
+                      final qty = int.tryParse(qtyController.text) ?? 1;
+                      if (qty <= 0) return;
+                      setParentState(() {
+                        ingredients.add(MenuIngredient(
+                          inventoryItemId: selectedItem!.id,
+                          inventoryItemName: selectedItem!.name,
+                          quantityNeeded: qty,
+                        ));
+                      });
+                      Navigator.pop(ctx);
+                    },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+              child: const Text('Tambah', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddOptionDialog(OptionGroup group) {
+    final nameController = TextEditingController();
+    final priceController = TextEditingController(text: '0');
+    final ingredients = <MenuIngredient>[];
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Tambah Opsi', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nama Opsi',
+                      hintText: 'Contoh: Telur Dadar, Sawi',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: priceController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Tambahan Harga (Rp)',
+                      hintText: '0 untuk gratis',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  _buildIngredientLinkingSection(ingredients, setDialogState),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameController.text.isNotEmpty) {
+                  final newOptions = [
+                    ...group.options,
+                    OptionItem(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      name: nameController.text,
+                      priceAdjustment: int.tryParse(priceController.text) ?? 0,
+                      ingredients: ingredients,
+                    ),
+                  ];
+                  await _optionGroupService.updateOptionGroup(OptionGroup(
+                    id: group.id,
+                    name: group.name,
+                    isRequired: group.isRequired,
+                    minSelection: group.minSelection,
+                    maxSelection: group.maxSelection,
+                    options: newOptions,
+                    linkedMenuItems: group.linkedMenuItems,
+                  ));
+                }
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+              child: const Text('Tambah', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1414,65 +2105,79 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
   void _showEditOptionDialog(OptionGroup group, OptionItem option) {
     final nameController = TextEditingController(text: option.name);
     final priceController = TextEditingController(text: option.priceAdjustment.toString());
+    final ingredients = List<MenuIngredient>.from(option.ingredients);
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Opsi'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Nama Opsi',
-                border: OutlineInputBorder(),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Edit Opsi', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nama Opsi',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: priceController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Tambahan Harga (Rp)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  _buildIngredientLinkingSection(ingredients, setDialogState),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: priceController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Tambahan Harga (Rp)',
-                border: OutlineInputBorder(),
-              ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameController.text.isNotEmpty) {
+                  final updatedOptions = group.options.map((o) {
+                    if (identical(o, option)) {
+                      return OptionItem(
+                        id: o.id.isNotEmpty ? o.id : DateTime.now().millisecondsSinceEpoch.toString(),
+                        name: nameController.text,
+                        priceAdjustment: int.tryParse(priceController.text) ?? 0,
+                        ingredients: ingredients,
+                      );
+                    }
+                    return o;
+                  }).toList();
+                  
+                  await _optionGroupService.updateOptionGroup(OptionGroup(
+                    id: group.id,
+                    name: group.name,
+                    isRequired: group.isRequired,
+                    minSelection: group.minSelection,
+                    maxSelection: group.maxSelection,
+                    options: updatedOptions,
+                    linkedMenuItems: group.linkedMenuItems,
+                  ));
+                }
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+              child: const Text('Simpan', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (nameController.text.isNotEmpty) {
-                final updatedOptions = group.options.map((o) {
-                  if (o.id == option.id) {
-                    return OptionItem(
-                      id: o.id,
-                      name: nameController.text,
-                      priceAdjustment: int.tryParse(priceController.text) ?? 0,
-                    );
-                  }
-                  return o;
-                }).toList();
-                
-                await _optionGroupService.updateOptionGroup(OptionGroup(
-                  id: group.id,
-                  name: group.name,
-                  isRequired: group.isRequired,
-                  options: updatedOptions,
-                  linkedMenuItems: group.linkedMenuItems,
-                ));
-              }
-              Navigator.pop(context);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-            child: const Text('Simpan', style: TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
     );
   }
@@ -1490,11 +2195,13 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
           ),
           ElevatedButton(
             onPressed: () async {
-              final updatedOptions = group.options.where((o) => o.id != option.id).toList();
+              final updatedOptions = group.options.where((o) => !identical(o, option)).toList();
               await _optionGroupService.updateOptionGroup(OptionGroup(
                 id: group.id,
                 name: group.name,
                 isRequired: group.isRequired,
+                minSelection: group.minSelection,
+                maxSelection: group.maxSelection,
                 options: updatedOptions,
                 linkedMenuItems: group.linkedMenuItems,
               ));

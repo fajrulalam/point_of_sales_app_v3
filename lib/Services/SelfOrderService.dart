@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 
@@ -15,7 +16,7 @@ class SelfOrderService {
   /// Get the collection reference for self-orders
   static CollectionReference<Map<String, dynamic>> get _selfOrdersCollection =>
       _firestore
-          .collection('Canteens')
+          .collection(Col.name('Canteens'))
           .doc(canteenId)
           .collection('SelfOrders');
 
@@ -23,7 +24,7 @@ class SelfOrderService {
   /// Optionally filter by status (e.g., 'Unpaid', 'Paid', 'Declined')
   Stream<List<SelfOrder>> getSelfOrdersStream({String? statusFilter}) {
     Query<Map<String, dynamic>> query =
-        _selfOrdersCollection.orderBy('timestamp', descending: true);
+        _selfOrdersCollection.orderBy('waktuPesan', descending: true);
 
     if (statusFilter != null && statusFilter.isNotEmpty) {
       query = query.where('status', isEqualTo: statusFilter);
@@ -103,6 +104,7 @@ class SelfOrderService {
         harga: item.harga,
         dineInQuantity: item.dineInQuantity,
         takeAwayQuantity: item.takeAwayQuantity,
+        selectedOptions: item.selectedOptions,
       );
     }).toList();
   }
@@ -129,10 +131,10 @@ class SelfOrderService {
     final endOfToday = DateTime(now.year, now.month, now.day, 23, 59, 59);
 
     return _selfOrdersCollection
-        .where('timestamp',
+        .where('waktuPesan',
             isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
-        .where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(endOfToday))
-        .orderBy('timestamp', descending: true)
+        .where('waktuPesan', isLessThanOrEqualTo: Timestamp.fromDate(endOfToday))
+        .orderBy('waktuPesan', descending: true)
         .snapshots()
         .map((snapshot) =>
             snapshot.docs.map((doc) => SelfOrder.fromFirestore(doc)).toList());

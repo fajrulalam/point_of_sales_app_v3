@@ -10,7 +10,11 @@ import 'package:point_of_sales_app_v3/Services/OrderConfirmationService.dart';
 import 'package:point_of_sales_app_v3/Services/RecommendationService.dart';
 import 'package:point_of_sales_app_v3/Services/MemberService.dart';
 import 'package:point_of_sales_app_v3/Services/SelfOrderService.dart';
+import 'package:point_of_sales_app_v3/Services/OpenBillService.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
+import 'package:point_of_sales_app_v3/Models/OpenBill.dart';
+import 'package:point_of_sales_app_v3/BottomSheets/OptionSelectionBottomSheet.dart';
+import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 import 'package:point_of_sales_app_v3/Widgets/MenuManagementWidget.dart';
 import 'package:point_of_sales_app_v3/Widgets/OrderListWidget.dart';
 import 'package:point_of_sales_app_v3/Widgets/OrderSummaryWidget.dart';
@@ -21,7 +25,9 @@ import 'package:point_of_sales_app_v3/Screens/InventoryScreen.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
 import 'package:point_of_sales_app_v3/Screens/MarketingScreen.dart';
 import 'package:point_of_sales_app_v3/Screens/ShoppingScreen.dart';
-import 'package:point_of_sales_app_v3/Screens/SelfOrdersScreen.dart';
+import 'package:point_of_sales_app_v3/Screens/LiveTabsScreen.dart';
+import 'package:point_of_sales_app_v3/BottomSheets/FinancialReportBottomSheet.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class Home extends StatefulWidget {
   const Home({Key? key}) : super(key: key);
@@ -35,12 +41,16 @@ class _HomeState extends State<Home> {
   late HomeController controller;
   TextEditingController uangYangDiterimaController = TextEditingController();
   TextEditingController customerNameController = TextEditingController();
-  String _activeRoute = 'pos'; // 'pos', 'inventory', 'shopping', 'members', 'selforders'
+  String _activeRoute = 'pos_order';
+  bool _sidebarMinimized = false;
   
-  // Self-orders
+  // Self-orders & Open Bills
   final SelfOrderService _selfOrderService = SelfOrderService.instance;
+  final OpenBillService _openBillService = OpenBillService.instance;
   StreamSubscription<int>? _selfOrdersCountSubscription;
+  StreamSubscription<List<OpenBill>>? _openBillsSubscription;
   int _pendingSelfOrdersCount = 0;
+  int _pendingOpenBillsCount = 0;
 
   @override
   void initState() {
@@ -95,21 +105,25 @@ class _HomeState extends State<Home> {
           });
         }
       },
-      onError: (error) {
-        print('Error listening to self-orders count: $error');
+      onError: (e) => print('Error in self-orders stream: $e'),
+    );
+
+    // Subscribe to open bills stream for badge
+    _openBillsSubscription = _openBillService.getOpenBillsStream().listen(
+      (bills) {
+        if (mounted) {
+          setState(() {
+            _pendingOpenBillsCount = bills.length;
+          });
+        }
       },
+      onError: (e) => print('Error in open bills stream: $e'),
     );
   }
 
   Future<void> _initializeRecommendationService() async {
-    // HIDDEN: Recommendation feature UI is hidden but backend remains for thesis documentation
-    // Initialize silently without showing snackbar
-    await Future.delayed(const Duration(milliseconds: 500));
-    
-    if (!mounted) return;
-    
-    // Still initialize the service (backend kept for documentation)
-    await RecommendationService.instance.initialize();
+    // HIDDEN: Recommendation feature is fully disabled to avoid unnecessary processing.
+    // Backend code is kept for thesis documentation but not executed at runtime.
   }
 
   @override
@@ -119,6 +133,7 @@ class _HomeState extends State<Home> {
     uangYangDiterimaController.dispose();
     customerNameController.dispose();
     _selfOrdersCountSubscription?.cancel();
+    _openBillsSubscription?.cancel();
     super.dispose();
   }
 
@@ -128,6 +143,9 @@ class _HomeState extends State<Home> {
 
   @override
   Widget build(BuildContext context) {
+    const double expandedWidth = 220;
+    final double sidebarWidth = _sidebarMinimized ? 0 : expandedWidth;
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
@@ -136,61 +154,131 @@ class _HomeState extends State<Home> {
       ),
       child: Scaffold(
         resizeToAvoidBottomInset: false,
-        body: Row(
+    body: Stack(
+      children: [
+        // 1. Layout Base (Content + Space for Sidebar)
+        Row(
           children: [
-            // Sidebar
-            SidebarWidget(
-              orderButtonColor: controller.orderButtonColor,
-              menuButtonColor: controller.menuButtonColor,
-              printButtonColor: controller.printButtonColor,
-              orderButtonOffset: controller.orderButtonOffset_y,
-              menuButtonOffset: controller.menuButtonOffset_y,
-              printButtonOffset: controller.printButtonOffset_y,
-              printerIsConnected: controller.printerIsConnected,
-              selfOrdersCount: _pendingSelfOrdersCount,
-              onOrderPressed: () {
-                setState(() => _activeRoute = 'pos');
-                controller.changeButtonColors('order');
-              },
-              onMenuPressed: () {
-                setState(() => _activeRoute = 'pos');
-                controller.changeButtonColors('menu');
-              },
-              onPrintPressed: () => _handlePrintPressed(),
-              onPrintLongPress: () => _handlePrintLongPress(),
-              onResetPressed: () => controller.resetCustomerNumber(),
-              // HIDDEN: Recommendation feature UI hidden but backend kept for thesis documentation
-              onRulesPressed: null,
-              onInventoryPressed: () => _navigateToInventory(),
-              onShoppingPressed: () => _navigateToShopping(),
-              onSelfOrdersPressed: () => _navigateToSelfOrders(),
-              onMembersPressed: () => _navigateToMembers(),
-              onLogoutPressed: _handleLogout,
+            // Dummy space filler to push main content
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeInOut,
+              width: sidebarWidth,
             ),
             // Main Content Area
-            if (_activeRoute == 'pos') ...[
-              if (controller.menuButtonColor == Colors.grey.shade300)
-                ..._buildOrderingView(),
-              if (controller.menuButtonColor == Colors.white)
-                _buildMenuManagementView(),
-            ] else if (_activeRoute == 'inventory')
-              const Expanded(flex: 12, child: InventoryScreen())
-            else if (_activeRoute == 'shopping')
-              const Expanded(flex: 12, child: ShoppingScreen())
-            else if (_activeRoute == 'selforders')
-              Expanded(
-                flex: 12,
-                child: SelfOrdersScreen(
-                  onAcceptOrder: _handleAcceptSelfOrder,
-                ),
-              )
-            else if (_activeRoute == 'members')
-              const Expanded(flex: 12, child: MarketingScreen()),
+            Expanded(
+              child: _buildMainContent(),
+            ),
           ],
         ),
+        // 2. Sidebar (on top)
+        SidebarWidget(
+          printerIsConnected: controller.printerIsConnected,
+          liveTabsCount: _pendingSelfOrdersCount + _pendingOpenBillsCount,
+          activeRoute: _activeRoute,
+          isExpanded: true, // Always true when not minimized
+          isMinimized: _sidebarMinimized,
+          onExpandToggled: () => setState(() {
+            _sidebarMinimized = !_sidebarMinimized;
+          }),
+          onMinimizeToggled: () => setState(() {
+            _sidebarMinimized = !_sidebarMinimized;
+          }),
+          onOrderPressed: () => setState(() => _activeRoute = 'pos_order'),
+          onMenuPressed: () => setState(() => _activeRoute = 'pos_menu'),
+          onPrintPressed: () => _handlePrintPressed(),
+          onPrintLongPress: () => _handlePrintLongPress(),
+          onResetPressed: () => controller.resetCustomerNumber(),
+          onRulesPressed: null,
+          onInventoryPressed: () => _navigateToInventory(),
+          onShoppingPressed: () => _navigateToShopping(),
+          onSelfOrdersPressed: () => _navigateToSelfOrders(),
+          onMembersPressed: () => _navigateToMembers(),
+          onFinancialReportPressed: () => _showFinancialReport(),
+          onTestingModeToggled: _handleTestingModeToggle,
+          onLogoutPressed: _handleLogout,
+        ),
+        // 3. Floating Bubble (Direct child of Stack to fix hit-testing)
+        if (_sidebarMinimized)
+          Positioned(
+            left: 20,
+            bottom: 32,
+            child: _buildFloatingBubble(),
+          ),
+        // 4. Testing mode banner
+        if (Col.testingMode.value)
+          Positioned(
+            top: 0,
+            left: sidebarWidth,
+            right: 0,
+            child: Container(
+              color: Colors.orange.shade700,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: const Center(
+                child: Text(
+                  'TESTING MODE — data will not affect production',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  ),
+);
+}
+
+Widget _buildFloatingBubble() {
+  return InkWell(
+    onTap: () => setState(() {
+      _sidebarMinimized = false;
+    }),
+    child: Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: const Color(0xFF069494), // kDarkTeal
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF069494).withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
+      child: const Icon(
+        Icons.restaurant_menu_rounded,
+        color: Color(0xFFF5C518), // kWarmYellow
+        size: 28,
+      ),
+    ),
+  );
+}
+
+Widget _buildMainContent() {
+  if (_activeRoute == 'pos_order') {
+    return Row(children: _buildOrderingView());
+  } else if (_activeRoute == 'pos_menu') {
+    return _buildMenuManagementView();
+  } else if (_activeRoute == 'inventory') {
+    return const InventoryScreen();
+  } else if (_activeRoute == 'shopping') {
+    return const ShoppingScreen();
+  } else if (_activeRoute == 'selforders') {
+    return LiveTabsScreen(
+      onAcceptOrder: _handleAcceptSelfOrder,
+      homeController: controller,
     );
+  } else if (_activeRoute == 'members') {
+    return const MarketingScreen();
   }
+  return const SizedBox.shrink();
+}
 
   List<Widget> _buildOrderingView() {
     return [
@@ -203,8 +291,7 @@ class _HomeState extends State<Home> {
           categoryOrder: controller.categoryOrder,
           isTakeAway: controller.isTakeAway,
           onTakeAwayChanged: (value) => controller.setTakeAway(value),
-          onMenuTap: (menu) =>
-              controller.addToOrder(menu, controller.isTakeAway),
+          onMenuTap: (menu) => _handleMenuTap(menu),
         ),
       ),
       // Order List and Summary
@@ -229,7 +316,7 @@ class _HomeState extends State<Home> {
                 flex: 1,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5E9),
+                    color: const Color(0xFFF5F5F0),
                     border: Border(
                       bottom: BorderSide(
                         color: Colors.grey.shade300,
@@ -303,19 +390,47 @@ class _HomeState extends State<Home> {
         menuObjectList_minuman: controller.menuObjectList_minuman,
         listGambar: controller.listGambar,
         categoryOrder: controller.categoryOrder,
+        onDeleteCatalogImage: controller.deleteCatalogImage,
       ),
     );
   }
 
+  Future<void> _handleMenuTap(dynamic menu) async {
+    final linkedGroups = controller.getLinkedOptionGroups(menu.id);
+
+    if (linkedGroups.isEmpty) {
+      await controller.addToOrder(menu, controller.isTakeAway);
+      return;
+    }
+
+    final selectedOptions = await OptionSelectionBottomSheet.show(
+      context,
+      menu: menu,
+      linkedGroups: linkedGroups,
+    );
+
+    if (selectedOptions != null) {
+      await controller.addToOrder(
+        menu,
+        controller.isTakeAway,
+        options: selectedOptions,
+      );
+    }
+  }
+
   void _handlePrintPressed() {
-    controller.changeButtonColors('print');
+    final prevRoute = _activeRoute;
+    setState(() => _activeRoute = 'printer');
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return const ConnectPrinterDialog();
+        return ConnectPrinterDialog(controller: controller);
       },
     ).then((value) {
-      controller.changeButtonColors('order');
+      if (mounted) {
+        setState(() => _activeRoute = prevRoute);
+      }
       if (value != null) {
         controller.connectPrinter(value).catchError((e) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -350,21 +465,14 @@ class _HomeState extends State<Home> {
       uangYangDiterimaController: uangYangDiterimaController,
       nomorBerikutnya: controller.nomorBerikutnya,
       getTotal: controller.getTotal,
-      printReceipt: ({int discountAmount = 0, int originalTotal = 0}) async =>
-          await controller.printReceipt(
-        controller.pesananList,
-        controller.nomorBerikutnya,
-        controller.totalHarga,
-        controller.isTakeAway,
-        discountAmount: discountAmount,
-        originalTotal: originalTotal,
-      ),
+      printReceipt: controller.printReceipt,
       getYear: controller.getYear,
       getMonth: controller.getMonth,
       getDate: controller.getDate,
       setJumlahItem: (value) => controller.jumlahItem = value,
       addRecommendedItem: controller.addRecommendedItem,
       menuItems: menuItemNames,
+      printerIsConnected: controller.printerIsConnected,
     );
   }
 
@@ -408,12 +516,19 @@ class _HomeState extends State<Home> {
       uangYangDiterimaController: uangYangDiterimaController,
       nomorBerikutnya: controller.nomorBerikutnya,
       getTotal: controller.getTotal,
-      printReceipt: ({int discountAmount = 0, int originalTotal = 0}) async =>
+      printReceipt: ({
+        List<PesananObject>? customPesananList,
+        int? overrideNomorBerikutnya,
+        int? overrideTotalHarga,
+        bool? overrideIsTakeAway,
+        int discountAmount = 0,
+        int originalTotal = 0,
+      }) async =>
           await controller.printReceipt(
-        pesananList,
-        controller.nomorBerikutnya,
-        order.total,
-        isTakeAway,
+        customPesananList: customPesananList ?? pesananList,
+        overrideNomorBerikutnya: overrideNomorBerikutnya ?? controller.nomorBerikutnya,
+        overrideTotalHarga: overrideTotalHarga ?? order.total,
+        overrideIsTakeAway: overrideIsTakeAway ?? isTakeAway,
         discountAmount: discountAmount,
         originalTotal: originalTotal,
       ),
@@ -429,6 +544,70 @@ class _HomeState extends State<Home> {
         uangYangDiterimaController.clear();
       },
     );
+  }
+
+  void _showFinancialReport() {
+    final prevRoute = _activeRoute;
+    setState(() => _activeRoute = 'financial');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const FinancialReportBottomSheet(),
+    ).then((_) {
+      if (mounted) {
+        setState(() => _activeRoute = prevRoute);
+      }
+    });
+  }
+
+  Future<void> _handleTestingModeToggle() async {
+    final turning = Col.testingMode.value ? 'OFF' : 'ON';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Turn $turning Testing Mode?'),
+        content: Text(
+          Col.testingMode.value
+              ? 'Switching back to production data.'
+              : 'All reads/writes will go to testing collections. '
+                'Data will be migrated on first activation.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Col.testingMode.value ? Colors.teal : Colors.orange,
+            ),
+            child: Text('Turn $turning'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await Col.toggle();
+      if (mounted) {
+        // Reinitialize controller to reload data from the new collections
+        controller.removeListener(_onControllerUpdate);
+        controller.dispose();
+        controller = HomeController();
+        controller.addListener(_onControllerUpdate);
+        controller.onShowMessage = (message, {bool isError = false}) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+        };
+        controller.initialize();
+        setState(() {});
+      }
+    }
   }
 
   Future<void> _handleLogout() async {

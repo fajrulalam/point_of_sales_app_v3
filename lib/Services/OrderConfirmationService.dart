@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -11,10 +12,14 @@ import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 import 'package:point_of_sales_app_v3/Services/LoaderWidget.dart';
 import 'package:point_of_sales_app_v3/Services/RecommendationService.dart';
 import 'package:point_of_sales_app_v3/Services/SelfOrderService.dart';
+import 'package:point_of_sales_app_v3/Services/OpenBillService.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Models/OpenBill.dart';
 import 'package:point_of_sales_app_v3/Widgets/RecommendationListWidget.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
+import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 import 'package:dropdown_search/dropdown_search.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Services/MemberService.dart';
@@ -30,8 +35,14 @@ class OrderConfirmationService {
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
     required Function() getTotal,
-    required Future<void> Function({int discountAmount, int originalTotal})
-        printReceipt,
+    required Future<void> Function({
+      List<PesananObject>? customPesananList,
+      int? overrideNomorBerikutnya,
+      int? overrideTotalHarga,
+      bool? overrideIsTakeAway,
+      int discountAmount,
+      int originalTotal,
+    }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
@@ -39,6 +50,7 @@ class OrderConfirmationService {
     required Function(String, int)
         addRecommendedItem, // Add callback to add item
     List<String> menuItems = const [], // Available menu items for filtering recommendations
+    bool printerIsConnected = false,
   }) async {
     if (pesananList.isEmpty) {
       return;
@@ -61,15 +73,38 @@ class OrderConfirmationService {
           onAddRecommendedItem: addRecommendedItem,
           getTotal: getTotal,
           menuItems: menuItems,
+          printerIsConnected: printerIsConnected,
         );
       },
     );
 
-    if (result != null && result['confirmed'] == true) {
+    if (result != null && result['chargeToTab'] == true) {
+      await _processOpenBillOrder(
+        context: context,
+        pesananList: pesananList,
+        totalHarga: totalHarga,
+        originalTotal: totalHarga,
+        isTakeAway: isTakeAway,
+        biayaBungkus: biayaBungkus,
+        customerNameController: customerNameController,
+        uangYangDiterimaController: uangYangDiterimaController,
+        nomorBerikutnya: nomorBerikutnya,
+        getTotal: getTotal,
+        printReceipt: printReceipt,
+        getYear: getYear,
+        getMonth: getMonth,
+        getDate: getDate,
+        setJumlahItem: setJumlahItem,
+        memberId: result['memberId'],
+        memberName: result['memberName'],
+        memberPhone: result['memberPhone'],
+      );
+    } else if (result != null && result['confirmed'] == true) {
       int finalTotal = result['finalTotal'] ?? totalHarga;
       String? appliedVoucherCode = result['voucherCode'];
       bool isMember = result['isMember'] ?? false;
       String? memberId = result['memberId'];
+      String? paymentMethod = result['paymentMethod'];
 
       await _processOrder(
         context: context,
@@ -77,6 +112,7 @@ class OrderConfirmationService {
         totalHarga: finalTotal,
         originalTotal: totalHarga,
         isTakeAway: isTakeAway,
+        biayaBungkus: biayaBungkus,
         customerNameController: customerNameController,
         uangYangDiterimaController: uangYangDiterimaController,
         nomorBerikutnya: nomorBerikutnya,
@@ -92,6 +128,7 @@ class OrderConfirmationService {
         appliedVoucherCode: appliedVoucherCode,
         isPosVoucher: result['isPosVoucher'] ?? false,
         discountAmount: totalHarga - finalTotal,
+        transactionMethod: paymentMethod,
       );
     } else {
       uangYangDiterimaController.clear();
@@ -111,8 +148,14 @@ class OrderConfirmationService {
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
     required Function() getTotal,
-    required Future<void> Function({int discountAmount, int originalTotal})
-        printReceipt,
+    required Future<void> Function({
+      List<PesananObject>? customPesananList,
+      int? overrideNomorBerikutnya,
+      int? overrideTotalHarga,
+      bool? overrideIsTakeAway,
+      int discountAmount,
+      int originalTotal,
+    }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
@@ -156,6 +199,7 @@ class OrderConfirmationService {
       String? appliedVoucherCode = result['voucherCode'];
       bool isMember = result['isMember'] ?? false;
       String? memberId = result['memberId'];
+      String? paymentMethod = result['paymentMethod'];
 
       await _processSelfOrder(
         context: context,
@@ -164,6 +208,7 @@ class OrderConfirmationService {
         totalHarga: finalTotal,
         originalTotal: totalHarga,
         isTakeAway: isTakeAway,
+        biayaBungkus: biayaBungkus,
         customerNameController: customerNameController,
         uangYangDiterimaController: uangYangDiterimaController,
         nomorBerikutnya: nomorBerikutnya,
@@ -180,6 +225,7 @@ class OrderConfirmationService {
         isPosVoucher: result['isPosVoucher'] ?? false,
         discountAmount: totalHarga - finalTotal,
         onOrderCompleted: onOrderCompleted,
+        transactionMethod: paymentMethod,
       );
     } else {
       // User cancelled - revert status back to Unpaid
@@ -197,12 +243,19 @@ class OrderConfirmationService {
     required int totalHarga,
     required int originalTotal,
     required bool isTakeAway,
+    required int biayaBungkus,
     required TextEditingController customerNameController,
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
     required Function() getTotal,
-    required Future<void> Function({int discountAmount, int originalTotal})
-        printReceipt,
+    required Future<void> Function({
+      List<PesananObject>? customPesananList,
+      int? overrideNomorBerikutnya,
+      int? overrideTotalHarga,
+      bool? overrideIsTakeAway,
+      int discountAmount,
+      int originalTotal,
+    }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
@@ -214,6 +267,7 @@ class OrderConfirmationService {
     bool isPosVoucher = false,
     int discountAmount = 0,
     VoidCallback? onOrderCompleted,
+    String? transactionMethod,
   }) async {
     // Validate stock availability for all items
     final inventoryService = InventoryService();
@@ -221,7 +275,7 @@ class OrderConfirmationService {
 
     // Get all menu items to check their ingredients
     final menuSnapshot = await firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc('canteen375')
         .collection('MenuCollection')
         .get();
@@ -245,13 +299,25 @@ class OrderConfirmationService {
       menuMap[menu.namaMenu] = menu;
     }
 
+    // Fetch option groups for ingredient lookup
+    final optionGroupSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('OptionGroups')
+        .get();
+    final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot);
+
     // Check availability for each item in the order
     for (var pesanan in pesananList) {
       final menu = menuMap[pesanan.namaPesanan];
       if (menu == null) continue;
 
-      final availability = await inventoryService.checkMenuAvailability(
+      final optionIngredients = _resolveOptionIngredients(
+        pesanan.selectedOptions, optionGroupLookup,
+      );
+      final availability = await inventoryService.checkOrderAvailability(
         menu,
+        optionIngredients,
         pesanan.totalQuantity,
       );
 
@@ -307,7 +373,17 @@ class OrderConfirmationService {
     quantitypesananSerialized = quantitypesananSerialized.substring(
         0, quantitypesananSerialized.length - 2);
 
+    int subTotal = totalHarga - biayaBungkus;
     map['total'] = FieldValue.increment(totalHarga);
+    map['subTotal'] = FieldValue.increment(subTotal);
+    map['takeAwayFee'] = FieldValue.increment(biayaBungkus);
+    if (transactionMethod == 'Cash') {
+      map['totalCash'] = FieldValue.increment(totalHarga);
+    } else if (transactionMethod == 'QRIS') {
+      map['totalQris'] = FieldValue.increment(totalHarga);
+    } else if (transactionMethod == 'Online') {
+      map['totalOnline'] = FieldValue.increment(totalHarga);
+    }
     map["year"] = getYear();
     map["month"] = getMonth();
     map["date"] = getDate();
@@ -321,22 +397,26 @@ class OrderConfirmationService {
     DateTime now = DateTime.now();
     String datenowFormatted = DateFormat('yyyy-MM-dd').format(now);
     DocumentReference dailyTransaction =
-        fs.collection("DailyTransaction").doc(datenowFormatted);
+        fs.collection(Col.name('DailyTransaction')).doc(datenowFormatted);
     batch.set(dailyTransaction, map, SetOptions(merge: true));
 
     DocumentReference monthlyTransaction =
-        fs.collection("MonthlyTransaction").doc(getMonth());
+        fs.collection(Col.name('MonthlyTransaction')).doc(getMonth());
     batch.set(monthlyTransaction, map, SetOptions(merge: true));
 
     DocumentReference yearlyTransaction =
-        fs.collection("YearlyTransaction").doc(getYear());
+        fs.collection(Col.name('YearlyTransaction')).doc(getYear());
     batch.set(yearlyTransaction, map, SetOptions(merge: true));
 
     List<Map<String, dynamic>> orderItems = pesananList.map((order) {
+      final menu = menuMap[order.namaPesanan];
       return {
         'namaPesanan': order.namaPesanan,
+        'harga': order.harga,
         'dineInQuantity': order.dineInQuantity,
         'takeAwayQuantity': order.takeAwayQuantity,
+        'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
+        'isMakanan': menu?.isMakanan ?? false,
       };
     }).toList();
 
@@ -345,40 +425,39 @@ class OrderConfirmationService {
     mapStatus['status'] = 'Serving';
     mapStatus['namaCustomer'] = customerNameController.text;
     mapStatus['total'] = totalHarga;
+    mapStatus['subTotal'] = subTotal;
+    mapStatus['takeAwayFee'] = biayaBungkus;
+    mapStatus['transactionMethod'] = transactionMethod;
     mapStatus['isMember'] = isMember;
+    mapStatus['canteenId'] = selfOrder.canteenId;
     mapStatus['selfOrderId'] = selfOrder.id;
-    mapStatus['selfOrderShortCode'] = selfOrder.shortCode;
+    mapStatus['selfOrderShortCode'] = selfOrder.displayShortCode;
     if (memberId != null) {
       mapStatus['memberId'] = memberId;
     }
     if (memberPhone != null) {
       mapStatus['customerPhone'] = memberPhone;
     }
-    mapStatus['waktuPengambilan'] = 'Tidak Memesan';
+    mapStatus['waktuPengambilan'] = selfOrder.waktuPengambilan;
     mapStatus['waktuPesan'] = FieldValue.serverTimestamp();
 
+    // final canteenRef = fs.collection(Col.name('Canteens')).doc('canteen375');
     DocumentReference statusRef =
-        fs.collection("Status").doc('${nomorBerikutnya + 1}');
+        fs.collection(Col.name('Status')).doc('${nomorBerikutnya + 1}_plazaUnipdu');
     batch.set(statusRef, mapStatus);
 
-    DocumentReference customerNumber =
-        fs.collection("Canteens").doc('canteen375');
+    DocumentReference customerNumber = fs.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
     batch.update(customerNumber, {'customerNumber': FieldValue.increment(1)});
+
+    // Deduct ingredients entirely within the same atomic batch
+    await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
+
+    if (appliedVoucherCode != null) {
+      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch);
+    }
 
     try {
       await batch.commit();
-
-      // Deduct ingredients from inventory
-      for (var pesanan in pesananList) {
-        final menu = menuMap[pesanan.namaPesanan];
-        if (menu != null && menu.ingredients.isNotEmpty) {
-          await inventoryService.deductIngredients(menu, pesanan.totalQuantity);
-        }
-      }
-
-      if (appliedVoucherCode != null) {
-        _claimVoucherAsync(appliedVoucherCode, isPosVoucher);
-      }
 
       // Update member points and competition records
       if (isMember && memberId != null) {
@@ -485,7 +564,7 @@ class OrderConfirmationService {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      selfOrder.shortCode,
+                      selfOrder.displayShortCode,
                       style: GoogleFonts.poppins(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -571,47 +650,10 @@ class OrderConfirmationService {
   }
 
   /// Generate recommendations based on the current order
+  /// HIDDEN: Association rules feature is hidden; skip processing to avoid delays.
   static Future<List<Recommendation>> _generateRecommendations(
       List<PesananObject> pesananList) async {
-    try {
-      final recommendationService = RecommendationService.instance;
-
-      if (!recommendationService.isInitialized) {
-        print('⚠️ Recommendation system not initialized yet');
-        return [];
-      }
-
-      // Extract item names from the order
-      final orderItems = pesananList.map((order) => order.namaPesanan).toList();
-
-      print('🛒 Current order items: ${orderItems.join(", ")}');
-
-      // Get recommendations
-      final recommendations =
-          await recommendationService.getRecommendations(orderItems);
-
-      if (recommendations.isEmpty) {
-        print('📭 No recommendations found for this order');
-      } else {
-        print('✨ ====== RECOMMENDATIONS ======');
-        print('📊 Found ${recommendations.length} recommendations:');
-        print('');
-
-        for (int i = 0; i < recommendations.length; i++) {
-          final rec = recommendations[i];
-          print(
-              '${i + 1}. ${rec.itemName} (${(rec.confidence * 100).toStringAsFixed(1)}% confidence)');
-          print('   Based on: ${rec.basedOn.join(", ")}');
-          print('');
-        }
-        print('================================');
-      }
-
-      return recommendations;
-    } catch (e) {
-      print('❌ Error generating recommendations: $e');
-      return [];
-    }
+    return [];
   }
 
   static Future<void> _processOrder({
@@ -620,12 +662,19 @@ class OrderConfirmationService {
     required int totalHarga,
     required int originalTotal,
     required bool isTakeAway,
+    required int biayaBungkus,
     required TextEditingController customerNameController,
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
     required Function() getTotal,
-    required Future<void> Function({int discountAmount, int originalTotal})
-        printReceipt,
+    required Future<void> Function({
+      List<PesananObject>? customPesananList,
+      int? overrideNomorBerikutnya,
+      int? overrideTotalHarga,
+      bool? overrideIsTakeAway,
+      int discountAmount,
+      int originalTotal,
+    }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
@@ -636,6 +685,7 @@ class OrderConfirmationService {
     String? appliedVoucherCode,
     bool isPosVoucher = false,
     int discountAmount = 0,
+    String? transactionMethod,
   }) async {
     // 🔍 STEP 1: Validate stock availability for all items
     final inventoryService = InventoryService();
@@ -643,7 +693,7 @@ class OrderConfirmationService {
     
     // Get all menu items to check their ingredients
     final menuSnapshot = await firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc('canteen375')
         .collection('MenuCollection')
         .get();
@@ -666,14 +716,26 @@ class OrderConfirmationService {
       );
       menuMap[menu.namaMenu] = menu;
     }
+
+    // Fetch option groups for ingredient lookup
+    final optionGroupSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('OptionGroups')
+        .get();
+    final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot);
     
     // Check availability for each item in the order
     for (var pesanan in pesananList) {
       final menu = menuMap[pesanan.namaPesanan];
       if (menu == null) continue;
-      
-      final availability = await inventoryService.checkMenuAvailability(
+
+      final optionIngredients = _resolveOptionIngredients(
+        pesanan.selectedOptions, optionGroupLookup,
+      );
+      final availability = await inventoryService.checkOrderAvailability(
         menu,
+        optionIngredients,
         pesanan.totalQuantity,
       );
       
@@ -728,7 +790,17 @@ class OrderConfirmationService {
     quantitypesananSerialized = quantitypesananSerialized.substring(
         0, quantitypesananSerialized.length - 2);
 
+    int subTotal = totalHarga - biayaBungkus;
     map['total'] = FieldValue.increment(totalHarga);
+    map['subTotal'] = FieldValue.increment(subTotal);
+    map['takeAwayFee'] = FieldValue.increment(biayaBungkus);
+    if (transactionMethod == 'Cash') {
+      map['totalCash'] = FieldValue.increment(totalHarga);
+    } else if (transactionMethod == 'QRIS') {
+      map['totalQris'] = FieldValue.increment(totalHarga);
+    } else if (transactionMethod == 'Online') {
+      map['totalOnline'] = FieldValue.increment(totalHarga);
+    }
     map["year"] = getYear();
     map["month"] = getMonth();
     map["date"] = getDate();
@@ -741,22 +813,26 @@ class OrderConfirmationService {
     DateTime now = DateTime.now();
     String datenowFormatted = DateFormat('yyyy-MM-dd').format(now);
     DocumentReference dailyTransaction =
-        fs.collection("DailyTransaction").doc(datenowFormatted);
+        fs.collection(Col.name('DailyTransaction')).doc(datenowFormatted);
     batch.set(dailyTransaction, map, SetOptions(merge: true));
 
     DocumentReference monthlyTransaction =
-        fs.collection("MonthlyTransaction").doc(getMonth());
+        fs.collection(Col.name('MonthlyTransaction')).doc(getMonth());
     batch.set(monthlyTransaction, map, SetOptions(merge: true));
 
     DocumentReference yearlyTransaction =
-        fs.collection("YearlyTransaction").doc(getYear());
+        fs.collection(Col.name('YearlyTransaction')).doc(getYear());
     batch.set(yearlyTransaction, map, SetOptions(merge: true));
 
     List<Map<String, dynamic>> orderItems = pesananList.map((order) {
+      final menu = menuMap[order.namaPesanan];
       return {
         'namaPesanan': order.namaPesanan,
+        'harga': order.harga,
         'dineInQuantity': order.dineInQuantity,
         'takeAwayQuantity': order.takeAwayQuantity,
+        'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
+        'isMakanan': menu?.isMakanan ?? false,
       };
     }).toList();
 
@@ -765,6 +841,10 @@ class OrderConfirmationService {
     mapStatus['status'] = 'Serving';
     mapStatus['namaCustomer'] = customerNameController.text;
     mapStatus['total'] = totalHarga;
+    mapStatus['subTotal'] = subTotal;
+    mapStatus['takeAwayFee'] = biayaBungkus;
+    mapStatus['transactionMethod'] = transactionMethod;
+    mapStatus['canteenId'] = 'canteen375_plazaUnipdu';
     mapStatus['isMember'] = isMember;
     if (memberId != null) {
       mapStatus['memberId'] = memberId;
@@ -775,28 +855,23 @@ class OrderConfirmationService {
     mapStatus['waktuPengambilan'] = 'Tidak Memesan';
     mapStatus['waktuPesan'] = FieldValue.serverTimestamp();
 
+    // final canteenRef = fs.collection(Col.name('Canteens')).doc('canteen375');
     DocumentReference statusRef =
-        fs.collection("Status").doc('${nomorBerikutnya + 1}');
+        fs.collection(Col.name('Status')).doc('${nomorBerikutnya + 1}_plazaUnipdu');
     batch.set(statusRef, mapStatus);
 
-    DocumentReference customerNumber =
-        fs.collection("Canteens").doc('canteen375');
+    DocumentReference customerNumber = fs.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
     batch.update(customerNumber, {'customerNumber': FieldValue.increment(1)});
+
+    // Deduct ingredients entirely within the same atomic batch
+    await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
+    
+    if (appliedVoucherCode != null) {
+      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch);
+    }
 
     try {
       await batch.commit();
-
-      // 📦 STEP 2: Deduct ingredients from inventory
-      for (var pesanan in pesananList) {
-        final menu = menuMap[pesanan.namaPesanan];
-        if (menu != null && menu.ingredients.isNotEmpty) {
-          await inventoryService.deductIngredients(menu, pesanan.totalQuantity);
-        }
-      }
-
-      if (appliedVoucherCode != null) {
-        _claimVoucherAsync(appliedVoucherCode, isPosVoucher);
-      }
 
       // 💳 STEP 3: Update member points and competition records
       if (isMember && memberId != null) {
@@ -819,6 +894,195 @@ class OrderConfirmationService {
         totalHarga: totalHarga,
         originalTotal: originalTotal,
         discountAmount: discountAmount,
+        pesananList: pesananList,
+        customerNameController: customerNameController,
+        uangYangDiterimaController: uangYangDiterimaController,
+        getTotal: getTotal,
+        setJumlahItem: setJumlahItem,
+      );
+    } catch (error) {
+      Navigator.pop(context);
+    }
+  }
+
+  static Future<void> _processOpenBillOrder({
+    required BuildContext context,
+    required List<PesananObject> pesananList,
+    required int totalHarga,
+    required int originalTotal,
+    required bool isTakeAway,
+    required int biayaBungkus,
+    required TextEditingController customerNameController,
+    required TextEditingController uangYangDiterimaController,
+    required int nomorBerikutnya,
+    required Function() getTotal,
+    required Future<void> Function({
+      List<PesananObject>? customPesananList,
+      int? overrideNomorBerikutnya,
+      int? overrideTotalHarga,
+      bool? overrideIsTakeAway,
+      int discountAmount,
+      int originalTotal,
+    }) printReceipt,
+    required String Function() getYear,
+    required String Function() getMonth,
+    required String Function() getDate,
+    required Function(int) setJumlahItem,
+    required String memberId,
+    required String memberName,
+    required String? memberPhone,
+  }) async {
+    final inventoryService = InventoryService();
+    final firestore = FirebaseFirestore.instance;
+    
+    final menuSnapshot = await firestore.collection(Col.name('Canteens')).doc('canteen375').collection('MenuCollection').get();
+    final menuMap = <String, MenuObject>{};
+    for (var doc in menuSnapshot.docs) {
+      menuMap[doc['namaMenu']] = MenuObject(
+        id: doc.id,
+        namaMenu: doc['namaMenu'],
+        harga: doc['harga'],
+        isMakanan: doc['isMakanan'],
+        imagePath: doc['imagePath'],
+        category: doc.data().containsKey('category') ? doc['category'] : 'Umum',
+        ingredients: doc.data().containsKey('ingredients')
+            ? (doc['ingredients'] as List<dynamic>).map((ing) => MenuIngredient.fromMap(ing as Map<String, dynamic>)).toList()
+            : <MenuIngredient>[],
+      );
+    }
+    
+    final optionGroupSnapshot = await firestore.collection(Col.name('Canteens')).doc('canteen375').collection('OptionGroups').get();
+    final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot);
+    
+    for (var pesanan in pesananList) {
+      final menu = menuMap[pesanan.namaPesanan];
+      if (menu == null) continue;
+      final optionIngredients = _resolveOptionIngredients(pesanan.selectedOptions, optionGroupLookup);
+      final availability = await inventoryService.checkOrderAvailability(menu, optionIngredients, pesanan.totalQuantity);
+      if (!availability.isAvailable) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Stok tidak cukup untuk ${pesanan.namaPesanan}'), backgroundColor: Colors.red));
+        }
+        return;
+      }
+    }
+    
+    LoaderWidget.showLoaderDialog(context, message: "Menyimpan tagihan...");
+
+    // ── Query root Status collection for existing open bill ──
+    DocumentSnapshot? existingStatusDoc;
+    try {
+      existingStatusDoc = await OpenBillService.instance.getExistingOpenBill(memberId);
+    } catch (_) {
+      // If pre-read fails, proceed with creating a new Status doc
+    }
+
+    // ── Credit limit check ──
+    try {
+      final creditLimit = await OpenBillService.instance.getCreditLimit();
+      int currentTotal = 0;
+      if (existingStatusDoc != null && existingStatusDoc.exists) {
+        final data = existingStatusDoc.data() as Map<String, dynamic>;
+        currentTotal = (data['total'] ?? 0) as int;
+      }
+      int newTotal = currentTotal + totalHarga;
+      if (newTotal > creditLimit) {
+        Navigator.pop(context);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Total tagihan (Rp $newTotal) melebihi batas kredit (Rp $creditLimit). Selesaikan tagihan yang ada terlebih dahulu.'),
+            backgroundColor: Colors.red,
+          ));
+        }
+        return;
+      }
+    } catch (e) {
+      // Continue — credit limit check is a safeguard, not a blocker
+    }
+
+    // ── Build orderItems for the Status doc ──
+    List<Map<String, dynamic>> orderItems = pesananList.map((order) {
+      final menu = menuMap[order.namaPesanan];
+      return {
+        'namaPesanan': order.namaPesanan,
+        'harga': order.harga,
+        'dineInQuantity': order.dineInQuantity,
+        'takeAwayQuantity': order.takeAwayQuantity,
+        'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
+        'isMakanan': menu?.isMakanan ?? false,
+      };
+    }).toList();
+
+    try {
+      final WriteBatch batch = firestore.batch();
+
+      if (existingStatusDoc != null && existingStatusDoc.exists) {
+        // ── APPEND to existing Status doc ──
+        final existingData = existingStatusDoc.data() as Map<String, dynamic>;
+        List<dynamic> existingOrderItems = List.from(existingData['orderItems'] ?? []);
+        existingOrderItems.addAll(orderItems);
+
+        // Store food subtotal only (exclude take-away fee); fee is recalculated at settlement
+        int foodSubtotal = totalHarga - biayaBungkus;
+        batch.update(existingStatusDoc.reference, {
+          'orderItems': existingOrderItems,
+          'total': FieldValue.increment(foodSubtotal),
+          'subTotal': FieldValue.increment(foodSubtotal),
+          // takeAwayFee stays at 0; recalculated at settlement
+        });
+      } else {
+        // ── CREATE new Status doc ──
+        final String statusDocId = '${nomorBerikutnya + 1}_plazaUnipdu';
+        // Store food subtotal only (exclude take-away fee); fee is recalculated at settlement
+        int foodSubtotal = totalHarga - biayaBungkus;
+        Map<String, dynamic> mapStatus = {
+          'customerNumber': nomorBerikutnya + 1,
+          'orderItems': orderItems,
+          'status': 'Serving',
+          'namaCustomer': memberName,
+          'total': foodSubtotal,
+          'subTotal': foodSubtotal,
+          'takeAwayFee': 0,
+          'transactionMethod': 'Open Bill',
+          'isMember': true,
+          'memberId': memberId,
+          if (memberPhone != null) 'customerPhone': memberPhone,
+          'waktuPengambilan': 'Tidak Memesan',
+          'canteenId': "canteen375_plazaUnipdu",
+          'waktuPesan': FieldValue.serverTimestamp(),
+          'isClosed': false,
+        };
+
+        DocumentReference statusRef = firestore.collection(Col.name('Status')).doc(statusDocId);
+        batch.set(statusRef, mapStatus);
+
+        DocumentReference customerNumber = firestore.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
+        batch.update(customerNumber, {'customerNumber': FieldValue.increment(1)});
+      }
+
+      // Deduct ingredients within the batch
+      await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
+
+      await batch.commit();
+    } catch (e) {
+      Navigator.pop(context);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
+      }
+      return;
+    }
+
+    try {
+      // Receipt printing is skipped here for Open Bills. It will be printed during settlement.
+      Navigator.pop(context);
+
+      await _showSuccessDialog(
+        context: context,
+        nomorBerikutnya: nomorBerikutnya,
+        uangYangDiterima: totalHarga,
+        totalHarga: totalHarga,
+        originalTotal: originalTotal,
+        discountAmount: 0,
         pesananList: pesananList,
         customerNameController: customerNameController,
         uangYangDiterimaController: uangYangDiterimaController,
@@ -917,25 +1181,110 @@ class OrderConfirmationService {
     getTotal();
   }
 
-  static void _claimVoucherAsync(String voucherCode, bool isPosVoucher) async {
+  /// Build a nested lookup: {groupId: {optionId: OptionItem}}
+  static Map<String, Map<String, OptionItem>> _buildOptionGroupLookup(
+    QuerySnapshot snapshot,
+  ) {
+    final lookup = <String, Map<String, OptionItem>>{};
+    for (var doc in snapshot.docs) {
+      final group = OptionGroup.fromFirestore(doc);
+      final optionMap = <String, OptionItem>{};
+      for (var option in group.options) {
+        optionMap[option.id] = option;
+      }
+      lookup[group.id] = optionMap;
+    }
+    return lookup;
+  }
+
+  /// Resolve a list of SelectedOptions into a flat list of MenuIngredients
+  /// by looking up each option's ingredients from the option group data.
+  static List<MenuIngredient> _resolveOptionIngredients(
+    List<SelectedOption> selectedOptions,
+    Map<String, Map<String, OptionItem>> optionGroupLookup,
+  ) {
+    final ingredients = <MenuIngredient>[];
+    for (var selected in selectedOptions) {
+      final groupMap = optionGroupLookup[selected.groupId];
+      if (groupMap == null) continue;
+      final optionItem = groupMap[selected.optionId];
+      if (optionItem == null) continue;
+      ingredients.addAll(optionItem.ingredients);
+    }
+    return ingredients;
+  }
+
+  static Future<void> _appendAllIngredientsToBatch(
+    List<PesananObject> pesananList,
+    Map<String, MenuObject> menuMap,
+    Map<String, Map<String, OptionItem>> optionGroupLookup,
+    {WriteBatch? batch, Transaction? transaction}
+  ) async {
+    if (batch == null && transaction == null) return;
+
+    final aggregated = <String, Map<String, dynamic>>{};
+    
+    for (var pesanan in pesananList) {
+      final menu = menuMap[pesanan.namaPesanan];
+      if (menu == null) continue;
+      
+      final optIngredients = _resolveOptionIngredients(
+        pesanan.selectedOptions, optionGroupLookup,
+      );
+      
+      final singleMenuAgg = InventoryService().aggregateIngredients(
+        menu.ingredients, optIngredients, pesanan.totalQuantity
+      );
+      
+      for (var entry in singleMenuAgg.entries) {
+        if (aggregated.containsKey(entry.key)) {
+          aggregated[entry.key]!['totalRequired'] = 
+              (aggregated[entry.key]!['totalRequired'] as int) + (entry.value['totalRequired'] as int);
+        } else {
+          aggregated[entry.key] = {
+            'name': entry.value['name'],
+            'totalRequired': entry.value['totalRequired'],
+          };
+        }
+      }
+    }
+
+    if (batch != null) {
+      await InventoryService().batchDeductAggregatedIngredients(aggregated, batch);
+    } else if (transaction != null) {
+      await InventoryService().transactionDeductAggregatedIngredients(aggregated, transaction);
+    }
+  }
+
+  static Future<void> _appendVoucherToBatchOrTransaction(
+      String voucherCode, bool isPosVoucher, {WriteBatch? batch, Transaction? transaction}) async {
     try {
+      if (batch == null && transaction == null) return;
+      
       if (isPosVoucher) {
         FirebaseFirestore fs = FirebaseFirestore.instance;
         DocumentReference voucherRef =
             fs.collection("vouchers").doc(voucherCode);
 
         // Fetch document to get voucherGroupId
-        DocumentSnapshot doc = await voucherRef.get();
+        DocumentSnapshot doc;
+        if (transaction != null) {
+            doc = await transaction.get(voucherRef);
+        } else {
+            doc = await voucherRef.get();
+        }
+        
         if (doc.exists) {
           Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
           String? groupId = data['voucherGroupId'];
 
-          await voucherRef.update({'status': 'CLAIMED'});
+          if (batch != null) batch.update(voucherRef, {'status': 'CLAIMED'});
+          if (transaction != null) transaction.update(voucherRef, {'status': 'CLAIMED'});
 
           if (groupId != null) {
-            await fs.collection('voucherGroup').doc(groupId).update({
-              'totalClaimed': FieldValue.increment(1),
-            });
+            var groupRef = fs.collection('voucherGroup').doc(groupId);
+            if (batch != null) batch.update(groupRef, {'totalClaimed': FieldValue.increment(1)});
+            if (transaction != null) transaction.update(groupRef, {'totalClaimed': FieldValue.increment(1)});
             print('📈 Incremented totalClaimed for group $groupId');
           }
         }
@@ -944,9 +1293,10 @@ class OrderConfirmationService {
             FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
         DocumentReference voucherRef =
             eSantrenFs.collection("vouchers").doc(voucherCode);
-        await voucherRef.update({'isClaimed': true});
+        if (batch != null) batch.update(voucherRef, {'isClaimed': true});
+        if (transaction != null) transaction.update(voucherRef, {'isClaimed': true});
       }
-      print('✅ Voucher $voucherCode claimed successfully');
+      print('✅ Voucher $voucherCode claimed successfully inside atomic unit');
     } catch (e) {
       print('❌ Failed to claim voucher $voucherCode: $e');
     }
@@ -1050,7 +1400,7 @@ class OrderConfirmationService {
       if (pointsToAdd <= 0) return;
 
       FirebaseFirestore fs = FirebaseFirestore.instance;
-      DocumentReference memberRef = fs.collection("Members").doc(memberId);
+      DocumentReference memberRef = fs.collection(Col.name('Members')).doc(memberId);
 
       await memberRef.update({
         'points': FieldValue.increment(pointsToAdd),
@@ -1211,6 +1561,238 @@ class OrderConfirmationService {
       print('❌ Failed to process periodic cashback campaign: $e');
     }
   }
+
+  /// Show settlement dialog for an existing Open Bill
+  static Future<void> showOpenBillSettlementDialog({
+    required BuildContext context,
+    required OpenBill openBill,
+    required List<OpenBillOrder> billOrders,
+    required bool printerIsConnected,
+    required TextEditingController uangYangDiterimaController,
+    required int nomorBerikutnya,
+    required Future<void> Function({int discountAmount, int originalTotal, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway})
+        printReceipt,
+    required String Function() getYear,
+    required String Function() getMonth,
+    required String Function() getDate,
+    required Function(int) setJumlahItem,
+  }) async {
+    // 1. Aggregate all items from all orders in the open bill
+    final List<PesananObject> aggregatedItems = [];
+    
+    for (var order in billOrders) {
+      for (var item in order.items) {
+        final pesanan = PesananObject(
+          namaPesanan: item.namaPesanan,
+          harga: item.harga,
+          dineInQuantity: item.dineInQuantity,
+          takeAwayQuantity: item.takeAwayQuantity,
+          selectedOptions: item.selectedOptions.toList(),
+        );
+        
+        int idx = aggregatedItems.indexWhere((ai) => ai.orderKey == pesanan.orderKey);
+        if (idx == -1) {
+          aggregatedItems.add(pesanan);
+        } else {
+          aggregatedItems[idx].dineInQuantity += pesanan.dineInQuantity;
+          aggregatedItems[idx].takeAwayQuantity += pesanan.takeAwayQuantity;
+        }
+      }
+    }
+
+    // 2. Calculate take-away fee from aggregated items using unitsPerPackage
+    int totalTakeAwayFee = 0;
+    try {
+      final menuSnapshot = await FirebaseFirestore.instance
+          .collection(Col.name('Canteens'))
+          .doc('canteen375')
+          .collection('MenuCollection')
+          .get();
+      final menuUnitsMap = <String, int>{};
+      for (var doc in menuSnapshot.docs) {
+        final data = doc.data();
+        menuUnitsMap[data['namaMenu'] ?? ''] = (data['unitsPerPackage'] ?? 1) as int;
+      }
+
+      int totalPackages = 0;
+      for (var item in aggregatedItems) {
+        if (item.takeAwayQuantity > 0) {
+          int unitsPerPackage = menuUnitsMap[item.namaPesanan] ?? 1;
+          int packagesNeeded = (item.takeAwayQuantity / unitsPerPackage).ceil();
+          totalPackages += packagesNeeded;
+        }
+      }
+      totalTakeAwayFee = (totalPackages ~/ 4) * 1000;
+    } catch (e) {
+      // If menu fetch fails, proceed with 0 take-away fee
+      print('⚠️ Failed to calculate take-away fee for open bill: $e');
+    }
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return _OpenBillSettlementDialog(
+          openBill: openBill,
+          printerIsConnected: printerIsConnected,
+          aggregatedItems: aggregatedItems,
+          totalTakeAwayFee: totalTakeAwayFee,
+          uangYangDiterimaController: uangYangDiterimaController,
+        );
+      },
+    );
+
+    if (result != null && result['confirmed'] == true) {
+      int finalTotal = result['finalTotal'] ?? (openBill.totalAmount + totalTakeAwayFee);
+      String? appliedVoucherCode = result['voucherCode'];
+      String? paymentMethod = result['paymentMethod'];
+
+      int billTotalWithFee = openBill.totalAmount + totalTakeAwayFee;
+
+      await _processOpenBillSettlement(
+        context: context,
+        openBill: openBill,
+        aggregatedItems: aggregatedItems,
+        totalHarga: finalTotal,
+        originalTotal: billTotalWithFee,
+        totalTakeAwayFee: totalTakeAwayFee,
+        uangYangDiterimaController: uangYangDiterimaController,
+        nomorBerikutnya: nomorBerikutnya,
+        printReceipt: printReceipt,
+        getYear: getYear,
+        getMonth: getMonth,
+        getDate: getDate,
+        setJumlahItem: setJumlahItem,
+        appliedVoucherCode: appliedVoucherCode,
+        isPosVoucher: result['isPosVoucher'] ?? false,
+        discountAmount: billTotalWithFee - finalTotal,
+        transactionMethod: paymentMethod,
+      );
+    } else {
+      uangYangDiterimaController.clear();
+    }
+  }
+
+  /// Internal logic for completing an open bill settlement
+  static Future<void> _processOpenBillSettlement({
+    required BuildContext context,
+    required OpenBill openBill,
+    required List<PesananObject> aggregatedItems,
+    required int totalHarga,
+    required int originalTotal,
+    required int totalTakeAwayFee,
+    required TextEditingController uangYangDiterimaController,
+    required int nomorBerikutnya,
+    required Future<void> Function({int discountAmount, int originalTotal, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway}) printReceipt,
+    required String Function() getYear,
+    required String Function() getMonth,
+    required String Function() getDate,
+    required Function(int) setJumlahItem,
+    String? appliedVoucherCode,
+    bool isPosVoucher = false,
+    int discountAmount = 0,
+    String? transactionMethod,
+  }) async {
+    LoaderWidget.showLoaderDialog(context, message: "Menyelesaikan tagihan...");
+    
+    FirebaseFirestore fs = FirebaseFirestore.instance;
+    WriteBatch batch = fs.batch();
+    
+    // 1. Prepare Transaction Data
+    Map<String, dynamic> map = {};
+    for (var element in aggregatedItems) {
+      map[element.namaPesanan] = FieldValue.increment(element.totalQuantity);
+    }
+    int subTotal = totalHarga - totalTakeAwayFee;
+    map['total'] = FieldValue.increment(totalHarga);
+    map['subTotal'] = FieldValue.increment(subTotal);
+    map['takeAwayFee'] = FieldValue.increment(totalTakeAwayFee);
+    if (transactionMethod == 'Cash') {
+      map['totalCash'] = FieldValue.increment(totalHarga);
+    } else if (transactionMethod == 'QRIS') {
+      map['totalQris'] = FieldValue.increment(totalHarga);
+    } else if (transactionMethod == 'Online') {
+      map['totalOnline'] = FieldValue.increment(totalHarga);
+    }
+    map["year"] = getYear();
+    map["month"] = getMonth();
+    map["date"] = getDate();
+    map["timestamp"] = FieldValue.serverTimestamp();
+
+    DateTime now = DateTime.now();
+    String datenowFormatted = DateFormat('yyyy-MM-dd').format(now);
+    DocumentReference dailyTransaction = fs.collection(Col.name('DailyTransaction')).doc(datenowFormatted);
+    batch.set(dailyTransaction, map, SetOptions(merge: true));
+
+    DocumentReference monthlyTransaction = fs.collection(Col.name('MonthlyTransaction')).doc(getMonth());
+    batch.set(monthlyTransaction, map, SetOptions(merge: true));
+
+    DocumentReference yearlyTransaction = fs.collection(Col.name('YearlyTransaction')).doc(getYear());
+    batch.set(yearlyTransaction, map, SetOptions(merge: true));
+
+    try {
+      // 🗃️ STEP 2: Settle the open bill by updating the Status doc
+      // Changes transactionMethod from 'Open Bill' to actual payment method,
+      // sets isClosed=true, and records settlement metadata.
+      if (openBill.statusDocId != null) {
+        await OpenBillService.instance.settleBill(
+          statusDocId: openBill.statusDocId!,
+          paymentMethod: transactionMethod ?? 'Cash',
+          finalTotal: totalHarga,
+          discountAmount: discountAmount,
+          subTotal: subTotal,
+          takeAwayFee: totalTakeAwayFee,
+          voucherCode: appliedVoucherCode,
+          existingBatch: batch,
+        );
+      }
+
+      if (appliedVoucherCode != null) {
+        await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch);
+      }
+
+      // 🏆 Commit the entire batch (Financials + Settlement) together!
+      await batch.commit();
+
+      // 💳 STEP 3: Update member points and competition records
+      _incrementMemberPoints(openBill.memberId, totalHarga);
+      _updateCompetitionRecord(openBill.memberId, totalHarga);
+      _processPeriodicCashbackCampaign(openBill.memberId, totalHarga, openBill.memberName);
+
+      // 📠 STEP 4: Print Receipt
+      await printReceipt(
+        customPesananList: aggregatedItems,
+        overrideTotalHarga: totalHarga,
+        overrideNomorBerikutnya: nomorBerikutnya,
+        overrideIsTakeAway: totalTakeAwayFee > 0,
+        discountAmount: discountAmount,
+        originalTotal: originalTotal,
+      );
+
+      Navigator.pop(context); // Close loader
+
+      int uangYangDiterima = int.parse(uangYangDiterimaController.text.replaceAll('.', ''));
+
+      await _showSuccessDialog(
+        context: context,
+        nomorBerikutnya: nomorBerikutnya,
+        uangYangDiterima: uangYangDiterima,
+        totalHarga: totalHarga,
+        originalTotal: originalTotal,
+        discountAmount: discountAmount,
+        pesananList: aggregatedItems,
+        customerNameController: TextEditingController(text: openBill.memberName),
+        uangYangDiterimaController: uangYangDiterimaController,
+        getTotal: () {},
+        setJumlahItem: setJumlahItem,
+      );
+    } catch (e) {
+      Navigator.pop(context);
+      if (context.mounted) {
+         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal menyelesaikan tagihan: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
 }
 
 class _OrderConfirmationDialog extends StatefulWidget {
@@ -1224,6 +1806,7 @@ class _OrderConfirmationDialog extends StatefulWidget {
   final Function(String, int) onAddRecommendedItem;
   final Function() getTotal;
   final List<String> menuItems;
+  final bool printerIsConnected;
 
   const _OrderConfirmationDialog({
     required this.totalHarga,
@@ -1236,6 +1819,7 @@ class _OrderConfirmationDialog extends StatefulWidget {
     required this.onAddRecommendedItem,
     required this.getTotal,
     this.menuItems = const [],
+    this.printerIsConnected = false,
   });
 
   @override
@@ -1257,6 +1841,10 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   List<Member> _members = [];
   Member? _selectedMember;
   bool isMember = true;
+  String? _memberError;
+  String? _selectedPaymentMethod;
+  String _lastSearchQuery = '';
+  Iterable<Member> _lastOptionsFound = const Iterable<Member>.empty();
 
   late FocusNode customerNameFocusNode;
   late FocusNode uangFocusNode;
@@ -1306,14 +1894,29 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
 
     return AlertDialog(
       title: Center(
-        child: Text(
-          'Konfirmasi Pesanan',
-          style: GoogleFonts.poppins(
-            color: Colors.black87,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.1,
-            fontSize: 18,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              'Konfirmasi Pesanan',
+              style: GoogleFonts.poppins(
+                color: Colors.black87,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
+                fontSize: 18,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: widget.printerIsConnected ? Colors.green : Colors.grey,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
         ),
       ),
       content: SizedBox(
@@ -1456,6 +2059,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                   isMember = value ?? true;
                                   if (!isMember) {
                                     _selectedMember = null;
+                                    _memberError = null;
                                   }
                                 });
                               },
@@ -1605,15 +2209,26 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                         textEditingController: widget.customerNameController,
                         displayStringForOption: (Member option) => option.name,
                         optionsBuilder: (TextEditingValue textEditingValue) async {
-                          if (textEditingValue.text == '') {
+                          final query = textEditingValue.text;
+                          if (query == '') {
                             return const Iterable<Member>.empty();
                           }
-                          return await MemberService.instance
-                              .searchCachedMembers(textEditingValue.text);
+                          
+                          _lastSearchQuery = query;
+                          await Future.delayed(const Duration(milliseconds: 500));
+                          
+                          if (query != _lastSearchQuery) {
+                            return _lastOptionsFound;
+                          }
+                          
+                          _lastOptionsFound = await MemberService.instance
+                              .searchCachedMembers(query);
+                          return _lastOptionsFound;
                         },
                         onSelected: (Member selection) {
                           setState(() {
                             _selectedMember = selection;
+                            _memberError = null;
                             widget.customerNameController.text = selection.name;
                           });
                         },
@@ -1627,7 +2242,12 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               widget.customerNameController.text = value;
                               // Reset selection if input changes from the selected member's name
                               if (_selectedMember != null && value != _selectedMember!.name) {
-                                _selectedMember = null;
+                                setState(() {
+                                  _selectedMember = null;
+                                  _memberError = null;
+                                });
+                              } else if (_memberError != null) {
+                                setState(() => _memberError = null);
                               }
                             },
                             decoration: InputDecoration(
@@ -1635,6 +2255,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(4.0),
                               ),
+                              errorText: _memberError,
                             ),
                           );
                         },
@@ -1680,6 +2301,53 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                         ),
                       ),
                     const SizedBox(height: 16),
+                    Text(
+                      'Metode Pembayaran',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: ['Cash', 'QRIS', 'Online'].map((method) {
+                        final isSelected = _selectedPaymentMethod == method;
+                        return Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.only(
+                              right: method != 'Online' ? 8 : 0,
+                            ),
+                            child: ChoiceChip(
+                              label: SizedBox(
+                                width: double.infinity,
+                                child: Text(method, textAlign: TextAlign.center),
+                              ),
+                              selected: isSelected,
+                              selectedColor: const Color(0xFFC8E6C9),
+                              labelStyle: GoogleFonts.poppins(
+                                fontSize: 13,
+                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
+                              ),
+                              onSelected: (selected) {
+                                setState(() {
+                                  _selectedPaymentMethod = selected ? method : null;
+                                  if (selected && method != 'Cash') {
+                                    final format = NumberFormat("#,###", "id_ID");
+                                    widget.uangYangDiterimaController.text =
+                                        format.format(displayTotal);
+                                  } else if (selected && method == 'Cash') {
+                                    widget.uangYangDiterimaController.clear();
+                                  }
+                                });
+                              },
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
                     Row(
                       children: [
                         Expanded(
@@ -1721,13 +2389,41 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               backgroundColor: const Color(0xFF2E7D32),
                             ),
                             onPressed: () {
-                              int uangYangDiterima = int.parse(widget
+                              if (isMember && _selectedMember == null) {
+                                setState(() {
+                                  _memberError = widget.customerNameController.text.trim().isEmpty
+                                      ? 'Nama member wajib diisi'
+                                      : 'Nama tidak ditemukan, pilih dari daftar';
+                                });
+                                return;
+                              }
+                              if (_selectedPaymentMethod == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Pilih metode pembayaran'),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                                return;
+                              }
+                              final inputText = widget
                                   .uangYangDiterimaController.text
-                                  .replaceAll('.', ''));
+                                  .replaceAll('.', '');
+                              if (inputText.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Masukkan uang yang diterima'),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                                return;
+                              }
+                              int uangYangDiterima = int.parse(inputText);
                               if (uangYangDiterima >= displayTotal) {
                                 Navigator.pop(context, {
                                   'confirmed': true,
                                   'finalTotal': displayTotal,
+                                  'paymentMethod': _selectedPaymentMethod,
                                   'isMember': isMember,
                                   'memberId': _selectedMember?.id,
                                   'memberPhone': _selectedMember?.phoneNumber,
@@ -1737,13 +2433,13 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                   'isPosVoucher': voucherApplied ? isPosVoucher : false,
                                 });
                               } else {
-                                SnackBar snackBar = const SnackBar(
-                                  content:
-                                      Text('Uang yang diterima masih kurang'),
-                                  backgroundColor: Colors.redAccent,
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Uang yang diterima masih kurang'),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
                                 );
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(snackBar);
                               }
                             },
                             child: const Text('OK'),
@@ -1751,6 +2447,29 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                         )
                       ],
                     ),
+                    if (isMember && _selectedMember != null) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.receipt_long),
+                          label: const Text('Simpan ke Tagihan (Open Bill)'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.orange.shade800,
+                            side: BorderSide(color: Colors.orange.shade800),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(context, {
+                              'chargeToTab': true,
+                              'memberId': _selectedMember!.id,
+                              'memberName': _selectedMember!.name,
+                              'memberPhone': _selectedMember!.phoneNumber,
+                            });
+                          },
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1836,6 +2555,7 @@ class _SelfOrderConfirmationDialogState
   late int currentTotal;
   List<Member> _members = [];
   Member? _selectedMember;
+  String? _selectedPaymentMethod;
 
   late FocusNode uangFocusNode;
   late FocusNode voucherFocusNode;
@@ -1849,7 +2569,7 @@ class _SelfOrderConfirmationDialogState
     _loadMembers();
     
     // Pre-fill customer name from self-order
-    widget.customerNameController.text = widget.selfOrder.memberName;
+    widget.customerNameController.text = widget.selfOrder.namaCustomer;
   }
 
   @override
@@ -1863,9 +2583,9 @@ class _SelfOrderConfirmationDialogState
     final members = await MemberService.instance.getCachedMembers();
     setState(() {
       _members = members;
-      // Try to find matching member by userId
+      // Try to find matching member by memberId
       _selectedMember = _members.cast<Member?>().firstWhere(
-        (m) => m?.id == widget.selfOrder.userId,
+        (m) => m?.id == widget.selfOrder.memberId,
         orElse: () => null,
       );
       if (_selectedMember != null) {
@@ -1949,7 +2669,7 @@ class _SelfOrderConfirmationDialogState
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              widget.selfOrder.shortCode,
+              widget.selfOrder.displayShortCode,
               style: GoogleFonts.poppins(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -2178,6 +2898,55 @@ class _SelfOrderConfirmationDialogState
                     ],
                     const SizedBox(height: 16),
 
+                    // Payment method selection
+                    Text(
+                      'Metode Pembayaran',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: ['Cash', 'QRIS', 'Online'].map((method) {
+                        final isSelected = _selectedPaymentMethod == method;
+                        return Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.only(
+                              right: method != 'Online' ? 8 : 0,
+                            ),
+                            child: ChoiceChip(
+                              label: SizedBox(
+                                width: double.infinity,
+                                child: Text(method, textAlign: TextAlign.center),
+                              ),
+                              selected: isSelected,
+                              selectedColor: const Color(0xFFC8E6C9),
+                              labelStyle: GoogleFonts.poppins(
+                                fontSize: 13,
+                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
+                              ),
+                              onSelected: (selected) {
+                                setState(() {
+                                  _selectedPaymentMethod = selected ? method : null;
+                                  if (selected && method != 'Cash') {
+                                    final format = NumberFormat("#,###", "id_ID");
+                                    widget.uangYangDiterimaController.text =
+                                        format.format(displayTotal);
+                                  } else if (selected && method == 'Cash') {
+                                    widget.uangYangDiterimaController.clear();
+                                  }
+                                });
+                              },
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+
                     // Cash input
                     TextField(
                       focusNode: uangFocusNode,
@@ -2239,6 +3008,15 @@ class _SelfOrderConfirmationDialogState
                               ),
                             ),
                             onPressed: () {
+                              if (_selectedPaymentMethod == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Pilih metode pembayaran'),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                                return;
+                              }
                               final inputText = widget
                                   .uangYangDiterimaController.text
                                   .replaceAll('.', '');
@@ -2256,6 +3034,7 @@ class _SelfOrderConfirmationDialogState
                                 Navigator.pop(context, {
                                   'confirmed': true,
                                   'finalTotal': displayTotal,
+                                  'paymentMethod': _selectedPaymentMethod,
                                   'isMember': _selectedMember != null,
                                   'memberId': _selectedMember?.id ??
                                       widget.selfOrder.userId,
@@ -2315,6 +3094,328 @@ class _SelfOrderConfirmationDialogState
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Dialog for settling an open bill
+class _OpenBillSettlementDialog extends StatefulWidget {
+  final OpenBill openBill;
+  final bool printerIsConnected;
+  final List<PesananObject> aggregatedItems;
+  final int totalTakeAwayFee;
+  final TextEditingController uangYangDiterimaController;
+
+  const _OpenBillSettlementDialog({
+    required this.openBill,
+    required this.printerIsConnected,
+    required this.aggregatedItems,
+    required this.totalTakeAwayFee,
+    required this.uangYangDiterimaController,
+  });
+
+  @override
+  _OpenBillSettlementDialogState createState() => _OpenBillSettlementDialogState();
+}
+
+class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
+  bool applyPromo = false;
+  TextEditingController voucherController = TextEditingController();
+  String? voucherName;
+  int voucherValue = 0;
+  bool voucherApplied = false;
+  String? voucherError;
+  bool isValidatingVoucher = false;
+  bool isPosVoucher = false;
+  String? _selectedPaymentMethod;
+
+  late FocusNode uangFocusNode;
+  late FocusNode voucherFocusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    uangFocusNode = FocusNode();
+    voucherFocusNode = FocusNode();
+    widget.uangYangDiterimaController.clear();
+  }
+
+  @override
+  void dispose() {
+    uangFocusNode.dispose();
+    voucherFocusNode.dispose();
+    super.dispose();
+  }
+
+  Future<void> _validateAndApplyVoucher() async {
+    if (voucherController.text.isEmpty) return;
+
+    setState(() {
+      isValidatingVoucher = true;
+      voucherError = null;
+    });
+
+    final result = await OrderConfirmationService._validateVoucher(
+        voucherController.text, widget.openBill.totalAmount + widget.totalTakeAwayFee);
+
+    setState(() {
+      isValidatingVoucher = false;
+      if (result?['error'] != null) {
+        voucherError = result!['error'];
+        voucherApplied = false;
+      } else if (result != null) {
+        voucherApplied = true;
+        voucherName = result['voucherName'];
+        voucherValue = result['value'] ?? 0;
+        isPosVoucher = result['isPosVoucher'] ?? false;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    int baseTotal = widget.openBill.totalAmount + widget.totalTakeAwayFee;
+    int displayTotal = baseTotal - voucherValue;
+
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.receipt_long, color: Colors.orange),
+              const SizedBox(width: 8),
+              Text(
+                'Selesaikan Tagihan',
+                style: GoogleFonts.poppins(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: widget.printerIsConnected ? Colors.green : Colors.grey,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            widget.openBill.memberName,
+            style: GoogleFonts.poppins(
+              color: Colors.grey.shade600,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Order Items List
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  children: [
+                    ...widget.aggregatedItems.map((item) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${item.namaPesanan} x${item.totalQuantity}',
+                                  style: GoogleFonts.poppins(fontSize: 13),
+                                ),
+                              ),
+                              Text(
+                                'Rp ${NumberFormat.decimalPattern().format(item.subtotal).replaceAll(',', '.')}',
+                                style: GoogleFonts.poppins(fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        )),
+                    if (widget.totalTakeAwayFee > 0) ...[
+                      const Divider(),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Total Biaya Bungkus',
+                            style: GoogleFonts.poppins(
+                                fontSize: 13, color: Colors.grey.shade600),
+                          ),
+                          Text(
+                            'Rp ${NumberFormat.decimalPattern().format(widget.totalTakeAwayFee).replaceAll(',', '.')}',
+                            style: GoogleFonts.poppins(fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Total
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Total Tagihan: ',
+                    style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w500),
+                  ),
+                  if (voucherApplied) ...[
+                    Text(
+                      'Rp ${NumberFormat.decimalPattern().format(baseTotal).replaceAll(',', '.')}',
+                      style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          color: Colors.grey,
+                          decoration: TextDecoration.lineThrough),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  Text(
+                    'Rp ${NumberFormat.decimalPattern().format(displayTotal).replaceAll(',', '.')}',
+                    style: GoogleFonts.poppins(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange.shade800),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Voucher input
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: voucherController,
+                      focusNode: voucherFocusNode,
+                      decoration: InputDecoration(
+                        labelText: 'Kode Voucher',
+                        border: const OutlineInputBorder(),
+                        errorText: voucherError,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _validateAndApplyVoucher,
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                    child: const Text('Apply'),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 20),
+              
+              Text(
+                'Metode Pembayaran',
+                style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: ['Cash', 'QRIS', 'Online'].map((method) {
+                  final isSelected = _selectedPaymentMethod == method;
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ChoiceChip(
+                        label: Center(child: Text(method)),
+                        selected: isSelected,
+                        onSelected: (val) {
+                          setState(() {
+                            _selectedPaymentMethod = val ? method : null;
+                            if (val && method != 'Cash') {
+                              widget.uangYangDiterimaController.text =
+                                  NumberFormat("#,###", "id_ID").format(displayTotal);
+                            } else {
+                              widget.uangYangDiterimaController.clear();
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              TextField(
+                controller: widget.uangYangDiterimaController,
+                focusNode: uangFocusNode,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  TextInputFormatter.withFunction((oldValue, newValue) {
+                     if (newValue.text.isEmpty) return newValue;
+                     final intValue = int.parse(newValue.text);
+                     final newText = NumberFormat("#,###", "id_ID").format(intValue);
+                     return TextEditingValue(
+                        text: newText,
+                        selection: TextSelection.collapsed(offset: newText.length),
+                     );
+                  }),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Uang yang Diterima',
+                  border: OutlineInputBorder(),
+                  prefixText: 'Rp ',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            if (_selectedPaymentMethod == null) {
+               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pilih metode pembayaran')));
+               return;
+            }
+            final totalDiterima = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
+            if (totalDiterima < displayTotal) {
+               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uang kurang')));
+               return;
+            }
+            
+            Navigator.pop(context, {
+              'confirmed': true,
+              'finalTotal': displayTotal,
+              'paymentMethod': _selectedPaymentMethod,
+              'voucherCode': voucherApplied ? voucherController.text : null,
+              'isPosVoucher': isPosVoucher,
+            });
+          },
+          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+          child: Text('PROSES BAYAR', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        ),
+      ],
     );
   }
 }

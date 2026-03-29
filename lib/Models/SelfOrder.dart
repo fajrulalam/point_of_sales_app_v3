@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 
 /// Represents an individual item in a self-order
 class SelfOrderItem {
@@ -6,13 +7,15 @@ class SelfOrderItem {
   final int harga;
   final int dineInQuantity;
   final int takeAwayQuantity;
-  final List<dynamic> selectedOptions;
+  final bool isMakanan;
+  final List<SelectedOption> selectedOptions;
 
   SelfOrderItem({
     required this.namaPesanan,
     required this.harga,
     required this.dineInQuantity,
     required this.takeAwayQuantity,
+    this.isMakanan = true,
     this.selectedOptions = const [],
   });
 
@@ -22,7 +25,11 @@ class SelfOrderItem {
       harga: (map['harga'] ?? 0).toInt(),
       dineInQuantity: (map['dineInQuantity'] ?? 0).toInt(),
       takeAwayQuantity: (map['takeAwayQuantity'] ?? 0).toInt(),
-      selectedOptions: map['selectedOptions'] ?? [],
+      isMakanan: map['isMakanan'] ?? true,
+      selectedOptions: (map['selectedOptions'] as List<dynamic>?)
+              ?.map((o) => SelectedOption.fromMap(o as Map<String, dynamic>))
+              .toList() ??
+          [],
     );
   }
 
@@ -32,52 +39,66 @@ class SelfOrderItem {
       'harga': harga,
       'dineInQuantity': dineInQuantity,
       'takeAwayQuantity': takeAwayQuantity,
-      'selectedOptions': selectedOptions,
+      'isMakanan': isMakanan,
+      'selectedOptions': selectedOptions.map((o) => o.toMap()).toList(),
     };
   }
 
   int get totalQuantity => dineInQuantity + takeAwayQuantity;
 
-  int get itemTotal => harga * totalQuantity;
+  int get optionsTotal =>
+      selectedOptions.fold(0, (sum, o) => sum + o.priceAdjustment);
+
+  int get effectivePrice => harga + optionsTotal;
+
+  int get itemTotal => effectivePrice * totalQuantity;
 }
 
 /// Represents a self-order placed by a member through the Member's app
 class SelfOrder {
   final String id;
-  final String memberName;
-  final String userId;
-  final String shortCode;
+  final String canteenId;
+  final int customerNumber;
+  final String customerPhone;
+  final bool isMember;
+  final String memberId;
+  final String namaCustomer;
   final String status;
   final List<SelfOrderItem> orderItems;
-  final int subtotal;
-  final int takeAwayFee;
   final int total;
-  final DateTime timestamp;
+  final String transactionMethod;
+  final String waktuPengambilan;
+  final DateTime waktuPesan;
   final String? declineReason;
+  final String? shortCode; // Keep for UI compatibility if needed, fallback to customerNumber
 
   SelfOrder({
     required this.id,
-    required this.memberName,
-    required this.userId,
-    required this.shortCode,
+    required this.canteenId,
+    required this.customerNumber,
+    required this.customerPhone,
+    required this.isMember,
+    required this.memberId,
+    required this.namaCustomer,
     required this.status,
     required this.orderItems,
-    required this.subtotal,
-    required this.takeAwayFee,
     required this.total,
-    required this.timestamp,
+    required this.transactionMethod,
+    required this.waktuPengambilan,
+    required this.waktuPesan,
     this.declineReason,
+    this.shortCode,
   });
 
   factory SelfOrder.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
 
     // Parse timestamp
-    DateTime parsedTimestamp;
-    if (data['timestamp'] is Timestamp) {
-      parsedTimestamp = (data['timestamp'] as Timestamp).toDate();
+    DateTime parsedWaktuPesan;
+    if (data['waktuPesan'] is Timestamp) {
+      parsedWaktuPesan = (data['waktuPesan'] as Timestamp).toDate();
     } else {
-      parsedTimestamp = DateTime.now();
+      parsedWaktuPesan = DateTime.now();
     }
 
     // Parse order items
@@ -90,33 +111,54 @@ class SelfOrder {
 
     return SelfOrder(
       id: doc.id,
-      memberName: data['memberName'] ?? '',
-      userId: data['userId'] ?? '',
-      shortCode: data['shortCode'] ?? '',
+      canteenId: data['canteenId'] ?? '',
+      customerNumber: (data['customerNumber'] ?? 0).toInt(),
+      customerPhone: data['customerPhone'] ?? '',
+      isMember: data['isMember'] ?? false,
+      memberId: data['memberId'] ?? data['userId'] ?? '',
+      namaCustomer: data['namaCustomer'] ?? data['memberName'] ?? '',
       status: data['status'] ?? 'Unpaid',
       orderItems: items,
-      subtotal: (data['subtotal'] ?? 0).toInt(),
-      takeAwayFee: (data['takeAwayFee'] ?? 0).toInt(),
       total: (data['total'] ?? 0).toInt(),
-      timestamp: parsedTimestamp,
+      transactionMethod: data['transactionMethod'] ?? 'Self Order',
+      waktuPengambilan: data['waktuPengambilan'] ?? 'Tidak Memesan',
+      waktuPesan: parsedWaktuPesan,
       declineReason: data['declineReason'],
+      shortCode: data['shortCode'] ?? (data['customerNumber']?.toString()),
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
-      'memberName': memberName,
-      'userId': userId,
-      'shortCode': shortCode,
+      'canteenId': canteenId,
+      'customerNumber': customerNumber,
+      'customerPhone': customerPhone,
+      'isMember': isMember,
+      'memberId': memberId,
+      'namaCustomer': namaCustomer,
       'status': status,
       'orderItems': orderItems.map((item) => item.toMap()).toList(),
-      'subtotal': subtotal,
-      'takeAwayFee': takeAwayFee,
       'total': total,
-      'timestamp': Timestamp.fromDate(timestamp),
+      'transactionMethod': transactionMethod,
+      'waktuPengambilan': waktuPengambilan,
+      'waktuPesan': Timestamp.fromDate(waktuPesan),
       'declineReason': declineReason,
+      'shortCode': shortCode,
     };
   }
+
+  // Helper getters for compatibility and UI
+  String get memberName => namaCustomer;
+  String get userId => memberId;
+  DateTime get timestamp => waktuPesan;
+  String get displayShortCode => shortCode ?? customerNumber.toString();
+
+  // Calculated subtotal for UI if needed
+  int get calculatedSubtotal =>
+      orderItems.fold(0, (sum, item) => sum + item.itemTotal);
+
+  int get subtotal => calculatedSubtotal;
+  int get takeAwayFee => total - subtotal;
 
   bool get isUnpaid => status == 'Unpaid';
   bool get isPaid => status == 'Paid';
@@ -132,29 +174,37 @@ class SelfOrder {
 
   SelfOrder copyWith({
     String? id,
-    String? memberName,
-    String? userId,
-    String? shortCode,
+    String? canteenId,
+    int? customerNumber,
+    String? customerPhone,
+    bool? isMember,
+    String? memberId,
+    String? namaCustomer,
     String? status,
     List<SelfOrderItem>? orderItems,
-    int? subtotal,
-    int? takeAwayFee,
     int? total,
-    DateTime? timestamp,
+    String? transactionMethod,
+    String? waktuPengambilan,
+    DateTime? waktuPesan,
     String? declineReason,
+    String? shortCode,
   }) {
     return SelfOrder(
       id: id ?? this.id,
-      memberName: memberName ?? this.memberName,
-      userId: userId ?? this.userId,
-      shortCode: shortCode ?? this.shortCode,
+      canteenId: canteenId ?? this.canteenId,
+      customerNumber: customerNumber ?? this.customerNumber,
+      customerPhone: customerPhone ?? this.customerPhone,
+      isMember: isMember ?? this.isMember,
+      memberId: memberId ?? this.memberId,
+      namaCustomer: namaCustomer ?? this.namaCustomer,
       status: status ?? this.status,
       orderItems: orderItems ?? this.orderItems,
-      subtotal: subtotal ?? this.subtotal,
-      takeAwayFee: takeAwayFee ?? this.takeAwayFee,
       total: total ?? this.total,
-      timestamp: timestamp ?? this.timestamp,
+      transactionMethod: transactionMethod ?? this.transactionMethod,
+      waktuPengambilan: waktuPengambilan ?? this.waktuPengambilan,
+      waktuPesan: waktuPesan ?? this.waktuPesan,
       declineReason: declineReason ?? this.declineReason,
+      shortCode: shortCode ?? this.shortCode,
     );
   }
 }

@@ -50,6 +50,39 @@ class OrderListWidget extends StatelessWidget {
                     fontSize: 18,
                   ),
                 ),
+                // Selected options
+                if (order.selectedOptions.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8.0, top: 2.0),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: order.selectedOptions.map((opt) {
+                        final isDiscount = opt.priceAdjustment < 0;
+                        final priceLabel = opt.priceAdjustment > 0
+                            ? ' (+${NumberFormat.decimalPattern().format(opt.priceAdjustment).replaceAll(',', '.')})'
+                            : opt.priceAdjustment < 0
+                                ? ' (-${NumberFormat.decimalPattern().format(opt.priceAdjustment.abs()).replaceAll(',', '.')})'
+                                : '';
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isDiscount ? const Color(0xFFFFF3E0) : const Color(0xFFE8F5E9),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '${opt.optionName}$priceLabel',
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              color: isDiscount ? const Color(0xFFE65100) : const Color(0xFF2E7D32),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 const SizedBox(height: 8),
                 // Two counters side by side
                 Row(

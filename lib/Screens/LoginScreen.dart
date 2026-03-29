@@ -12,39 +12,102 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  static const _teal = Color(0xFF069494);
+  static const _tealDark = Color(0xFF004D4D);
+  static const _tealLight = Color(0xFFE0F4F4);
+  static const _yellow = Color(0xFFF5C518);
+
+  static const String _correctPin = '375375';
+  static const String _adminEmail = 'admin@canteen375.com';
+  static const String _adminPassword = 'password123';
+  static const List<String> _employees = ['Ghinan', 'Amel', 'Eka', 'Dina'];
+
+  String? _selectedEmployee;
+  bool _dropdownOpen = false;
+  String _enteredPin = '';
   bool _isLoading = false;
   String? _errorMessage;
 
-  Future<void> _login() async {
-    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
-      setState(() => _errorMessage = 'Email dan password tidak boleh kosong');
+  // Keys to measure dropdown position relative to the card
+  final _cardKey = GlobalKey();
+  final _employeeRowKey = GlobalKey();
+  double _dropdownTopOffset = 246; // fallback
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureDropdownOffset());
+  }
+
+  void _measureDropdownOffset() {
+    final cardBox = _cardKey.currentContext?.findRenderObject() as RenderBox?;
+    final rowBox = _employeeRowKey.currentContext?.findRenderObject() as RenderBox?;
+    if (cardBox == null || rowBox == null) return;
+    final rowGlobal = rowBox.localToGlobal(Offset.zero);
+    final cardGlobal = cardBox.localToGlobal(Offset.zero);
+    if (mounted) {
+      setState(() {
+        _dropdownTopOffset = (rowGlobal.dy - cardGlobal.dy) + rowBox.size.height;
+      });
+    }
+  }
+
+  void _onDigitTap(String digit) {
+    if (_enteredPin.length >= 6 || _isLoading) return;
+    setState(() {
+      _enteredPin += digit;
+      _errorMessage = null;
+    });
+    if (_enteredPin.length == 6) _validateAndLogin();
+  }
+
+  void _onDelete() {
+    if (_enteredPin.isEmpty || _isLoading) return;
+    setState(() {
+      _enteredPin = _enteredPin.substring(0, _enteredPin.length - 1);
+      _errorMessage = null;
+    });
+  }
+
+  Future<void> _validateAndLogin() async {
+    if (_enteredPin != _correctPin) {
+      setState(() {
+        _errorMessage = 'PIN salah. Coba lagi.';
+        _enteredPin = '';
+      });
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      // 1. Sign in to default app
       await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+        email: _adminEmail,
+        password: _adminPassword,
       );
-
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, Home.id);
-      }
+      if (mounted) Navigator.pushReplacementNamed(context, Home.id);
     } on FirebaseAuthException catch (e) {
-      setState(() {
-        _errorMessage = e.message ?? 'Terjadi kesalahan saat login';
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.message ?? 'Terjadi kesalahan saat login';
+          _enteredPin = '';
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      print('DEBUG: Login Error: $e');
-      setState(() => _errorMessage = 'Gagal login: $e');
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (mounted && FirebaseAuth.instance.currentUser != null) {
+        setState(() => _isLoading = false);
+        Navigator.pushReplacementNamed(context, Home.id);
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Terjadi kesalahan. Coba lagi.';
+          _enteredPin = '';
+          _isLoading = false;
+        });
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -52,136 +115,357 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final otherEmployees = _employees.where((e) => e != _selectedEmployee).toList();
+
+
     return Scaffold(
-      backgroundColor: const Color(0xFF1B5E20),
+      backgroundColor: _tealDark,
       body: Center(
-        child: SingleChildScrollView(
-          child: Container(
-            width: 400,
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+        child: Container(
+          key: _cardKey,
+          width: 360,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.25),
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: Stack(
+              clipBehavior: Clip.hardEdge,
               children: [
-                // Logo or Icon
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFE8F5E9),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.storefront_rounded,
-                    size: 64,
-                    color: Color(0xFF2E7D32),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  '375 POS Admin',
-                  style: GoogleFonts.poppins(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF1B5E20),
-                  ),
-                ),
-                Text(
-                  'Silahkan login untuk melanjutkan',
-                  style: GoogleFonts.poppins(
-                    color: Colors.grey.shade600,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                
-                // Email Field
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: const Icon(Icons.email_outlined),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                
-                // Password Field
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: InputDecoration(
-                    labelText: 'Password',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 2),
-                    ),
-                  ),
-                ),
-                
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    style: const TextStyle(color: Colors.red, fontSize: 13),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-                
-                const SizedBox(height: 32),
-                
-                // Login Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _login,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2E7D32),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                // ── Main content column ─────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: const BoxDecoration(
+                          color: _tealLight,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.storefront_rounded, size: 48, color: _teal),
                       ),
-                      elevation: 2,
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                          )
-                        : Text(
-                            'LOGIN',
-                            style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                      const SizedBox(height: 12),
+                      Text(
+                        '375 POS Admin',
+                        style: GoogleFonts.poppins(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: _tealDark,
+                        ),
+                      ),
+                      Text(
+                        'Pilih kasir yang bertugas',
+                        style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 13),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Employee selector trigger (collapsed, never expands)
+                      GestureDetector(
+                        key: _employeeRowKey,
+                        onTap: () => setState(() => _dropdownOpen = !_dropdownOpen),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: _selectedEmployee != null ? _tealLight : Colors.grey.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: _selectedEmployee != null ? _teal : Colors.grey.shade300,
+                              width: 1.5,
                             ),
                           ),
+                          child: Row(
+                            children: [
+                              if (_selectedEmployee != null)
+                                _buildAvatar(_selectedEmployee!, isSelected: true)
+                              else
+                                Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade200,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.person_outline, color: Colors.black38, size: 20),
+                                ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _selectedEmployee ?? 'Pilih kasir...',
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: _selectedEmployee != null ? FontWeight.w600 : FontWeight.normal,
+                                    fontSize: 15,
+                                    color: _selectedEmployee != null ? _tealDark : Colors.grey.shade400,
+                                  ),
+                                ),
+                              ),
+                              AnimatedRotation(
+                                turns: _dropdownOpen ? 0.5 : 0,
+                                duration: const Duration(milliseconds: 200),
+                                child: Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: _selectedEmployee != null ? _teal : Colors.grey.shade400,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+                      Text(
+                        'Masukkan PIN untuk memulai',
+                        style: GoogleFonts.poppins(color: Colors.grey.shade500, fontSize: 12),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // PIN dot indicators
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(6, (i) {
+                          final filled = i < _enteredPin.length;
+                          return Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 8),
+                            width: 14,
+                            height: 14,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: filled ? _teal : Colors.grey.shade300,
+                              border: Border.all(
+                                color: filled ? _teal : Colors.grey.shade400,
+                                width: 1.5,
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+
+                      // Error message
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        height: _errorMessage != null ? 32 : 0,
+                        child: _errorMessage != null
+                            ? Padding(
+                                padding: const EdgeInsets.only(top: 10),
+                                child: Text(
+                                  _errorMessage!,
+                                  style: GoogleFonts.poppins(
+                                    color: Colors.red.shade600,
+                                    fontSize: 12,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      if (_isLoading)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 28),
+                          child: CircularProgressIndicator(color: _teal),
+                        )
+                      else
+                        _buildNumberPad(),
+
+                      const SizedBox(height: 4),
+                    ],
                   ),
                 ),
+
+                // ── Dismiss layer (intercepts taps outside the dropdown) ─
+                if (_dropdownOpen)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => setState(() => _dropdownOpen = false),
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+
+                // ── Dropdown options overlay (on top, no card resize) ───
+                if (_dropdownOpen)
+                  Positioned(
+                    top: _dropdownTopOffset,
+                    left: 32,
+                    right: 32,
+                    child: _buildDropdownOptions(otherEmployees),
+                  ),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDropdownOptions(List<String> employees) {
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: const BorderRadius.only(
+            bottomLeft: Radius.circular(12),
+            bottomRight: Radius.circular(12),
+          ),
+          border: Border.all(color: _teal, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: employees.asMap().entries.map((entry) {
+            final isFirst = entry.key == 0;
+            final employee = entry.value;
+            return GestureDetector(
+              onTap: () => setState(() {
+                _selectedEmployee = employee;
+                _dropdownOpen = false;
+                _enteredPin = '';
+                _errorMessage = null;
+              }),
+
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  border: isFirst
+                      ? null
+                      : Border(top: BorderSide(color: Colors.grey.shade100)),
+                ),
+                child: Row(
+                  children: [
+                    _buildAvatar(employee, isSelected: false),
+                    const SizedBox(width: 12),
+                    Text(
+                      employee,
+                      style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAvatar(String name, {required bool isSelected}) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: isSelected ? _teal : Colors.grey.shade200,
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          name[0],
+          style: GoogleFonts.poppins(
+            color: isSelected ? _yellow : Colors.black45,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNumberPad() {
+    return Column(
+      children: [
+        _buildPadRow(['1', '2', '3']),
+        const SizedBox(height: 10),
+        _buildPadRow(['4', '5', '6']),
+        const SizedBox(height: 10),
+        _buildPadRow(['7', '8', '9']),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(width: 78),
+            _buildDigitKey('0'),
+            const SizedBox(width: 10),
+            _buildDeleteKey(),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPadRow(List<String> digits) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: digits.asMap().entries.map((e) {
+        return Row(
+          children: [
+            if (e.key > 0) const SizedBox(width: 10),
+            _buildDigitKey(e.value),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildDigitKey(String digit) {
+    return GestureDetector(
+      onTap: () => _onDigitTap(digit),
+      child: Container(
+        width: 68,
+        height: 68,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Text(
+            digit,
+            style: GoogleFonts.poppins(
+              fontSize: 22,
+              fontWeight: FontWeight.w500,
+              color: Colors.black87,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeleteKey() {
+    return GestureDetector(
+      onTap: _onDelete,
+      child: Container(
+        width: 68,
+        height: 68,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          shape: BoxShape.circle,
+        ),
+        child: const Center(
+          child: Icon(Icons.backspace_outlined, size: 24, color: Colors.black54),
         ),
       ),
     );

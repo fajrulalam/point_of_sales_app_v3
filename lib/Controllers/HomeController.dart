@@ -6,21 +6,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Classes/Assets.dart';
+import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
+import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class HomeController extends ChangeNotifier {
   // Callback for showing error messages (e.g., snackbars)
   Function(String message, {bool isError})? onShowMessage;
   // State variables
-  Color orderButtonColor = Colors.white;
-  Color menuButtonColor = Colors.grey.shade300;
-  Color printButtonColor = Colors.grey.shade300;
-  double orderButtonOffset_y = 0;
-  double menuButtonOffset_y = 4;
-  double printButtonOffset_y = 4;
 
   int nomorBerikutnya = 0;
   List<MenuObject> menuObjectList = [];
@@ -29,6 +26,7 @@ class HomeController extends ChangeNotifier {
   List<PesananObject> pesananList = [];
   List<AssetsObject> listGambar = [];
   List<String> categoryOrder = []; // Category display order from MenuConfig
+  List<OptionGroup> optionGroups = []; // Cached option groups for quick lookup
 
   List<String> quoteKejujuran = [
     'Jujur itu menyenangkan',
@@ -75,8 +73,11 @@ class HomeController extends ChangeNotifier {
 
   // Menu Management
   void getMenu() {
-    DocumentReference customerNumber =
-        FirebaseFirestore.instance.collection('Canteens').doc('canteen375');
+    DocumentReference customerNumber = FirebaseFirestore.instance
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('Metadata')
+        .doc('customerNumber');
 
     customerNumber.snapshots().listen((event) {
       Map map = event.data() as Map<String, dynamic>;
@@ -85,7 +86,7 @@ class HomeController extends ChangeNotifier {
     });
 
     CollectionReference menuCollection = FirebaseFirestore.instance
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc('canteen375')
         .collection('MenuCollection');
 
@@ -101,7 +102,7 @@ class HomeController extends ChangeNotifier {
 
     // Fetch category order from MenuConfig
     FirebaseFirestore.instance
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc('canteen375')
         .collection('Metadata')
         .doc('MenuConfig')
@@ -113,19 +114,87 @@ class HomeController extends ChangeNotifier {
         notifyListeners();
       }
     });
+
+    // Stream option groups for use in ordering flow
+    OptionGroupService().getOptionGroupsStream().listen((groups) {
+      optionGroups = groups;
+      notifyListeners();
+    });
   }
 
-  Future<void> getListGambar() async {
-    FirebaseFirestore.instance.collection('assets').get().then((value) {
+  void getListGambar() {
+    FirebaseFirestore.instance.collection('assets').snapshots().listen((value) {
       listGambar = AssetsClass.getImageAssets(value);
       notifyListeners();
     });
   }
 
+  Future<void> deleteCatalogImage(AssetsObject asset) async {
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final batch = firestore.batch();
+      
+      // 1. Update all menu items using this image
+      final menuQuery = await firestore
+          .collection(Col.name('Canteens'))
+          .doc('canteen375')
+          .collection('MenuCollection')
+          .where('imagePath', isEqualTo: asset.path)
+          .get();
+          
+      for (var doc in menuQuery.docs) {
+        batch.update(doc.reference, {'imagePath': 'tidak ada'});
+      }
+      
+      // 2. Delete the asset document
+      batch.delete(firestore.collection('assets').doc(asset.id));
+      
+      await batch.commit();
+      onShowMessage?.call('Gambar berhasil dihapus dari katalog', isError: false);
+    } catch (e) {
+      onShowMessage?.call('Gagal menghapus gambar: $e', isError: true);
+    }
+  }
+
+  /// Returns all OptionGroups linked to the given menu item ID.
+  List<OptionGroup> getLinkedOptionGroups(String menuItemId) {
+    return optionGroups
+        .where((g) => g.linkedMenuItems.contains(menuItemId))
+        .toList();
+  }
+
+  /// Resolve selected options into a flat list of MenuIngredients
+  /// using the cached optionGroups data.
+  List<MenuIngredient> _resolveOptionIngredients(List<SelectedOption> selectedOptions) {
+    final ingredients = <MenuIngredient>[];
+    for (var selected in selectedOptions) {
+      final group = optionGroups.firstWhere(
+        (g) => g.id == selected.groupId,
+        orElse: () => OptionGroup(id: '', name: ''),
+      );
+      if (group.id.isEmpty) continue;
+      final optionItem = group.options.firstWhere(
+        (o) => o.id == selected.optionId,
+        orElse: () => OptionItem(id: '', name: ''),
+      );
+      if (optionItem.id.isEmpty) continue;
+      ingredients.addAll(optionItem.ingredients);
+    }
+    return ingredients;
+  }
+
   // Order Management
-  Future<void> addToOrder(MenuObject menu, bool isTakeAway) async {
+  Future<void> addToOrder(MenuObject menu, bool isTakeAway, {List<SelectedOption>? options}) async {
+    final selectedOpts = options ?? const [];
+
+    // Build a temporary key to find matching existing items (same name + same options)
+    final tempObj = PesananObject(
+      namaPesanan: menu.namaMenu,
+      harga: menu.harga,
+      selectedOptions: selectedOpts,
+    );
     int orderIndex = pesananList
-        .indexWhere((element) => element.namaPesanan == menu.namaMenu);
+        .indexWhere((element) => element.orderKey == tempObj.orderKey);
 
     // Calculate what the new quantity would be
     int newQuantity = 1;
@@ -133,15 +202,16 @@ class HomeController extends ChangeNotifier {
       newQuantity = pesananList[orderIndex].totalQuantity + 1;
     }
 
-    // Check if this quantity is available
+    // Check availability (menu + option ingredients aggregated)
     final inventoryService = InventoryService();
-    final availability = await inventoryService.checkMenuAvailability(
+    final optionIngredients = _resolveOptionIngredients(selectedOpts);
+    final availability = await inventoryService.checkOrderAvailability(
       menu,
+      optionIngredients,
       newQuantity,
     );
 
     if (!availability.isAvailable) {
-      // Data missing error (e.g. ingredient not found) - still block
       onShowMessage?.call(
         'Tidak bisa menambah ${menu.namaMenu}: ${availability.message}',
         isError: true,
@@ -150,30 +220,20 @@ class HomeController extends ChangeNotifier {
     }
 
     if (availability.hasWarning) {
-      // Show warning but proceed
       onShowMessage?.call(
         'Peringatan: ${availability.message}',
         isError: false,
       );
     }
 
-    // If available, add to order
     if (orderIndex == -1) {
-      if (isTakeAway) {
-        pesananList.add(PesananObject(
-          namaPesanan: menu.namaMenu,
-          harga: menu.harga,
-          dineInQuantity: 0,
-          takeAwayQuantity: 1,
-        ));
-      } else {
-        pesananList.add(PesananObject(
-          namaPesanan: menu.namaMenu,
-          harga: menu.harga,
-          dineInQuantity: 1,
-          takeAwayQuantity: 0,
-        ));
-      }
+      pesananList.add(PesananObject(
+        namaPesanan: menu.namaMenu,
+        harga: menu.harga,
+        dineInQuantity: isTakeAway ? 0 : 1,
+        takeAwayQuantity: isTakeAway ? 1 : 0,
+        selectedOptions: selectedOpts,
+      ));
     } else {
       if (isTakeAway) {
         pesananList[orderIndex].takeAwayQuantity++;
@@ -195,10 +255,12 @@ class HomeController extends ChangeNotifier {
     final newQuantity = pesananList[index].dineInQuantity + 1;
     final totalNewQuantity = newQuantity + pesananList[index].takeAwayQuantity;
 
-    // Check if this quantity is available
+    // Check availability (menu + option ingredients aggregated)
     final inventoryService = InventoryService();
-    final availability = await inventoryService.checkMenuAvailability(
+    final optionIngredients = _resolveOptionIngredients(pesananList[index].selectedOptions);
+    final availability = await inventoryService.checkOrderAvailability(
       menuItem,
+      optionIngredients,
       totalNewQuantity,
     );
 
@@ -245,10 +307,12 @@ class HomeController extends ChangeNotifier {
     final newQuantity = pesananList[index].takeAwayQuantity + 1;
     final totalNewQuantity = newQuantity + pesananList[index].dineInQuantity;
 
-    // Check if this quantity is available
+    // Check availability (menu + option ingredients aggregated)
     final inventoryService = InventoryService();
-    final availability = await inventoryService.checkMenuAvailability(
+    final optionIngredients = _resolveOptionIngredients(pesananList[index].selectedOptions);
+    final availability = await inventoryService.checkOrderAvailability(
       menuItem,
+      optionIngredients,
       totalNewQuantity,
     );
 
@@ -366,38 +430,7 @@ class HomeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Button State Management
-  void changeButtonColors(String buttonType) {
-    switch (buttonType) {
-      case 'print':
-        printButtonColor = Colors.white;
-        printButtonOffset_y = 0;
-        menuButtonOffset_y = 4;
-        menuButtonColor = Colors.grey.shade300;
-        orderButtonColor = Colors.grey.shade300;
-        orderButtonOffset_y = 4;
-        break;
-      case 'order':
-        printButtonColor = Colors.grey.shade300;
-        printButtonOffset_y = 4;
-        menuButtonOffset_y = 4;
-        menuButtonColor = Colors.grey.shade300;
-        orderButtonColor = Colors.white;
-        orderButtonOffset_y = 0;
-        break;
-      case 'menu':
-        printButtonColor = Colors.grey.shade300;
-        printButtonOffset_y = 4;
-        menuButtonOffset_y = 0;
-        menuButtonColor = Colors.white;
-        orderButtonColor = Colors.grey.shade300;
-        orderButtonOffset_y = 4;
-        break;
-      default:
-        break;
-    }
-    notifyListeners();
-  }
+
 
   // Printer Management
   Future<void> checkIfPrinterIsConnected() async {
@@ -420,9 +453,14 @@ class HomeController extends ChangeNotifier {
     }
   }
 
-  Future<void> printReceipt(List<PesananObject> pesananList,
-      int nomorBerikutnya, int totalHarga, bool isTakeAway,
-      {int discountAmount = 0, int originalTotal = 0}) async {
+  Future<void> printReceipt({
+    List<PesananObject>? customPesananList,
+    int? overrideNomorBerikutnya,
+    int? overrideTotalHarga,
+    bool? overrideIsTakeAway,
+    int discountAmount = 0,
+    int originalTotal = 0,
+  }) async {
     // Check actual printer connection status dynamically
     await checkIfPrinterIsConnected();
 
@@ -431,16 +469,21 @@ class HomeController extends ChangeNotifier {
       return;
     }
 
+    final int displayNomor = overrideNomorBerikutnya ?? nomorBerikutnya;
+    final int displayTotal = overrideTotalHarga ?? totalHarga;
+    final bool displayTakeAway = overrideIsTakeAway ?? isTakeAway;
+    final List<PesananObject> displayPesananList = customPesananList ?? pesananList;
+
     try {
-      printer.printCustom("375 Canteen", 3, 1);
+      printer.printCustom("Canteen 375", 3, 1);
       printer.printNewLine();
       DateTime now = DateTime.now();
       String formattedDate = DateFormat('dd-MM-yy HH:mm').format(now);
-      print2Column(formattedDate, "No. $nomorBerikutnya", 3);
+      print2Column(formattedDate, "No. $displayNomor", 3);
       // printer.print2Column();
       printer.printNewLine();
       print2Column('ITEM (QTY)', 'SUBTOTAL', 58);
-      for (var element in pesananList) {
+      for (var element in displayPesananList) {
         String itemName = element.namaPesanan;
         if (itemName.length > 15) {
           itemName = itemName.substring(0, 15);
@@ -448,8 +491,15 @@ class HomeController extends ChangeNotifier {
         }
         print2ColumnSmall(itemName + "(" + element.totalQuantity.toString() +")",
              element.subtotal.toString());
+        for (var opt in element.selectedOptions) {
+          String optLine = '  + ${opt.optionName}';
+          String optPrice = opt.priceAdjustment > 0
+              ? '+${opt.priceAdjustment}'
+              : '';
+          print2ColumnSmall(optLine, optPrice);
+        }
       }
-      if (isTakeAway) {
+      if (displayTakeAway) {
         print2ColumnSmall(
             'Bungkus (' +  jumlahItem.toString()+")", biayaBungkus.toString());
       }
@@ -459,7 +509,7 @@ class HomeController extends ChangeNotifier {
         printer.printCustom('DISKON: -Rp $discountAmount', 1, 0);
       }
       printer.printNewLine();
-      printer.printCustom('TOTAL: Rp $totalHarga', 3, 0);
+      printer.printCustom('TOTAL: Rp $displayTotal', 3, 0);
       printer.printNewLine();
       printer.printNewLine();
       printer.printNewLine();
@@ -467,17 +517,236 @@ class HomeController extends ChangeNotifier {
       print('✅ Receipt printed successfully');
     } catch (e) {
       print('❌ Error printing receipt: $e');
+      printerIsConnected = false;
+      notifyListeners();
+    }
+  }
+
+  /// Reprint a receipt from a previously stored order (Status or RecentlyServed collection)
+  Future<void> reprintFromOrder(Map<String, dynamic> orderData) async {
+    await checkIfPrinterIsConnected();
+
+    if (!printerIsConnected) {
+      print('⚠️ Printer not connected - cannot reprint');
+      return;
+    }
+
+    try {
+      final int customerNumber = orderData['customerNumber'] ?? 0;
+      final int total = orderData['total'] ?? 0;
+      final List<dynamic> orderItems = orderData['orderItems'] ?? [];
+      final DateTime? waktuPesan = orderData['waktuPesan'] != null
+          ? (orderData['waktuPesan'] as dynamic).toDate()
+          : null;
+
+      // Determine if it's a takeaway order
+      bool hasTakeAway = orderItems.any((item) => (item['takeAwayQuantity'] ?? 0) > 0);
+
+      printer.printCustom("Canteen 375", 3, 1);
+      printer.printCustom("*** CETAK ULANG ***", 1, 1);
+      printer.printNewLine();
+
+      String formattedDate = waktuPesan != null
+          ? DateFormat('dd-MM-yy HH:mm').format(waktuPesan)
+          : DateFormat('dd-MM-yy HH:mm').format(DateTime.now());
+      print2Column(formattedDate, "No. $customerNumber", 3);
+      printer.printNewLine();
+      print2Column('ITEM (QTY)', 'SUBTOTAL', 58);
+
+      for (var item in orderItems) {
+        String itemName = item['namaPesanan'] ?? '';
+        int dineIn = item['dineInQuantity'] ?? 0;
+        int takeAway = item['takeAwayQuantity'] ?? 0;
+        int harga = item['harga'] ?? 0;
+        int totalQty = dineIn + takeAway;
+
+        // Add option price adjustments to per-item price
+        int optionsAdj = 0;
+        final List<dynamic> selectedOpts = item['selectedOptions'] ?? [];
+        for (var opt in selectedOpts) {
+          optionsAdj += (opt['priceAdjustment'] ?? 0) as int;
+        }
+        int effectivePrice = harga + optionsAdj;
+        int subtotal = effectivePrice * totalQty;
+
+        if (itemName.length > 15) {
+          itemName = itemName.substring(0, 15) + "..";
+        }
+        print2ColumnSmall("$itemName($totalQty)", subtotal.toString());
+
+        for (var opt in selectedOpts) {
+          String optName = opt['optionName'] ?? '';
+          int adj = opt['priceAdjustment'] ?? 0;
+          String optPrice = adj > 0 ? '+$adj' : '';
+          print2ColumnSmall('  + $optName', optPrice);
+        }
+      }
+
+      if (hasTakeAway) {
+        int takeAwayCount = orderItems.fold<int>(
+            0, (sum, item) => sum + ((item['takeAwayQuantity'] ?? 0) as int));
+        int bungkusFee = takeAwayCount * 200;
+        print2ColumnSmall('Bungkus ($takeAwayCount)', bungkusFee.toString());
+      }
+
+      printer.printNewLine();
+      printer.printCustom('TOTAL: Rp $total', 3, 0);
+      printer.printNewLine();
+      printer.printNewLine();
+      printer.printNewLine();
+      printer.printNewLine();
+
+      print('✅ Receipt reprinted successfully for order #$customerNumber');
+    } catch (e) {
+      print('❌ Error reprinting receipt: $e');
+      printerIsConnected = false;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Reprint a settled open bill receipt
+  Future<void> reprintSettledBill(Map<String, dynamic> data) async {
+    await checkIfPrinterIsConnected();
+
+    if (!printerIsConnected) {
+      print('⚠️ Printer not connected - cannot reprint');
+      return;
+    }
+
+    try {
+      final String memberName = data['namaCustomer'] ?? data['memberName'] ?? 'Member';
+      final int finalTotal = data['finalTotal'] ?? data['total'] ?? data['totalAmount'] ?? 0;
+      final int originalTotal = data['totalAmount'] ?? data['total'] ?? finalTotal;
+      final int discountAmount = data['discountAmount'] ?? 0;
+      final String paymentMethod = data['paymentMethod'] ?? '';
+
+      // Support both new (flat orderItems) and legacy (nested orders[].items[]) formats
+      final List<dynamic>? flatItems = data['orderItems'];
+      final List<dynamic>? legacyOrders = data['orders'];
+
+      final DateTime? settledAt = data['settledAt'] != null
+          ? (data['settledAt'] as dynamic).toDate()
+          : null;
+
+      printer.printCustom("Canteen 375", 3, 1);
+      printer.printCustom("*** TAGIHAN SELESAI ***", 1, 1);
+      printer.printCustom("*** CETAK ULANG ***", 1, 1);
+      printer.printNewLine();
+
+      String formattedDate = settledAt != null
+          ? DateFormat('dd-MM-yy HH:mm').format(settledAt)
+          : DateFormat('dd-MM-yy HH:mm').format(DateTime.now());
+      print2Column(formattedDate, paymentMethod, 3);
+      printer.printCustom("Pelanggan: $memberName", 0, 0);
+      printer.printNewLine();
+      print2Column('ITEM (QTY)', 'SUBTOTAL', 58);
+
+      if (flatItems != null && flatItems.isNotEmpty) {
+        // New Status doc format: flat orderItems array
+        for (var item in flatItems) {
+          String itemName = item['namaPesanan'] ?? '';
+          int dineIn = item['dineInQuantity'] ?? 0;
+          int takeAway = item['takeAwayQuantity'] ?? 0;
+          int harga = item['harga'] ?? 0;
+          int totalQty = dineIn + takeAway;
+
+          int optionsAdj = 0;
+          final List<dynamic> selectedOpts = item['selectedOptions'] ?? [];
+          for (var opt in selectedOpts) {
+            optionsAdj += (opt['priceAdjustment'] ?? 0) as int;
+          }
+          int effectivePrice = harga + optionsAdj;
+          int subtotal = effectivePrice * totalQty;
+
+          if (itemName.length > 15) {
+            itemName = "${itemName.substring(0, 15)}..";
+          }
+          print2ColumnSmall("$itemName($totalQty)", subtotal.toString());
+
+          for (var opt in selectedOpts) {
+            String optName = opt['optionName'] ?? '';
+            int adj = opt['priceAdjustment'] ?? 0;
+            String optPrice = adj > 0 ? '+$adj' : '';
+            print2ColumnSmall('  + $optName', optPrice);
+          }
+        }
+      } else if (legacyOrders != null) {
+        // Legacy format: orders[].items[]
+        for (var order in legacyOrders) {
+          final List<dynamic> items = order['items'] ?? [];
+          for (var item in items) {
+            String itemName = item['namaPesanan'] ?? '';
+            int dineIn = item['dineInQuantity'] ?? 0;
+            int takeAway = item['takeAwayQuantity'] ?? 0;
+            int harga = item['harga'] ?? 0;
+            int totalQty = dineIn + takeAway;
+
+            int optionsAdj = 0;
+            final List<dynamic> selectedOpts = item['selectedOptions'] ?? [];
+            for (var opt in selectedOpts) {
+              optionsAdj += (opt['priceAdjustment'] ?? 0) as int;
+            }
+            int effectivePrice = harga + optionsAdj;
+            int subtotal = effectivePrice * totalQty;
+
+            if (itemName.length > 15) {
+              itemName = "${itemName.substring(0, 15)}..";
+            }
+            print2ColumnSmall("$itemName($totalQty)", subtotal.toString());
+
+            for (var opt in selectedOpts) {
+              String optName = opt['optionName'] ?? '';
+              int adj = opt['priceAdjustment'] ?? 0;
+              String optPrice = adj > 0 ? '+$adj' : '';
+              print2ColumnSmall('  + $optName', optPrice);
+            }
+          }
+
+          int takeAwayFee = order['orderTakeAwayFee'] ?? 0;
+          if (takeAwayFee > 0) {
+            print2ColumnSmall('Bungkus', takeAwayFee.toString());
+          }
+        }
+      }
+
+      printer.printNewLine();
+
+      if (discountAmount > 0) {
+        print2ColumnSmall('Subtotal', 'Rp $originalTotal');
+        print2ColumnSmall('Diskon', '-Rp $discountAmount');
+      }
+
+      printer.printCustom('TOTAL: Rp $finalTotal', 3, 0);
+      printer.printNewLine();
+      printer.printNewLine();
+      printer.printNewLine();
+      printer.printNewLine();
+
+      print('✅ Settled bill receipt reprinted for $memberName');
+    } catch (e) {
+      print('❌ Error reprinting settled bill: $e');
+      printerIsConnected = false;
+      notifyListeners();
+      rethrow;
     }
   }
 
   Future<void> testPrinter(String invoice) async {
+    await checkIfPrinterIsConnected();
     if (printerIsConnected) {
-      await Future.delayed(const Duration(milliseconds: 500));
-      printer.printCustom("Pinter sudah terhubung.", 3, 1);
-      printer.printNewLine();
-      printer.printNewLine();
-      printer.printNewLine();
-      printer.paperCut();
+      try {
+        await Future.delayed(const Duration(milliseconds: 500));
+        printer.printCustom("Pinter sudah terhubung.", 3, 1);
+        printer.printNewLine();
+        printer.printNewLine();
+        printer.printNewLine();
+        printer.paperCut();
+      } catch (e) {
+        print('❌ Error testing printer: $e');
+        printerIsConnected = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -520,12 +789,17 @@ class HomeController extends ChangeNotifier {
   // Reset customer number
   Future<void> resetCustomerNumber() async {
     await FirebaseFirestore.instance
-        .collection("Canteens")
+        .collection(Col.name('Canteens'))
         .doc('canteen375')
-        .update({'customerNumber': 0});
+        .collection('Metadata')
+        .doc('customerNumber')
+        .set({'customerNumber': 0}, SetOptions(merge: true));
 
-    final recentlyServed =
-        await FirebaseFirestore.instance.collection("RecentlyServed").get();
+    final recentlyServed = await FirebaseFirestore.instance
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection(Col.name('RecentlyServed'))
+        .get();
 
     for (var doc in recentlyServed.docs) {
       await doc.reference.delete();

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 
@@ -12,12 +13,15 @@ class InventoryService {
 
   // Cache for inventory items
   Map<String, InventoryItem> _inventoryCache = {};
+  
+  /// Expose the current inventory cache for selection dropdowns
+  Map<String, InventoryItem> get allInventoryItems => _inventoryCache;
 
   /// Fetch all inventory items and cache them
   Future<void> refreshInventoryCache() async {
     try {
       final snapshot = await _firestore
-          .collection('Canteens')
+          .collection(Col.name('Canteens'))
           .doc(canteenId)
           .collection('Inventory')
           .get();
@@ -86,74 +90,181 @@ class InventoryService {
     );
   }
 
-  /// Deduct ingredients from inventory when an order is placed
-  Future<bool> deductIngredients(MenuObject menu, int quantity) async {
-    if (menu.ingredients.isEmpty) return true;
 
-    try {
-      // Use a batch write for atomicity
-      final batch = _firestore.batch();
-      final ingredientsToLog = <Map<String, dynamic>>[];
 
-      for (var ingredient in menu.ingredients) {
-        final docRef = _firestore
-            .collection('Canteens')
-            .doc(canteenId)
-            .collection('Inventory')
-            .doc(ingredient.inventoryItemId);
+  /// Aggregate ingredients from menu + selected options into a single map.
+  /// Returns {inventoryItemId: {name, totalQuantity}} with duplicates merged.
+  Map<String, Map<String, dynamic>> aggregateIngredients(
+    List<MenuIngredient> menuIngredients,
+    List<MenuIngredient> optionIngredients,
+    int quantity,
+  ) {
+    final aggregated = <String, Map<String, dynamic>>{};
 
-        final requiredStock = ingredient.quantityNeeded * quantity;
-        
-        // Get current stock
-        final doc = await docRef.get();
-        if (!doc.exists) {
-          print('Ingredient ${ingredient.inventoryItemName} not found');
-          return false;
-        }
-
-        final data = doc.data()!;
-        final int currentStock = (data['stock'] ?? 0) as int;
-        final isPerishable = data['isPerishable'] ?? false;
-        
-        // Allowed to go negative: Removed the (currentStock < requiredStock) check
-
-        // Deduct stock
-        batch.update(docRef, {'stock': currentStock - requiredStock});
-        
-        // Store for logging after successful batch
-        ingredientsToLog.add({
-          'id': ingredient.inventoryItemId,
+    for (var ingredient in [...menuIngredients, ...optionIngredients]) {
+      if (aggregated.containsKey(ingredient.inventoryItemId)) {
+        aggregated[ingredient.inventoryItemId]!['quantityNeeded'] =
+            (aggregated[ingredient.inventoryItemId]!['quantityNeeded'] as int) +
+                ingredient.quantityNeeded;
+      } else {
+        aggregated[ingredient.inventoryItemId] = {
           'name': ingredient.inventoryItemName,
-          'quantity': requiredStock,
-          'isPerishable': isPerishable,
-        });
+          'quantityNeeded': ingredient.quantityNeeded,
+        };
       }
+    }
 
-      await batch.commit();
-      
-      // Log all stock usage
-      for (var ing in ingredientsToLog) {
-        await _logStockUsage(
-          ing['id'],
-          ing['name'],
-          ing['quantity'],
-          'Order: ${menu.namaMenu} x$quantity',
-          ing['isPerishable'],
+    // Multiply by order quantity
+    for (var entry in aggregated.values) {
+      entry['totalRequired'] = (entry['quantityNeeded'] as int) * quantity;
+    }
+
+    return aggregated;
+  }
+
+  /// Check availability considering both menu ingredients and option ingredients.
+  Future<MenuAvailability> checkOrderAvailability(
+    MenuObject menu,
+    List<MenuIngredient> optionIngredients,
+    int quantity,
+  ) async {
+    if (menu.ingredients.isEmpty && optionIngredients.isEmpty) {
+      return MenuAvailability(isAvailable: true, message: 'Available');
+    }
+
+    await refreshInventoryCache();
+
+    final aggregated = aggregateIngredients(
+      menu.ingredients, optionIngredients, quantity,
+    );
+
+    bool hasInsufficient = false;
+    String warningMessage = '';
+
+    for (var entry in aggregated.entries) {
+      final inventoryItem = _inventoryCache[entry.key];
+      if (inventoryItem == null) {
+        return MenuAvailability(
+          isAvailable: false,
+          message: 'Ingredient "${entry.value['name']}" not found in inventory',
+          missingIngredient: entry.value['name'] as String,
         );
       }
-      
-      await refreshInventoryCache(); // Refresh cache after update
-      return true;
-    } catch (e) {
-      print('Error deducting ingredients: $e');
-      return false;
+
+      final required = entry.value['totalRequired'] as int;
+      if (inventoryItem.stock < required) {
+        hasInsufficient = true;
+        warningMessage += '${entry.value['name']} (Stock: ${inventoryItem.stock}), ';
+      }
+    }
+
+    if (hasInsufficient) {
+      return MenuAvailability(
+        isAvailable: true,
+        hasWarning: true,
+        message: 'Stok kurang: ${warningMessage.substring(0, warningMessage.length - 2)}',
+      );
+    }
+
+    return MenuAvailability(isAvailable: true, message: 'Available');
+  }
+
+  /// Append deductions for a fully aggregated ingredient list into a WriteBatch using increment
+  Future<void> batchDeductAggregatedIngredients(
+    Map<String, Map<String, dynamic>> finalAggregated,
+    WriteBatch batch,
+  ) async {
+    if (finalAggregated.isEmpty) return;
+
+    await refreshInventoryCache();
+    final today = _getTodayDateString();
+
+    for (var entry in finalAggregated.entries) {
+      final inventoryId = entry.key;
+      final stockName = entry.value['name'] as String;
+      final totalRequired = entry.value['totalRequired'] as int;
+
+      final inventoryItem = _inventoryCache[inventoryId];
+      final isPerishable = inventoryItem?.isPerishable ?? false;
+
+      // 1. Queue stock deduction safely using Firebase increment
+      final docRef = _firestore
+          .collection(Col.name('Canteens'))
+          .doc(canteenId)
+          .collection('Inventory')
+          .doc(inventoryId);
+
+      batch.update(docRef, {'stock': FieldValue.increment(-totalRequired)});
+
+      // 2. Queue daily stock usage log safely
+      final logId = '${today}_$inventoryId';
+      final logRef = _firestore
+          .collection(Col.name('Canteens'))
+          .doc(canteenId)
+          .collection('DailyStockLogs')
+          .doc(logId);
+
+      batch.set(logRef, {
+        'date': today,
+        'inventoryItemId': inventoryId,
+        'inventoryItemName': stockName,
+        'isPerishable': isPerishable,
+        'stockUsed': FieldValue.increment(totalRequired),
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+  }
+
+  /// Same as batchDeductAggregatedIngredients but for Firestore Transactions
+  Future<void> transactionDeductAggregatedIngredients(
+    Map<String, Map<String, dynamic>> finalAggregated,
+    Transaction transaction,
+  ) async {
+    if (finalAggregated.isEmpty) return;
+
+    await refreshInventoryCache();
+    final today = _getTodayDateString();
+
+    for (var entry in finalAggregated.entries) {
+      final inventoryId = entry.key;
+      final stockName = entry.value['name'] as String;
+      final totalRequired = entry.value['totalRequired'] as int;
+
+      final inventoryItem = _inventoryCache[inventoryId];
+      final isPerishable = inventoryItem?.isPerishable ?? false;
+
+      // 1. Queue stock deduction safely using Firebase increment
+      final docRef = _firestore
+          .collection(Col.name('Canteens'))
+          .doc(canteenId)
+          .collection('Inventory')
+          .doc(inventoryId);
+
+      transaction.update(docRef, {'stock': FieldValue.increment(-totalRequired)});
+
+      // 2. Queue daily stock usage log safely
+      final logId = '${today}_$inventoryId';
+      final logRef = _firestore
+          .collection(Col.name('Canteens'))
+          .doc(canteenId)
+          .collection('DailyStockLogs')
+          .doc(logId);
+
+      transaction.set(logRef, {
+        'date': today,
+        'inventoryItemId': inventoryId,
+        'inventoryItemName': stockName,
+        'isPerishable': isPerishable,
+        'stockUsed': FieldValue.increment(totalRequired),
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     }
   }
 
   /// Get all inventory items
   Stream<List<InventoryItem>> getInventoryStream() {
     return _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('Inventory')
         .snapshots()
@@ -166,7 +277,7 @@ class InventoryService {
   Future<void> updateInventoryStock(String inventoryId, int newStock) async {
     // Get current stock for logging difference
     final doc = await _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('Inventory')
         .doc(inventoryId)
@@ -189,7 +300,7 @@ class InventoryService {
     }
 
     await _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('Inventory')
         .doc(inventoryId)
@@ -204,7 +315,7 @@ class InventoryService {
     final docId = '${name}_$epoch';
     
     final docRef = _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('Inventory')
         .doc(docId);
@@ -232,7 +343,7 @@ class InventoryService {
     final logId = '${today}_$itemName';
 
     await _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('DailyStockLogs')
         .doc(logId)
@@ -252,7 +363,7 @@ class InventoryService {
     final logId = '${today}_$itemName';
 
     await _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('DailyStockLogs')
         .doc(logId)
@@ -272,7 +383,7 @@ class InventoryService {
     final logId = '${today}_$itemName';
 
     await _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('DailyStockLogs')
         .doc(logId)
@@ -289,7 +400,7 @@ class InventoryService {
   /// Update inventory item metadata (name, unit, isPerishable)
   Future<void> updateInventoryItem(String id, String name, String unit, bool isPerishable) async {
     await _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('Inventory')
         .doc(id)
@@ -301,10 +412,63 @@ class InventoryService {
     await refreshInventoryCache();
   }
 
-  /// Delete inventory item
+  /// Delete inventory item safely
   Future<void> deleteInventoryItem(String id) async {
+    bool isUsed = false;
+    String usedWhere = '';
+
+    // 1. Check MenuCollection
+    final menuQuery = await _firestore
+        .collection(Col.name('Canteens'))
+        .doc(canteenId)
+        .collection('MenuCollection')
+        .get();
+
+    for (var doc in menuQuery.docs) {
+      final data = doc.data();
+      final ingredients = (data['ingredients'] as List<dynamic>?) ?? [];
+      for (var ing in ingredients) {
+        if (ing['inventoryItemId'] == id) {
+          isUsed = true;
+          usedWhere = 'Menu "${data['namaMenu']}"';
+          break;
+        }
+      }
+      if (isUsed) break;
+    }
+
+    // 2. Check OptionGroups
+    if (!isUsed) {
+      final optionsQuery = await _firestore
+          .collection(Col.name('Canteens'))
+          .doc(canteenId)
+          .collection('OptionGroups')
+          .get();
+
+      for (var doc in optionsQuery.docs) {
+        final data = doc.data();
+        final options = (data['options'] as List<dynamic>?) ?? [];
+        for (var opt in options) {
+          final ingredients = (opt['ingredients'] as List<dynamic>?) ?? [];
+          for (var ing in ingredients) {
+            if (ing['inventoryItemId'] == id) {
+              isUsed = true;
+              usedWhere = 'Opsi "${opt['name']}" di Grup "${data['name']}"';
+              break;
+            }
+          }
+          if (isUsed) break;
+        }
+        if (isUsed) break;
+      }
+    }
+
+    if (isUsed) {
+      throw Exception('Bahan tidak dapat dihapus karena sedang digunakan dalam $usedWhere. Hapus bahan ini dari resep terlebih dahulu.');
+    }
+
     await _firestore
-        .collection('Canteens')
+        .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('Inventory')
         .doc(id)

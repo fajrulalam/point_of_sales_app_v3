@@ -13,6 +13,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'dart:io';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 
@@ -21,12 +22,14 @@ class AddMenuBottomSheet extends StatefulWidget {
   final String makananOrMinuman;
   final MenuObject? menuObject;
   final List<AssetsObject> listGambar;
+  final Function(AssetsObject)? onDeleteCatalogImage;
   const AddMenuBottomSheet(
       {Key? key,
       required this.query,
       this.menuObject,
       required this.makananOrMinuman,
-      required this.listGambar})
+      required this.listGambar,
+      this.onDeleteCatalogImage})
       : super(key: key);
 
   @override
@@ -43,7 +46,10 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
   int selectedImageIndex = -1;
   XFile? selectedLocalFile;
   bool isUploading = false;
-  bool isFeatured = false;
+  bool isRecommended = false;
+  String? _existingImageUrl;
+  String _imageAspectRatio = '1:1';
+  int _sortOrder = 0;
   List<MenuIngredient> selectedIngredients = [];
   final ImagePicker _picker = ImagePicker();
   final _inventoryService = InventoryService();
@@ -76,12 +82,17 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
       namaMakananController.text = widget.menuObject!.namaMenu;
       hargaMakananController.text = widget.menuObject!.harga.toString();
       categoryController.text = widget.menuObject!.category;
-      descriptionController.text = widget.menuObject!.description;
+      descriptionController.text = widget.menuObject!.menuDescription;
       unitsPerPackageController.text = widget.menuObject!.unitsPerPackage.toString();
-      isFeatured = widget.menuObject!.isFeatured;
+      isRecommended = widget.menuObject!.isRecommended;
       selectedImageIndex = listGambar.indexWhere(
           (element) => element.path == widget.menuObject!.imagePath);
+      if (selectedImageIndex == -1) {
+        _existingImageUrl = widget.menuObject!.imagePath;
+      }
       selectedIngredients = List.from(widget.menuObject!.ingredients);
+      _imageAspectRatio = widget.menuObject!.imageAspectRatio;
+      _sortOrder = widget.menuObject!.sortOrder;
     } else {
       categoryController.text = 'Umum';
     }
@@ -211,31 +222,31 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: isFeatured ? Colors.amber.shade50 : Colors.grey.shade100,
+        color: isRecommended ? Colors.amber.shade50 : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isFeatured ? Colors.amber.shade400 : Colors.grey.shade300,
+          color: isRecommended ? Colors.amber.shade400 : Colors.grey.shade300,
         ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            isFeatured ? Icons.star : Icons.star_border,
-            color: isFeatured ? Colors.amber.shade600 : Colors.grey,
+            isRecommended ? Icons.star : Icons.star_border,
+            color: isRecommended ? Colors.amber.shade600 : Colors.grey,
           ),
           const SizedBox(width: 8),
           Text(
             'Populer',
             style: GoogleFonts.poppins(
-              fontWeight: isFeatured ? FontWeight.w600 : FontWeight.normal,
-              color: isFeatured ? Colors.amber.shade800 : Colors.grey.shade600,
+              fontWeight: isRecommended ? FontWeight.w600 : FontWeight.normal,
+              color: isRecommended ? Colors.amber.shade800 : Colors.grey.shade600,
             ),
           ),
           const SizedBox(width: 8),
           Switch(
-            value: isFeatured,
-            onChanged: (value) => setState(() => isFeatured = value),
+            value: isRecommended,
+            onChanged: (value) => setState(() => isRecommended = value),
             activeColor: Colors.amber.shade600,
           ),
         ],
@@ -310,7 +321,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
             physics: const BouncingScrollPhysics(),
             itemCount: listGambar.length + 1,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: (constraints.maxWidth / 180).floor().clamp(1, 6),
+              crossAxisCount: (constraints.maxWidth / 150).floor().clamp(1, 8),
               mainAxisSpacing: 12.0,
               crossAxisSpacing: 12.0,
               childAspectRatio: 1.0,
@@ -330,8 +341,11 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                   setState(() {
                     selectedImageIndex = actualIndex;
                     selectedLocalFile = null;
+                    _existingImageUrl = null;
+                    _imageAspectRatio = '1:1';
                   });
                 },
+                onLongPress: () => _confirmDeleteCatalogImage(listGambar[actualIndex]),
               );
             },
           );
@@ -341,22 +355,55 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
   }
 
   Future<void> _pickAndCropImage() async {
+    // Let user pick aspect ratio before opening gallery
+    final bool? useSquare = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Pilih Rasio Gambar'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.crop_square),
+              title: const Text('1:1 (Kotak)'),
+              onTap: () => Navigator.pop(context, true),
+            ),
+            ListTile(
+              leading: const Icon(Icons.crop_portrait),
+              title: const Text('3:4 (Potret)'),
+              onTap: () => Navigator.pop(context, false),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (useSquare == null) return; // user dismissed
+
+    final bool isSquare = useSquare;
+    final CropAspectRatio cropRatio = isSquare
+        ? const CropAspectRatio(ratioX: 1, ratioY: 1)
+        : const CropAspectRatio(ratioX: 3, ratioY: 4);
+    final CropAspectRatioPreset initPreset = isSquare
+        ? CropAspectRatioPreset.square
+        : CropAspectRatioPreset.original;
+
     final XFile? image = await _picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 70,
       maxWidth: 1024,
-      maxHeight: 1024,
+      maxHeight: isSquare ? 1024 : 1365,
     );
     if (image != null) {
       final croppedFile = await ImageCropper().cropImage(
         sourcePath: image.path,
-        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+        aspectRatio: cropRatio,
         uiSettings: [
           AndroidUiSettings(
             toolbarTitle: 'Potong Gambar',
             toolbarColor: const Color(0xFF81C784),
             toolbarWidgetColor: Colors.white,
-            initAspectRatio: CropAspectRatioPreset.square,
+            initAspectRatio: initPreset,
             lockAspectRatio: true,
           ),
           IOSUiSettings(
@@ -369,6 +416,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
         setState(() {
           selectedLocalFile = XFile(croppedFile.path);
           selectedImageIndex = -1;
+          _imageAspectRatio = isSquare ? '1:1' : '3:4';
         });
       }
     }
@@ -378,7 +426,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
     if (namaMakananController.text == '' ||
         hargaMakananController.text == '' ||
         categoryController.text == '' ||
-        (selectedImageIndex == -1 && selectedLocalFile == null)) {
+        (selectedImageIndex == -1 && selectedLocalFile == null && _existingImageUrl == null)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Mohon isi semua field dan pilih gambar menu')));
       return;
@@ -395,26 +443,43 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
         final fileBytes = await File(selectedLocalFile!.path).readAsBytes();
         await imageRef.putData(fileBytes, SettableMetadata(contentType: 'image/jpeg')).timeout(const Duration(seconds: 30));
         finalImagePath = await imageRef.getDownloadURL();
-      } else {
+
+        // Automatically save gallery uploads to catalog
+        await FirebaseFirestore.instance.collection('assets').add({
+          'path': finalImagePath,
+          'isMakanan': widget.makananOrMinuman == 'Makanan',
+        });
+      } else if (selectedImageIndex != -1) {
         finalImagePath = listGambar[selectedImageIndex].path;
+      } else {
+        finalImagePath = _existingImageUrl!;
       }
 
-      await FirebaseFirestore.instance
-          .collection("Canteens")
+      final menuCollectionRef = FirebaseFirestore.instance
+          .collection(Col.name('Canteens'))
           .doc('canteen375')
-          .collection('MenuCollection')
-          .doc(widget.query == 'edit' ? widget.menuObject!.id : namaMakananController.text)
-          .set({
+          .collection('MenuCollection');
+
+      final newDocId = namaMakananController.text;
+
+      await menuCollectionRef.doc(newDocId).set({
         'namaMenu': namaMakananController.text,
         'harga': int.parse(hargaMakananController.text.replaceAll(".", '')),
         'imagePath': finalImagePath,
         'isMakanan': widget.makananOrMinuman == 'Makanan',
         'category': categoryController.text,
-        'description': descriptionController.text,
-        'isFeatured': isFeatured,
+        'menuDescription': descriptionController.text,
+        'isRecommended': isRecommended,
         'unitsPerPackage': int.tryParse(unitsPerPackageController.text) ?? 1,
         'ingredients': selectedIngredients.map((ing) => ing.toMap()).toList(),
+        'imageAspectRatio': _imageAspectRatio,
+        'sortOrder': _sortOrder,
       });
+
+      // If editing and the name changed, delete the old document
+      if (widget.query == 'edit' && widget.menuObject!.id != newDocId) {
+        await menuCollectionRef.doc(widget.menuObject!.id).delete();
+      }
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -425,6 +490,42 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
     } finally {
       if (mounted) setState(() => isUploading = false);
     }
+  }
+
+  void _confirmDeleteCatalogImage(AssetsObject asset) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Hapus dari Katalog'),
+        content: const Text(
+          'Yakin ingin menghapus gambar ini dari katalog? Menu yang menggunakan gambar ini akan dikembalikan ke icon default.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              widget.onDeleteCatalogImage?.call(asset);
+              // If the deleted image was selected, reset it
+              if (selectedImageIndex != -1 && listGambar[selectedImageIndex].path == asset.path) {
+                setState(() {
+                  selectedImageIndex = -1;
+                });
+              } else if (_existingImageUrl == asset.path) {
+                setState(() {
+                  _existingImageUrl = null;
+                });
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Hapus', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
 
@@ -561,8 +662,9 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
 class _LocalPickerTile extends StatelessWidget {
   final XFile? selectedFile;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
-  const _LocalPickerTile({required this.selectedFile, required this.onTap});
+  const _LocalPickerTile({required this.selectedFile, required this.onTap, this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
@@ -590,9 +692,8 @@ class _LocalPickerTile extends StatelessWidget {
                     style: GoogleFonts.poppins(
                         fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF2E7D32))),
               ] else ...[
-                SizedBox(
-                  height: 110,
-                  width: 110,
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: Image.file(
@@ -617,11 +718,13 @@ class _CatalogImageTile extends StatelessWidget {
   final bool isSelected;
   final String imageUrl;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const _CatalogImageTile({
     required this.isSelected,
     required this.imageUrl,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -639,19 +742,19 @@ class _CatalogImageTile extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
+          onLongPress: onLongPress,
           borderRadius: BorderRadius.circular(12),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(
-                height: 110,
-                width: 110,
+              Padding(
+                padding: const EdgeInsets.all(8.0),
                 child: CachedNetworkImage(
                   imageUrl: imageUrl,
                   fit: BoxFit.contain,
                   memCacheWidth: 200,
                   memCacheHeight: 200,
-                  fadeInDuration: Duration.zero, // Optimization: No fade-in overhead
+                  fadeInDuration: Duration.zero,
                   placeholder: (context, url) => const Center(
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),

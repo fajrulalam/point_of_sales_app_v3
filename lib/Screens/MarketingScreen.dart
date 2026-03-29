@@ -1605,9 +1605,10 @@ class _MarketingScreenState extends State<MarketingScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text('Marketing & Member',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white)),
-        backgroundColor: const Color(0xFF2E7D32),
-        foregroundColor: Colors.white,
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: const Color(0xFF1A1A1A))),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A1A1A),
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -1620,16 +1621,32 @@ class _MarketingScreenState extends State<MarketingScreen>
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(48),
-          child: TabBar(
-            controller: _tabController,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            indicatorColor: Colors.white,
-            indicatorWeight: 3,
-            tabs: const [
-              Tab(text: 'Daftar Member'),
-              Tab(text: 'Periodic Campaign'),
-            ],
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: const Color(0xFF1A1A1A),
+              unselectedLabelColor: Colors.grey.shade500,
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: const BoxDecoration(
+                color: Color(0xFFE8F5E9),
+                border: Border(
+                  bottom: BorderSide(
+                    color: Color(0xFF2E7D32),
+                    width: 3,
+                  ),
+                ),
+              ),
+              labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+              unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
+              tabs: const [
+                Tab(text: 'Daftar Member'),
+                Tab(text: 'Periodic Campaign'),
+              ],
+            ),
           ),
         ),
       ),

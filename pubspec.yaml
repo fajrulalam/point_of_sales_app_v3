@@ -50,6 +50,7 @@ dependencies:
   permission_handler: ^11.3.1
   numerus: ^2.0.0
   pdf: ^3.10.1
+  image: ^4.0.0
   open_file: ^3.3.0
   printing: ^5.10.4
   blue_thermal_printer: ^1.2.3
@@ -60,6 +61,8 @@ dependencies:
   path: ^1.8.3
   excel: ^4.0.3
   image_cropper: ^11.0.0
+  share_plus: ^10.0.2
+  shared_preferences: ^2.2.3
 
 dev_dependencies:
   flutter_test:

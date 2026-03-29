@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Services/DatabaseHelper.dart';
@@ -31,7 +32,7 @@ class MemberService {
   // Fetch all members from Firestore and update local cache
   Future<void> fetchAndCacheMembers() async {
     try {
-      final snapshot = await _firestore.collection('Members').get();
+      final snapshot = await _firestore.collection(Col.name('Members')).get();
       final members = snapshot.docs
           .map((doc) => Member.fromFirestore(doc.id, doc.data()))
           .toList();

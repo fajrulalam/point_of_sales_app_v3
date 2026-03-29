@@ -5,6 +5,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/EditCategoryBottomSheet.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Widgets/MenuGridWidget.dart';
+import 'package:point_of_sales_app_v3/Widgets/SidebarWidget.dart' show kDarkTeal;
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class OrderingViewWidget extends StatefulWidget {
   final List<MenuObject> menuObjectList_makanan;
@@ -43,12 +45,20 @@ class _OrderingViewWidgetState extends State<OrderingViewWidget> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             TabBar(
-              labelColor: const Color(0xFF2E7D32),
-              labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-              unselectedLabelStyle:
-                  GoogleFonts.poppins(fontWeight: FontWeight.normal),
-              unselectedLabelColor: Colors.grey.shade400,
-              indicatorColor: const Color(0xFF2E7D32),
+              labelColor: const Color(0xFF1A1A1A),
+              labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+              unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
+              unselectedLabelColor: Colors.grey.shade500,
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: BoxDecoration(
+                color: kDarkTeal.withOpacity(0.08),
+                border: Border(
+                  bottom: BorderSide(
+                    color: kDarkTeal,
+                    width: 3,
+                  ),
+                ),
+              ),
               tabs: const [
                 Tab(text: 'Makanan'),
                 Tab(text: 'Minuman'),
@@ -182,14 +192,14 @@ class _OrderingViewWidgetState extends State<OrderingViewWidget> {
                 IconButton(
                   onPressed: onBack,
                   icon: const Icon(Icons.arrow_back_ios),
-                  color: const Color(0xFF2E7D32),
+                  color: kDarkTeal,
                 ),
                 Text(
                   selectedCategory,
                   style: GoogleFonts.poppins(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: const Color(0xFF1B5E20),
+                    color: kDarkTeal,
                   ),
                 ),
               ],
@@ -220,8 +230,8 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance.collection('Categories').doc(category).get(),
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection(Col.name('Categories')).doc(category).snapshots(),
       builder: (context, snapshot) {
         String? imagePath;
         if (snapshot.hasData && snapshot.data!.exists) {
@@ -304,7 +314,7 @@ class _CategoryCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [const Color(0xFF66BB6A), const Color(0xFF2E7D32)],
+          colors: [kDarkTeal.withOpacity(0.7), kDarkTeal],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),

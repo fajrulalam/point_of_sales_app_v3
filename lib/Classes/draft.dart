@@ -1580,7 +1580,7 @@
 //   void printReceipt(List<PesananObject> pesananList, int nomorBerikutnya,
 //       int totalHarga, bool isTakeAway) {
 //     if (!printerIsConnected) return;
-//     printer.printCustom("375 Canteen", 3, 1);
+//     printer.printCustom("Canteen 375", 3, 1);
 //     printer.printNewLine();
 //     printer.printNewLine();
 //     printer.printCustom("No. $nomorBerikutnya", 3, 1);

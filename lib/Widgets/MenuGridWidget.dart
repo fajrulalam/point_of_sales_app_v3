@@ -16,13 +16,17 @@ class MenuGridWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Check if any item uses portrait (3:4) aspect ratio
+    final hasPortraitImage = menuObjectList.any((m) => m.imageAspectRatio == '3:4');
+    final gridAspectRatio = hasPortraitImage ? 0.65 : 1.0;
+
     return GridView.builder(
       itemCount: menuObjectList.length,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: MediaQuery.of(context).size.width ~/ 240,
         mainAxisSpacing: 8.0,
         crossAxisSpacing: 8.0,
-        childAspectRatio: 180 / 180,
+        childAspectRatio: gridAspectRatio,
       ),
       itemBuilder: (BuildContext context, int index) {
         if (menuObjectList.isEmpty) {
@@ -32,6 +36,9 @@ class MenuGridWidget extends StatelessWidget {
         }
 
         final menu = menuObjectList[index];
+        final isPortrait = menu.imageAspectRatio == '3:4';
+        final imgHeight = isPortrait ? 147.0 : 110.0;
+        final imgWidth = 110.0;
 
         return FutureBuilder<MenuAvailability>(
           future: InventoryService().checkMenuAvailability(menu, 1),
@@ -92,8 +99,8 @@ class MenuGridWidget extends StatelessWidget {
                           children: [
                             if (menu.imagePath != 'tidak ada')
                               SizedBox(
-                                height: 110,
-                                width: 110,
+                                height: imgHeight,
+                                width: imgWidth,
                                 child: Image(
                                   image:
                                       CachedNetworkImageProvider(menu.imagePath),

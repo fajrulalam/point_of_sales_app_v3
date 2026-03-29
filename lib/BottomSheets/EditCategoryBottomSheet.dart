@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'dart:io';
@@ -20,6 +21,7 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
   final categoryNameController = TextEditingController();
   XFile? selectedLocalFile;
   bool isUploading = false;
+  bool _imageDeleted = false;
   final ImagePicker _picker = ImagePicker();
   String? currentImagePath;
 
@@ -32,7 +34,7 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
 
   Future<void> _fetchCategoryImage() async {
     try {
-      final doc = await FirebaseFirestore.instance.collection('Categories').doc(widget.categoryName).get();
+      final doc = await FirebaseFirestore.instance.collection(Col.name('Categories')).doc(widget.categoryName).get();
       if (doc.exists && doc.data()!.containsKey('imagePath')) {
         setState(() {
           currentImagePath = doc['imagePath'];
@@ -86,15 +88,34 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: selectedLocalFile != null
-                  ? Image.file(File(selectedLocalFile!.path), fit: BoxFit.cover)
-                  : (currentImagePath != null
-                      ? Image.network(currentImagePath!, fit: BoxFit.cover)
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.file(File(selectedLocalFile!.path), fit: BoxFit.cover),
+                    )
+                  : (!_imageDeleted && currentImagePath != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.network(currentImagePath!, fit: BoxFit.cover),
+                        )
                       : const Icon(Icons.add_a_photo, size: 50, color: Colors.grey)),
             ),
           ),
+          if ((selectedLocalFile != null) || (!_imageDeleted && currentImagePath != null))
+            TextButton.icon(
+              onPressed: _deleteImage,
+              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+              label: const Text('Hapus Foto', style: TextStyle(color: Colors.red)),
+            ),
         ],
       ),
     );
+  }
+
+  void _deleteImage() {
+    setState(() {
+      selectedLocalFile = null;
+      _imageDeleted = true;
+    });
   }
 
   Future<void> _pickImage() async {
@@ -140,7 +161,7 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
 
     try {
       final newName = categoryNameController.text;
-      String? imageUrl = currentImagePath;
+      String? imageUrl = _imageDeleted ? null : currentImagePath;
 
       // 1. Upload new image if selected
       if (selectedLocalFile != null) {
@@ -160,8 +181,8 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
       }
 
       final firestore = FirebaseFirestore.instance;
-      final oldDocRef = firestore.collection('Categories').doc(widget.categoryName);
-      final newDocRef = firestore.collection('Categories').doc(newName);
+      final oldDocRef = firestore.collection(Col.name('Categories')).doc(widget.categoryName);
+      final newDocRef = firestore.collection(Col.name('Categories')).doc(newName);
 
       // 2. Update Image Path in Categories Collection for the OLD name first (in case name didn't change)
       // Actually, if name changed, we make a new doc. If name logic is confusing, handle separate cases.
@@ -170,31 +191,36 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
         // Name Changed:
         // A. Create new category doc
         await newDocRef.set({
-          'imagePath': imageUrl,
-          'name': newName, // redundancy doesn't hurt
+          if (imageUrl != null) 'imagePath': imageUrl,
+          'name': newName,
         });
-        
-        // B. Update ALL menu items (This is the heavy part)
-        // We need to find all menus with old category and update them.
-        // Assuming 'Canteens/canteen375/MenuCollection'
-        final menuQuery = await firestore.collection('Canteens').doc('canteen375').collection('MenuCollection')
+
+        // B. Update ALL menu items
+        final menuQuery = await firestore.collection(Col.name('Canteens')).doc('canteen375').collection('MenuCollection')
             .where('category', isEqualTo: widget.categoryName).get();
-            
+
         final batch = firestore.batch();
         for (var doc in menuQuery.docs) {
           batch.update(doc.reference, {'category': newName});
         }
         await batch.commit();
 
-        // C. Delete old category doc (optional, maybe keep it clean)
+        // C. Delete old category doc
         await oldDocRef.delete();
 
       } else {
-        // Name NOT Changed, strictly update image
-        await oldDocRef.set({
+        // Name NOT Changed — update or remove image
+        if (imageUrl != null) {
+          await oldDocRef.set({
             'imagePath': imageUrl,
-            'name': newName, 
-        }, SetOptions(merge: true));
+            'name': newName,
+          }, SetOptions(merge: true));
+        } else {
+          // Image was deleted: remove the imagePath field
+          await oldDocRef.update({
+            'imagePath': FieldValue.delete(),
+          });
+        }
       }
 
       if (mounted) Navigator.pop(context);

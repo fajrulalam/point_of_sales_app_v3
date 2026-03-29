@@ -1,14 +1,18 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 
 class OptionItem {
   String id;
   String name;
   int priceAdjustment; // 0 for free, positive for add-on price
+  List<MenuIngredient> ingredients;
 
   OptionItem({
     required this.id,
     required this.name,
     this.priceAdjustment = 0,
+    this.ingredients = const [],
   });
 
   factory OptionItem.fromMap(Map<String, dynamic> map, {String? id}) {
@@ -16,6 +20,11 @@ class OptionItem {
       id: id ?? map['id'] ?? '',
       name: map['name'] ?? '',
       priceAdjustment: map['priceAdjustment'] ?? 0,
+      ingredients: map.containsKey('ingredients')
+          ? (map['ingredients'] as List<dynamic>)
+              .map((ing) => MenuIngredient.fromMap(ing as Map<String, dynamic>))
+              .toList()
+          : [],
     );
   }
 
@@ -24,12 +33,16 @@ class OptionItem {
       'id': id,
       'name': name,
       'priceAdjustment': priceAdjustment,
+      'ingredients': ingredients.map((ing) => ing.toMap()).toList(),
     };
   }
 
   String get formattedPrice {
     if (priceAdjustment == 0) return 'Gratis';
-    return '+Rp${priceAdjustment.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}';
+    final prefix = priceAdjustment > 0 ? '+' : '-';
+    final formatted = priceAdjustment.abs().toString().replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.');
+    return '${prefix}Rp$formatted';
   }
 }
 
@@ -92,7 +105,7 @@ class OptionGroupService {
   final _firestore = FirebaseFirestore.instance;
   
   CollectionReference get _collection => _firestore
-      .collection('Canteens')
+      .collection(Col.name('Canteens'))
       .doc('canteen375')
       .collection('OptionGroups');
 
@@ -118,15 +131,4 @@ class OptionGroupService {
     await _collection.doc(groupId).update({'linkedMenuItems': menuItemIds});
   }
 
-  Future<void> addOptionToGroup(String groupId, OptionItem option) async {
-    await _collection.doc(groupId).update({
-      'options': FieldValue.arrayUnion([option.toMap()])
-    });
-  }
-
-  Future<void> removeOptionFromGroup(String groupId, OptionItem option) async {
-    await _collection.doc(groupId).update({
-      'options': FieldValue.arrayRemove([option.toMap()])
-    });
-  }
 }

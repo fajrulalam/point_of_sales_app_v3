@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
-import 'package:intl/intl.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({Key? key}) : super(key: key);
@@ -24,10 +22,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
       appBar: AppBar(
         title: Text(
           'Manajemen Stok Bahan',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.white),
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFF1A1A1A)),
         ),
-        backgroundColor: const Color(0xFF2E7D32),
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1A1A1A),
         elevation: 0,
         actions: [
           IconButton(
@@ -331,85 +329,100 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final stockController = TextEditingController(text: '0');
     final unitController = TextEditingController(text: 'pcs');
     bool isPerishable = false;
+    bool isSaving = false;
 
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text('Tambah Bahan Baru', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nama Bahan',
-                  border: OutlineInputBorder(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Bahan',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: stockController,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Stok Awal',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: stockController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'Stok Awal',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: unitController,
-                decoration: const InputDecoration(
-                  labelText: 'Unit (contoh: pcs, kg, liter)',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: unitController,
+                  decoration: const InputDecoration(
+                    labelText: 'Unit (contoh: pcs, kg, liter)',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              CheckboxListTile(
-                title: Text('Perishable', style: GoogleFonts.poppins()),
-                subtitle: Text('Stok akan reset ke 0 setiap hari', style: GoogleFonts.poppins(fontSize: 12)),
-                value: isPerishable,
-                onChanged: (value) {
-                  setDialogState(() {
-                    isPerishable = value ?? false;
-                  });
-                },
-                controlAffinity: ListTileControlAffinity.leading,
-                contentPadding: EdgeInsets.zero,
-              ),
-            ],
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  title: Text('Perishable', style: GoogleFonts.poppins()),
+                  subtitle: Text('Stok akan reset ke 0 setiap hari', style: GoogleFonts.poppins(fontSize: 12)),
+                  value: isPerishable,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      isPerishable = value ?? false;
+                    });
+                  },
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: isSaving ? null : () => Navigator.pop(context),
               child: const Text('Batal'),
             ),
             ElevatedButton(
-              onPressed: () async {
-                if (nameController.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Nama bahan tidak boleh kosong')),
-                  );
-                  return;
-                }
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      if (nameController.text.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Nama bahan tidak boleh kosong')),
+                        );
+                        return;
+                      }
 
-                await _inventoryService.addInventoryItem(
-                  nameController.text,
-                  int.tryParse(stockController.text) ?? 0,
-                  unitController.text,
-                  isPerishable: isPerishable,
-                );
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                }
-              },
+                      setDialogState(() => isSaving = true);
+                      try {
+                        await _inventoryService.addInventoryItem(
+                          nameController.text,
+                          int.tryParse(stockController.text) ?? 0,
+                          unitController.text,
+                          isPerishable: isPerishable,
+                        );
+                        if (context.mounted) Navigator.pop(context);
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Error: $e')),
+                          );
+                          setDialogState(() => isSaving = false);
+                        }
+                      }
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2E7D32),
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Tambah'),
+              child: isSaving
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Tambah'),
             ),
           ],
         ),
@@ -420,85 +433,126 @@ class _InventoryScreenState extends State<InventoryScreen> {
   Future<void> _showEditInventoryDialog(InventoryItem item) async {
     final nameController = TextEditingController(text: item.name);
     final unitController = TextEditingController(text: item.unit);
+    final stockController = TextEditingController(text: item.stock.toString());
     bool isPerishable = item.isPerishable;
+    bool isSaving = false;
 
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text('Edit Info Bahan', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nama Bahan',
-                  border: OutlineInputBorder(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Bahan',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: unitController,
-                decoration: const InputDecoration(
-                  labelText: 'Unit (contoh: pcs, kg, liter)',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: stockController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'Stok',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              CheckboxListTile(
-                title: Text('Perishable', style: GoogleFonts.poppins()),
-                subtitle: Text('Stok akan reset ke 0 setiap hari', style: GoogleFonts.poppins(fontSize: 12)),
-                value: isPerishable,
-                onChanged: (value) {
-                  setDialogState(() {
-                    isPerishable = value ?? false;
-                  });
-                },
-                controlAffinity: ListTileControlAffinity.leading,
-                contentPadding: EdgeInsets.zero,
-              ),
-            ],
+                const SizedBox(height: 12),
+                TextField(
+                  controller: unitController,
+                  decoration: const InputDecoration(
+                    labelText: 'Unit (contoh: pcs, kg, liter)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  title: Text('Perishable', style: GoogleFonts.poppins()),
+                  subtitle: Text('Stok akan reset ke 0 setiap hari', style: GoogleFonts.poppins(fontSize: 12)),
+                  value: isPerishable,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      isPerishable = value ?? false;
+                    });
+                  },
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ],
+            ),
           ),
           actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _showDeleteConfirmation(item);
-              },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Hapus'),
-            ),
-            const Spacer(),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Batal'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (nameController.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Nama bahan tidak boleh kosong')),
-                  );
-                  return;
-                }
+            Row(
+              children: [
+                TextButton(
+                  onPressed: isSaving
+                      ? null
+                      : () {
+                          Navigator.pop(context);
+                          _showDeleteConfirmation(item);
+                        },
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  child: const Text('Hapus'),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.pop(context),
+                  child: const Text('Batal'),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          if (nameController.text.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Nama bahan tidak boleh kosong')),
+                            );
+                            return;
+                          }
 
-                await _inventoryService.updateInventoryItem(
-                  item.id,
-                  nameController.text,
-                  unitController.text,
-                  isPerishable,
-                );
+                          setDialogState(() => isSaving = true);
+                          try {
+                            // Update basic info
+                            await _inventoryService.updateInventoryItem(
+                              item.id,
+                              nameController.text,
+                              unitController.text,
+                              isPerishable,
+                            );
 
-                if (context.mounted) {
-                  Navigator.pop(context);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2E7D32),
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Simpan'),
+                            // Update stock if changed
+                            final newStock = int.tryParse(stockController.text) ?? item.stock;
+                            if (newStock != item.stock) {
+                              await _inventoryService.updateInventoryStock(item.id, newStock);
+                            }
+
+                            if (context.mounted) Navigator.pop(context);
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Error: $e')),
+                              );
+                              setDialogState(() => isSaving = false);
+                            }
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white,
+                  ),
+                  child: isSaving
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Simpan'),
+                ),
+              ],
             ),
           ],
         ),
@@ -519,9 +573,22 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              await _inventoryService.deleteInventoryItem(item.id);
-              if (context.mounted) {
-                Navigator.pop(context);
+              try {
+                await _inventoryService.deleteInventoryItem(item.id);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(e.toString().replaceAll('Exception: ', '')),
+                      backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
               }
             },
             style: ElevatedButton.styleFrom(

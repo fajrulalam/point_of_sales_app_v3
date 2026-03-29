@@ -1,0 +1,813 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+
+class FinancialReportBottomSheet extends StatefulWidget {
+  const FinancialReportBottomSheet({Key? key}) : super(key: key);
+
+  @override
+  State<FinancialReportBottomSheet> createState() =>
+      _FinancialReportBottomSheetState();
+}
+
+class _FinancialReportBottomSheetState
+    extends State<FinancialReportBottomSheet> {
+  final _cashController = TextEditingController();
+  final _qrisController = TextEditingController();
+  final _onlineController = TextEditingController();
+
+  final List<_ExpenseEntry> _expenses = [_ExpenseEntry()];
+
+  int? _systemTotal;
+  bool _isLoadingTotal = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSystemTotal();
+  }
+
+  @override
+  void dispose() {
+    _cashController.dispose();
+    _qrisController.dispose();
+    _onlineController.dispose();
+    for (var e in _expenses) {
+      e.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _fetchSystemTotal() async {
+    try {
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final doc = await FirebaseFirestore.instance
+          .collection(Col.name('DailyTransaction'))
+          .doc(today)
+          .get();
+
+      if (doc.exists && doc.data() != null) {
+        setState(() {
+          _systemTotal = (doc.data()!['total'] ?? 0) as int;
+          _isLoadingTotal = false;
+        });
+      } else {
+        setState(() {
+          _systemTotal = 0;
+          _isLoadingTotal = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _systemTotal = 0;
+        _isLoadingTotal = false;
+      });
+    }
+  }
+
+  String _maskRevenue(int value) {
+    if (value == 0) return 'Rp 0';
+    final formatted =
+        NumberFormat.decimalPattern('id_ID').format(value);
+    if (formatted.length <= 1) return 'Rp $formatted';
+
+    final first = formatted[0];
+    final rest = formatted.substring(1).replaceAll(RegExp(r'[0-9]'), '*');
+    return 'Rp $first$rest';
+  }
+
+  int _parseFormattedNumber(String text) {
+    if (text.isEmpty) return 0;
+    return int.tryParse(text.replaceAll('.', '')) ?? 0;
+  }
+
+  static final _currencyFormatter = [
+    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+    TextInputFormatter.withFunction((oldValue, newValue) {
+      if (newValue.text.isEmpty) return newValue;
+      final plain = newValue.text.replaceAll('.', '');
+      if (plain.isEmpty) return newValue;
+      final format = NumberFormat("#,###", "id_ID");
+      final newText = format.format(int.parse(plain));
+      return TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(offset: newText.length),
+      );
+    }),
+  ];
+
+  Future<void> _submitReport() async {
+    final inputCash = _parseFormattedNumber(_cashController.text);
+    final inputQris = _parseFormattedNumber(_qrisController.text);
+    final inputOnline = _parseFormattedNumber(_onlineController.text);
+
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final fs = FirebaseFirestore.instance;
+    final doc = await fs.collection(Col.name('DailyTransaction')).doc(today).get();
+
+    final data = doc.data() ?? {};
+    final grossCash = (data['totalCash'] ?? 0) as int;
+    final grossQris = (data['totalQris'] ?? 0) as int;
+    final grossOnline = (data['totalOnline'] ?? 0) as int;
+
+    // Parse explicitly mapped expenses and deduct per-account securely!
+    final validExpenses = _expenses.where((e) =>
+        e.categoryController.text.isNotEmpty &&
+        e.amountController.text.isNotEmpty).toList();
+
+    int expensesCash = 0;
+    int expensesQris = 0;
+    int expensesOnline = 0;
+
+    final parsedExpenses = <Map<String, dynamic>>[];
+    for (var e in validExpenses) {
+      final amount = _parseFormattedNumber(e.amountController.text);
+      final source = e.sourceAccount;
+      if (source == 'Cash') expensesCash += amount;
+      if (source == 'QRIS') expensesQris += amount;
+      if (source == 'Online') expensesOnline += amount;
+      
+      parsedExpenses.add({
+        'category': e.categoryController.text,
+        'canteenId': 'canteen375_plazaUnipdu', // Hardcoded for now, ideally should be dynamic
+        'amount': amount,
+        'sourceAccount': source,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+    }
+
+    final netExpectedCash = grossCash - expensesCash;
+    final netExpectedQris = grossQris - expensesQris;
+
+    final cashMatch = inputCash == netExpectedCash;
+    final qrisMatch = inputQris == netExpectedQris;
+    // Online: delta is always auto-classified as platform commission
+    final platformCommission = grossOnline - inputOnline;
+    const onlineMatch = true; // Never warn for Online
+    final allMatch = cashMatch && qrisMatch && onlineMatch;
+
+    // Fetch previous day's closing balance for running saldo
+    final prevSnap = await fs.collection(Col.name('DailyTransaction'))
+        .where(FieldPath.documentId, isLessThan: today)
+        .orderBy(FieldPath.documentId, descending: true)
+        .limit(1)
+        .get();
+
+    final prevData = prevSnap.docs.isNotEmpty ? prevSnap.docs.first.data() : {};
+    final prevClosingCash = (prevData['closingCash'] ?? 0) as int;
+    final prevClosingQris = (prevData['closingQris'] ?? 0) as int;
+    final prevClosingOnline = (prevData['closingOnline'] ?? 0) as int;
+
+    final discrepancyCash = (grossCash - expensesCash) - inputCash;
+    final discrepancyQris = (grossQris - expensesQris) - inputQris;
+
+    // Closing = previous closing + actual income - expenses
+    // actualCash = inputCash (physical count), which already absorbs any discrepancy
+    // For online: actual received = grossOnline - platformCommission
+    final closingCash = prevClosingCash + inputCash - expensesCash;
+    final closingQris = prevClosingQris + inputQris - expensesQris;
+    final closingOnline = prevClosingOnline + inputOnline - expensesOnline;
+
+    if (!mounted) return;
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => _ValidationDialog(
+        inputCash: inputCash,
+        inputQris: inputQris,
+        inputOnline: inputOnline,
+        systemCash: netExpectedCash,
+        systemQris: netExpectedQris,
+        grossOnline: grossOnline,
+        platformCommission: platformCommission,
+        allMatch: allMatch,
+        cashMatch: cashMatch,
+        qrisMatch: qrisMatch,
+        onlineMatch: onlineMatch,
+      ),
+    );
+
+    if (result == 'save' && mounted) {
+      final batch = fs.batch();
+      final reportRef = fs.collection(Col.name('DailyTransaction')).doc(today);
+
+      batch.update(reportRef, {
+        'grossCash': grossCash,
+        'grossQris': grossQris,
+        'grossOnline': grossOnline,
+        'expensesCash': expensesCash,
+        'expensesQris': expensesQris,
+        'expensesOnline': expensesOnline,
+        'actualCash': inputCash,
+        'actualQris': inputQris,
+        'actualOnline': inputOnline,
+        'discrepancyCash': discrepancyCash,
+        'discrepancyQris': discrepancyQris,
+        'discrepancyOnline': platformCommission,
+        'closingCash': closingCash,
+        'closingQris': closingQris,
+        'closingOnline': closingOnline,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      // Write strictly to the subcollection separating array limits
+      for (var expense in parsedExpenses) {
+        final expenseRef = fs.collection(Col.name('Expenses')).doc(); 
+        batch.set(expenseRef, expense);
+      }
+
+      await batch.commit();
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 12),
+                Text(
+                  'Laporan keuangan harian berhasil disimpan',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        children: [
+          // Handle bar
+          Container(
+            margin: const EdgeInsets.only(top: 12, bottom: 8),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          // Title
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.assessment, color: Colors.amber.shade800, size: 28),
+                const SizedBox(width: 12),
+                Text(
+                  'Laporan Keuangan Harian',
+                  style: GoogleFonts.poppins(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          // Scrollable content
+          Expanded(
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildSection1SystemRevenue(),
+                  const SizedBox(height: 24),
+                  _buildSection2IncomeInput(),
+                  const SizedBox(height: 24),
+                  _buildSection3ExpenditureInput(),
+                  const SizedBox(height: 32),
+                  _buildSubmitButton(),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSection1SystemRevenue() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Perhitungan Sistem',
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _isLoadingTotal
+              ? const SizedBox(
+                  height: 32,
+                  width: 32,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(
+                  _maskRevenue(_systemTotal ?? 0),
+                  style: GoogleFonts.poppins(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSection2IncomeInput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Pemasukan Hari Ini',
+          style: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Masukkan jumlah uang yang diterima berdasarkan metode pembayaran',
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            color: Colors.grey.shade600,
+          ),
+        ),
+        const SizedBox(height: 16),
+        _buildIncomeField(
+          controller: _cashController,
+          label: 'Uang Cash (Rp)',
+          icon: Icons.payments_outlined,
+          color: Colors.green,
+        ),
+        const SizedBox(height: 12),
+        _buildIncomeField(
+          controller: _qrisController,
+          label: 'Uang QRIS (Rp)',
+          icon: Icons.qr_code_2,
+          color: Colors.blue,
+        ),
+        const SizedBox(height: 12),
+        _buildIncomeField(
+          controller: _onlineController,
+          label: 'Uang Online (Rp)',
+          icon: Icons.language,
+          color: Colors.purple,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildIncomeField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    required Color color,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: TextInputType.number,
+      inputFormatters: _currencyFormatter,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: GoogleFonts.poppins(fontSize: 14),
+        prefixIcon: Icon(icon, color: color),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: color, width: 2),
+        ),
+      ),
+      style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w500),
+    );
+  }
+
+  Widget _buildSection3ExpenditureInput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Pengeluaran Hari Ini',
+          style: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Tambahkan pengeluaran berdasarkan kategori',
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            color: Colors.grey.shade600,
+          ),
+        ),
+        const SizedBox(height: 16),
+        ..._expenses.asMap().entries.map((entry) {
+          final index = entry.key;
+          final expense = entry.value;
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: expense.categoryController,
+                        decoration: InputDecoration(
+                          labelText: 'Kategori (mis. Kerupuk)',
+                          labelStyle: GoogleFonts.poppins(fontSize: 13),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          isDense: true,
+                        ),
+                        style: GoogleFonts.poppins(fontSize: 14),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: _expenses.length > 1
+                          ? () {
+                              setState(() {
+                                _expenses[index].dispose();
+                                _expenses.removeAt(index);
+                              });
+                            }
+                          : null,
+                      icon: Icon(
+                        Icons.remove_circle,
+                        color: _expenses.length > 1
+                            ? Colors.red.shade400
+                            : Colors.grey.shade300,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 5,
+                      child: TextField(
+                        controller: expense.amountController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: _currencyFormatter,
+                        decoration: InputDecoration(
+                          labelText: 'Jumlah (Rp)',
+                          labelStyle: GoogleFonts.poppins(fontSize: 13),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          isDense: true,
+                        ),
+                        style: GoogleFonts.poppins(fontSize: 14),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 4,
+                      child: DropdownButtonFormField<String>(
+                        value: expense.sourceAccount,
+                        decoration: InputDecoration(
+                          labelText: 'Sumber Dana',
+                          labelStyle: GoogleFonts.poppins(fontSize: 13),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 12),
+                        ),
+                        items: ['Cash', 'QRIS', 'Online']
+                            .map((acc) => DropdownMenuItem(
+                                  value: acc,
+                                  child: Text(acc,
+                                      style: GoogleFonts.poppins(fontSize: 13)),
+                                ))
+                            .toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() => expense.sourceAccount = val);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () {
+              setState(() {
+                _expenses.add(_ExpenseEntry());
+              });
+            },
+            icon: const Icon(Icons.add_circle_outline, size: 20),
+            label: Text(
+              'Tambah Pengeluaran',
+              style: GoogleFonts.poppins(fontSize: 13),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSubmitButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton(
+        onPressed: _submitReport,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.amber.shade700,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          elevation: 2,
+        ),
+        child: Text(
+          'Rekap Harian',
+          style: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExpenseEntry {
+  final categoryController = TextEditingController();
+  final amountController = TextEditingController();
+  String sourceAccount = 'Cash';
+
+  void dispose() {
+    categoryController.dispose();
+    amountController.dispose();
+  }
+}
+
+class _ValidationDialog extends StatelessWidget {
+  final int inputCash;
+  final int inputQris;
+  final int inputOnline;
+  final int systemCash;
+  final int systemQris;
+  final int grossOnline;
+  final int platformCommission;
+  final bool allMatch;
+  final bool cashMatch;
+  final bool qrisMatch;
+  final bool onlineMatch;
+
+  const _ValidationDialog({
+    required this.inputCash,
+    required this.inputQris,
+    required this.inputOnline,
+    required this.systemCash,
+    required this.systemQris,
+    required this.grossOnline,
+    required this.platformCommission,
+    required this.allMatch,
+    required this.cashMatch,
+    required this.qrisMatch,
+    required this.onlineMatch,
+  });
+
+  String _fmt(int value) {
+    return NumberFormat.decimalPattern('id_ID').format(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Row(
+        children: [
+          Icon(
+            allMatch ? Icons.check_circle : Icons.warning_amber_rounded,
+            color: allMatch ? Colors.green : Colors.orange,
+            size: 28,
+          ),
+          const SizedBox(width: 12),
+          Text(
+            allMatch ? 'Konfirmasi Laporan' : 'Peringatan Selisih',
+            style: GoogleFonts.poppins(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              allMatch
+                  ? 'Semua nilai sesuai dengan hitungan Netto (Gross Income - Petty Cash).'
+                  : 'Terdapat selisih antara input fisik Anda dan sistem (Net Accounting).',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: Colors.grey.shade700,
+              ),
+            ),
+            const SizedBox(height: 20),
+            _buildComparisonRow('Cash', inputCash, systemCash, cashMatch),
+            const SizedBox(height: 10),
+            _buildComparisonRow('QRIS', inputQris, systemQris, qrisMatch),
+            const SizedBox(height: 10),
+            _buildOnlineRow(),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, 'edit'),
+          child: Text(
+            'Ubah',
+            style: GoogleFonts.poppins(color: Colors.grey.shade700),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, 'save'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor:
+                allMatch ? const Color(0xFF2E7D32) : Colors.orange.shade700,
+            foregroundColor: Colors.white,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: Text(
+            'Simpan',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildComparisonRow(
+      String label, int input, int system, bool match) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: match ? Colors.green.shade50 : Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: match ? Colors.green.shade200 : Colors.orange.shade200,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            match ? Icons.check_circle : Icons.warning,
+            color: match ? Colors.green : Colors.orange,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (!match)
+                  Text(
+                    'Input: Rp ${_fmt(input)}  vs  Net Harapan: Rp ${_fmt(system)}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.orange.shade800,
+                    ),
+                  )
+                else
+                  Text(
+                    'Rp ${_fmt(input)} - Sesuai',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.green.shade700,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOnlineRow() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Online',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  'Diterima: Rp ${_fmt(inputOnline)}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: Colors.blue.shade800,
+                  ),
+                ),
+                if (platformCommission > 0)
+                  Text(
+                    'Potongan Platform: Rp ${_fmt(platformCommission)} (otomatis)',
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.blue.shade600,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

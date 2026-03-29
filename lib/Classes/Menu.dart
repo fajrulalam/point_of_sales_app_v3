@@ -10,8 +10,10 @@ class MenuObject {
   String category;
   List<MenuIngredient> ingredients;
   int unitsPerPackage;
-  bool isFeatured;
-  String description;
+  bool isRecommended;
+  String menuDescription;
+  int sortOrder;
+  String imageAspectRatio;
 
   MenuObject({
     required this.id,
@@ -22,8 +24,10 @@ class MenuObject {
     this.category = 'Umum',
     this.ingredients = const [],
     this.unitsPerPackage = 1,
-    this.isFeatured = false,
-    this.description = '',
+    this.isRecommended = false,
+    this.menuDescription = '',
+    this.sortOrder = 0,
+    this.imageAspectRatio = '1:1',
   });
 }
 
@@ -31,26 +35,39 @@ class MenuClass {
   static List<MenuObject> getAllMenus(QuerySnapshot<Object?> snapshot) {
     List<MenuObject> menus = [];
 
+    int parseInt(dynamic value, int defaultValue) {
+      if (value == null) return defaultValue;
+      if (value is num) return value.toInt();
+      if (value is String) return int.tryParse(value) ?? defaultValue;
+      return defaultValue;
+    }
+
     for (var element in snapshot.docs) {
-      final data = element.data() as Map<String, dynamic>;
-      menus.add(
-        MenuObject(
-          id: element.id,
-          namaMenu: data['namaMenu'],
-          harga: data['harga'],
-          isMakanan: data['isMakanan'],
-          imagePath: data['imagePath'],
-          category: data.containsKey('category') ? data['category'] : 'Umum',
-          unitsPerPackage: data.containsKey('unitsPerPackage') ? data['unitsPerPackage'] : 1,
-          isFeatured: data['isFeatured'] ?? false,
-          description: data['description'] ?? '',
-          ingredients: data.containsKey('ingredients')
-              ? (data['ingredients'] as List<dynamic>)
-                  .map((ing) => MenuIngredient.fromMap(ing as Map<String, dynamic>))
-                  .toList()
-              : [],
-        ),
-      );
+      try {
+        final data = element.data() as Map<String, dynamic>;
+        menus.add(
+          MenuObject(
+            id: element.id,
+            namaMenu: data['namaMenu']?.toString() ?? 'Unnamed Item',
+            harga: parseInt(data['harga'], 0),
+            isMakanan: data['isMakanan'] ?? true,
+            imagePath: data['imagePath'] ?? 'tidak ada',
+            category: data['category']?.toString() ?? 'Umum',
+            unitsPerPackage: parseInt(data['unitsPerPackage'], 1),
+            isRecommended: data['isRecommended'] ?? false,
+            menuDescription: data['menuDescription']?.toString() ?? '',
+            sortOrder: parseInt(data['sortOrder'], 0),
+            imageAspectRatio: data['imageAspectRatio']?.toString() ?? '1:1',
+            ingredients: data.containsKey('ingredients') && data['ingredients'] != null
+                ? (data['ingredients'] as List<dynamic>)
+                    .map((ing) => MenuIngredient.fromMap(ing as Map<String, dynamic>))
+                    .toList()
+                : [],
+          ),
+        );
+      } catch (e) {
+        print('Error parsing menu item ${element.id}: $e');
+      }
     }
 
     return menus;
