@@ -253,10 +253,41 @@ Widget _buildFloatingBubble() {
           ),
         ],
       ),
-      child: const Icon(
-        Icons.restaurant_menu_rounded,
-        color: Color(0xFFF5C518), // kWarmYellow
-        size: 28,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          const Icon(
+            Icons.restaurant_menu_rounded,
+            color: Color(0xFFF5C518), // kWarmYellow
+            size: 28,
+          ),
+          if (_pendingSelfOrdersCount + _pendingOpenBillsCount > 0)
+            Positioned(
+              right: 8,
+              top: 8,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+                constraints: const BoxConstraints(
+                  minWidth: 16,
+                  minHeight: 16,
+                ),
+                child: Center(
+                  child: Text(
+                    '${_pendingSelfOrdersCount + _pendingOpenBillsCount}',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     ),
   );

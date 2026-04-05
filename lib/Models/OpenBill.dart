@@ -52,6 +52,7 @@ class OpenBill {
   final List<OpenBillOrder> orders;
   final String status;
   final String? statusDocId;
+  final int customerNumber;
 
   OpenBill({
     required this.memberId,
@@ -61,6 +62,7 @@ class OpenBill {
     required this.orders,
     required this.status,
     this.statusDocId,
+    this.customerNumber = 0,
   });
 
   /// Parse from a root Status doc (NEW data flow)
@@ -99,6 +101,7 @@ class OpenBill {
       orders: allItems.isEmpty ? [] : [singleOrder],
       status: (data['isClosed'] == true) ? 'settled' : 'open',
       statusDocId: doc.id,
+      customerNumber: (data['customerNumber'] ?? 0).toInt(),
     );
   }
 
@@ -125,6 +128,7 @@ class OpenBill {
       orders: parsedOrders,
       status: data['status'] ?? 'open',
       statusDocId: data['statusDocId'] as String?,
+      customerNumber: (data['customerNumber'] ?? 0).toInt(),
     );
   }
 
@@ -137,6 +141,7 @@ class OpenBill {
       'orders': orders.map((o) => o.toMap()).toList(),
       'status': status,
       if (statusDocId != null) 'statusDocId': statusDocId,
+      'customerNumber': customerNumber,
     };
   }
   

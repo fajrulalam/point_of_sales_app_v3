@@ -77,7 +77,6 @@ class OpenBillService {
     final statusRef = _statusRef.doc(statusDocId);
 
     batch.update(statusRef, {
-      'transactionMethod': paymentMethod,
       'isClosed': true,
       'settledAt': FieldValue.serverTimestamp(),
       'wasOpenBill': true,

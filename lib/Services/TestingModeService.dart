@@ -18,6 +18,7 @@ class Col {
   static const _rootCollections = <String>{
     'Canteens',
     'Categories',
+    'competitionRecords',
     'DailyFinancialReport',
     'DailyTransaction',
     'Expenses',
@@ -31,6 +32,9 @@ class Col {
     'StockSnapshotDaily',
     'StockTransactionDaily',
     'StockTransactionDetail',
+    'voucher',
+    'vouchers',
+    'voucherGroup',
     'YearlyTransaction',
   };
 

@@ -420,14 +420,15 @@ class OrderConfirmationService {
       };
     }).toList();
 
-    mapStatus['customerNumber'] = nomorBerikutnya + 1;
+    mapStatus['customerNumber'] = nomorBerikutnya;
     mapStatus['orderItems'] = orderItems;
     mapStatus['status'] = 'Serving';
     mapStatus['namaCustomer'] = customerNameController.text;
     mapStatus['total'] = totalHarga;
     mapStatus['subTotal'] = subTotal;
     mapStatus['takeAwayFee'] = biayaBungkus;
-    mapStatus['transactionMethod'] = transactionMethod;
+    mapStatus['transactionMethod'] = 'Self Orders';
+    mapStatus['paymentMethod'] = transactionMethod;
     mapStatus['isMember'] = isMember;
     mapStatus['canteenId'] = selfOrder.canteenId;
     mapStatus['selfOrderId'] = selfOrder.id;
@@ -443,7 +444,7 @@ class OrderConfirmationService {
 
     // final canteenRef = fs.collection(Col.name('Canteens')).doc('canteen375');
     DocumentReference statusRef =
-        fs.collection(Col.name('Status')).doc('${nomorBerikutnya + 1}_plazaUnipdu');
+        fs.collection(Col.name('Status')).doc('${nomorBerikutnya}_plazaUnipdu');
     batch.set(statusRef, mapStatus);
 
     DocumentReference customerNumber = fs.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
@@ -836,14 +837,15 @@ class OrderConfirmationService {
       };
     }).toList();
 
-    mapStatus['customerNumber'] = nomorBerikutnya + 1;
+    mapStatus['customerNumber'] = nomorBerikutnya;
     mapStatus['orderItems'] = orderItems;
     mapStatus['status'] = 'Serving';
     mapStatus['namaCustomer'] = customerNameController.text;
     mapStatus['total'] = totalHarga;
     mapStatus['subTotal'] = subTotal;
     mapStatus['takeAwayFee'] = biayaBungkus;
-    mapStatus['transactionMethod'] = transactionMethod;
+    mapStatus['transactionMethod'] = 'Normal';
+    mapStatus['paymentMethod'] = transactionMethod;
     mapStatus['canteenId'] = 'canteen375_plazaUnipdu';
     mapStatus['isMember'] = isMember;
     if (memberId != null) {
@@ -857,7 +859,7 @@ class OrderConfirmationService {
 
     // final canteenRef = fs.collection(Col.name('Canteens')).doc('canteen375');
     DocumentReference statusRef =
-        fs.collection(Col.name('Status')).doc('${nomorBerikutnya + 1}_plazaUnipdu');
+        fs.collection(Col.name('Status')).doc('${nomorBerikutnya}_plazaUnipdu');
     batch.set(statusRef, mapStatus);
 
     DocumentReference customerNumber = fs.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
@@ -1032,11 +1034,11 @@ class OrderConfirmationService {
         });
       } else {
         // ── CREATE new Status doc ──
-        final String statusDocId = '${nomorBerikutnya + 1}_plazaUnipdu';
+        final String statusDocId = '${nomorBerikutnya}_plazaUnipdu';
         // Store food subtotal only (exclude take-away fee); fee is recalculated at settlement
         int foodSubtotal = totalHarga - biayaBungkus;
         Map<String, dynamic> mapStatus = {
-          'customerNumber': nomorBerikutnya + 1,
+          'customerNumber': nomorBerikutnya,
           'orderItems': orderItems,
           'status': 'Serving',
           'namaCustomer': memberName,
@@ -1044,6 +1046,7 @@ class OrderConfirmationService {
           'subTotal': foodSubtotal,
           'takeAwayFee': 0,
           'transactionMethod': 'Open Bill',
+          'paymentMethod': null,
           'isMember': true,
           'memberId': memberId,
           if (memberPhone != null) 'customerPhone': memberPhone,
@@ -1307,7 +1310,7 @@ class OrderConfirmationService {
     try {
       FirebaseFirestore fs = FirebaseFirestore.instance;
       DocumentSnapshot doc =
-          await fs.collection("vouchers").doc(voucherCode).get();
+          await fs.collection(Col.name("vouchers")).doc(voucherCode).get();
 
       Map<String, dynamic>? data;
       bool isPosVoucher = false;
@@ -1320,7 +1323,7 @@ class OrderConfirmationService {
         FirebaseFirestore eSantrenFs =
             FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
         DocumentSnapshot eSantrenDoc =
-            await eSantrenFs.collection("vouchers").doc(voucherCode).get();
+            await eSantrenFs.collection(Col.name("vouchers")).doc(voucherCode).get();
         if (eSantrenDoc.exists) {
           data = eSantrenDoc.data() as Map<String, dynamic>;
         }
@@ -1357,7 +1360,7 @@ class OrderConfirmationService {
 
         // Expire voucher if it is past date but hasn't been officially set to EXPIRED yet
         if (now.isAfter(expireDate) && status == 'READY_TO_CLAIM') {
-          await fs.collection("vouchers").doc(voucherCode).update({
+          await fs.collection(Col.name("vouchers")).doc(voucherCode).update({
             'status': 'EXPIRED',
           });
           return {'error': 'Voucher sudah tidak berlaku (Expired)'};
@@ -1419,7 +1422,7 @@ class OrderConfirmationService {
       String monthDocId = DateFormat('yyyy-MM').format(now);
 
       DocumentReference compRef =
-          fs.collection("competitionRecords").doc(monthDocId);
+          fs.collection(Col.name("competitionRecords")).doc(monthDocId);
 
       int pointsEarned = totalHarga ~/ 10000;
 
@@ -1454,7 +1457,7 @@ class OrderConfirmationService {
       DateTime now = DateTime.now();
       
       QuerySnapshot activeCampaigns = await fs
-          .collection('voucherGroup')
+          .collection(Col.name('voucherGroup'))
           .where('isActive', isEqualTo: true)
           .where('type', isEqualTo: 'cashbackCampaign')
           .get();
@@ -1463,7 +1466,7 @@ class OrderConfirmationService {
 
       // Fetch user's existing vouchers to check status and avoid composite index requirement
       QuerySnapshot userVouchers = await fs
-          .collection('vouchers')
+          .collection(Col.name('vouchers'))
           .where('userId', isEqualTo: memberId)
           .get();
 
@@ -1532,7 +1535,7 @@ class OrderConfirmationService {
         int threshold = campaignData['threshold'] ?? 0;
         String initialStatus = pointsToAdd >= threshold ? 'READY_TO_CLAIM' : 'IN_PROGRESS';
 
-        await fs.collection('vouchers').doc(newVoucherId).set({
+        await fs.collection(Col.name('vouchers')).doc(newVoucherId).set({
           'activeDate': campaignData['activeDate'],
           'createdAt': FieldValue.serverTimestamp(),
           'expireDate': campaignData['expireDate'],
@@ -1763,7 +1766,7 @@ class OrderConfirmationService {
       await printReceipt(
         customPesananList: aggregatedItems,
         overrideTotalHarga: totalHarga,
-        overrideNomorBerikutnya: nomorBerikutnya,
+        overrideNomorBerikutnya: openBill.customerNumber,
         overrideIsTakeAway: totalTakeAwayFee > 0,
         discountAmount: discountAmount,
         originalTotal: originalTotal,
@@ -1775,7 +1778,7 @@ class OrderConfirmationService {
 
       await _showSuccessDialog(
         context: context,
-        nomorBerikutnya: nomorBerikutnya,
+        nomorBerikutnya: openBill.customerNumber,
         uangYangDiterima: uangYangDiterima,
         totalHarga: totalHarga,
         originalTotal: originalTotal,
@@ -2387,6 +2390,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           child: ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF2E7D32),
+                              foregroundColor: Colors.white,
                             ),
                             onPressed: () {
                               if (isMember && _selectedMember == null) {
@@ -2442,7 +2446,13 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                 );
                               }
                             },
-                            child: const Text('OK'),
+                            child: Text(
+                              'OK',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         )
                       ],

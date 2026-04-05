@@ -36,15 +36,15 @@ service cloud.firestore {
     }
 
     match /DailyTransaction/{id} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow write: if isAdmin();
     }
     match /MonthlyTransaction/{id} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow write: if isAdmin();
     }
     match /YearlyTransaction/{id} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow write: if isAdmin();
     }
     match /DailyFinancialReport/{id} {
@@ -192,121 +192,66 @@ service cloud.firestore {
 
     // ── TESTING MODE COLLECTIONS (zTesting_ prefix) ──────────────────────────────
     match /zTesting_Categories/{id} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write, update, delete: if true;
     }
 
     match /zTesting_DailyTransaction/{id} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write, update, delete: if true;
     }
 
     match /zTesting_MonthlyTransaction/{id} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write, update, delete: if true;
     }
 
     match /zTesting_YearlyTransaction/{id} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write, update, delete: if true;
     }
 
     match /zTesting_DailyFinancialReport/{id} {
-      allow read, write, update, delete: if isAuthenticated();
+      allow read, write, update, delete: if true;
       match /Expenses/{expenseId} {
-        allow read, write, update, delete: if isAuthenticated();
+        allow read, write, update, delete: if true;
       }
     }
 
     match /zTesting_Expenses/{id} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     match /zTesting_Status/{id} {
-      allow read, write, delete, update: if isAuthenticated();
+      allow read, write, update, delete: if true;
     }
 
     match /zTesting_RecentlyServed/{id} {
-      allow read, write, delete, update: if isAuthenticated();
+      allow read, write, delete, update: if true;
     }
 
     match /zTesting_Members/{uid} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated()
-                    && request.auth.uid == uid
-                    && request.resource.data.uid == uid;
-      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == uid);
-      allow delete: if isAdmin();
+      allow read, write, update, delete: if true;
     }
 
     match /zTesting_Canteens/{canteenId} {
-      allow read: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow create, delete: if isAdmin();
+      allow read, write, update, delete: if true;
 
-      match /Inventory/{id} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin();
+      match /{subcollection=**} {
+        allow read, write, update, delete: if true;
       }
+    }
 
-      match /DailyStockLogs/{id} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin();
-      }
+    match /zTesting_competitionRecords/{id} {
+      allow read, write, update, delete: if true;
+    }
 
-      match /MenuCollection/{menuId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin();
-      }
+    match /zTesting_vouchers/{id} {
+      allow read, write, update, delete: if true;
+    }
 
-      match /Metadata/{configId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin() || (isAuthenticated() && configId == 'SelfOrderCounter');
-      }
+    match /zTesting_voucher/{id} {
+      allow read, write, update, delete: if true;
+    }
 
-      match /OptionGroups/{groupId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin();
-      }
-
-      match /suppliers/{supplierId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin();
-      }
-
-      match /shoppingOrders/{orderId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin();
-      }
-
-      match /Status/{orderId} {
-        allow read, write, update, delete: if isAuthenticated();
-      }
-
-      match /RecentlyServed/{orderId} {
-        allow read, write, update, delete: if isAuthenticated();
-      }
-
-      match /SelfOrders/{orderId} {
-        allow read: if isAdmin() || (isAuthenticated() && resource.data.memberId == request.auth.uid);
-        allow create: if isAuthenticated() && request.resource.data.memberId == request.auth.uid;
-        allow update, delete: if isAdmin();
-      }
-
-      match /OpenBills/{memberId} {
-        allow read, write, update, delete: if isAuthenticated();
-        match /Orders/{tabOrderId} {
-          allow read, write, update, delete: if isAuthenticated();
-        }
-      }
-
-      match /SettledBills/{billId} {
-        allow read, write, update, delete: if isAuthenticated();
-      }
-
-      match /Orders/{orderID} {
-        allow read, write, update, delete: if isAuthenticated();
-      }
+    match /zTesting_voucherGroup/{id} {
+      allow read, write, update, delete: if true;
     }
   }
 }

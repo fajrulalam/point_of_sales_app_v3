@@ -1,102 +1,96 @@
 # 💰 Financial System Architecture & General Ledger Blueprint
 
-This document acts as the master blueprint for the financial engineering of the Canteen 375 ERP ecosystem. Future AI Agents and Developers reading this document must adhere strictly to the separation of concerns outlined below to prevent destructive mathematical anomalies when building out subsequent features, particularly the Manager Dashboard App.
+This document acts as the master blueprint for the financial engineering of the Canteen 375 ERP ecosystem. Future AI Agents and Developers reading this document must adhere strictly to the separation of concerns outlined below to prevent destructive mathematical anomalies.
 
 ---
 
 ## 🛑 The Core Golden Rule: Separation of Accounting Layers
 
-Do not mistake the Cashier App for an Accountant's workstation. Financial logic in this ecosystem is strictly isolated into two mutually exclusive environments:
+Financial logic in this ecosystem is strictly isolated into two environments:
 
-### 1. Shift Reconciliation (The POS Application)
-Used securely by front-of-house cashiers at the end of their shift.
-- Its **sole objective** is to mathematically audit the physical cash sitting inside the metal drawer against the POS software's daily recorded operations.
-- **Scope of Expenditures:** strictly minor "Petty Cash" anomalies (e.g., Rp 20.000 for emergency Tisu, Rp 15.000 for emergency ice delivery).
-- **Golden Logic:** The physical money input into the UI by the cashier must be matched against `Net Cash`. 
-  - Formula: `(System Gross Cash - Total Cash Petty Expenses) = Expected Physical Remainder`.
+### 1. Shift Reconciliation (POS Application)
+Used by cashiers at the end of their shift to audit the physical drawer.
+- **Objective:** Match physical cash/QRIS against recorded operations.
+- **Formulas:** 
+  - `Net Expected Cash = (Total Cash Sales - Total Cash Expenses)`
+  - `Net Expected QRIS = (Total QRIS Sales - Total QRIS Expenses)`
+- **Discrepancy Resolution:** Any delta between `Net Expected` and `Actual Input` is recorded as a discrepancy for audit.
 
-### 2. General Ledger Accounting (The Pending Dashboard Application)
-Designed for Managers, Stakeholders, and automated Profit & Loss (P&L) generation.
-- Its **sole objective** is to calculate absolute commercial profitability for given months/years.
-- **Scope of Expenditures:** Employee wages, Monthly building rent, Massive wholesale resupply invoices (e.g., buying 50 kg of raw ingredients from a farm).
-- **Golden Logic:** These massive expenditures will rapidly eclipse the POS drawer's daily income. Therefore, these transactions are inherently paid identically via Business Bank Accounts or the Back-Office Master Safe. They are never deducted from the Daily Transactions pipeline!
+### 2. General Ledger Accounting (Dashboard & Analytics)
+Designed for Managers and Stakeholders for P&L generation.
+- **Scale:** Handles large expenditures (wages, rent, bulk supplies).
+- **Separation:** POS "Petty Cash" expenses are tracked daily, while large back-office expenses are decoupled from the daily drawer reconciliation.
 
 ---
 
-## 🗄️ Firestore Database Architecture Blueprint
+## 🧪 Testing Mode & Prefixing (CRITICAL)
 
-To support this separated architecture seamlessly across multiple frontends (POS App vs Dashboard App), the `DailyFinancialReport` ecosystem MUST be structured as follows.
+To ensure safety during development and testing, the application implements a **Global Prefixing System**.
 
-### A. The Core Daily Net Ledger (`DailyFinancialReport`)
+- **Detection:** The `Col.name('CollectionName')` helper is used throughout the codebase.
+- **Behavior:** When **Testing Mode** is enabled (persisted in SharedPreferences), every root collection name is prefixed with `zTesting_`.
+- **Scope:** This includes `DailyTransaction`, `Status`, `Members`, `Expenses`, `vouchers`, etc.
+- **Safety:** AI Agents MUST use `Col.name()` for all Firestore collection references to avoid polluting production data.
 
-**Path:** `/DailyFinancialReport/{YYYY-MM-DD}`
+---
 
-This document aggregates the final performance of the POS terminal for exactly that date.
+## 🗄️ Firestore Database Architecture
+
+### A. The Daily Ledger (`DailyTransaction`)
+
+**Path:** `/DailyTransaction/{YYYY-MM-DD}` (Prefixed as `zTesting_DailyTransaction` in testing mode)
+
+This document acts as both the live aggregator for shift sales and the final audit report.
 
 ```json
 {
-  // 1. Gross Incoming Sales (Recorded cleanly by OrderConfirmationService)
+  // --- Live Accumulators (Incremented by OrderConfirmationService) ---
+  "total": 1050000,
+  "totalCash": 850000,
+  "totalQris": 200000,
+  "totalOnline": 0,
+  "subTotal": 1030000, // Food/Drink only
+  "takeAwayFee": 20000, // Recalculated at settlement for Open Bills
+  
+  // --- Final Audit Fields (Added by FinancialReportBottomSheet) ---
   "grossCash": 850000,
   "grossQris": 200000,
   "grossOnline": 0,
+  "expensesCash": 50000,
+  "actualCash": 800000, // User input
+  "discrepancyCash": 0,
+  "platformCommission": 0, // Delta for Online orders
   
-  // 2. Localized Shift Expenditures (Aggregated dynamically via POS BottomSheet)
-  "expensesCash": 50000, // E.g., Emergency Tisu
-  "expensesQris": 0,
-  "expensesOnline": 0,
-  
-  // 3. Mathematical Net Expectations (Calculated purely by system formulas)
-  "netExpectedCash": 800000, 
-  "netExpectedQris": 200000,
-  "netExpectedOnline": 0,
-  
-  // 4. Physical Count Logs (What the cashier physically held and inputted in the UI)
-  "inputCash": 800000,
-  "inputQris": 200000,
-  "inputOnline": 0,
-
-  // 5. Final Audit Discrepancy (A perfectly balanced drawer evaluates all three to strictly 0)
-  "discrepancyCash": 0, 
-  "discrepancyQris": 0,
-  "discrepancyOnline": 0, // Always 0; delta is auto-classified below
-
-  // 6. Food Delivery Aggregator Commission (auto-calculated: grossOnline - inputOnline)
-  "platformCommission": 100000, // GrabFood/GoFood/ShopeeFood combined cut
-  
-  "timestamp": "serverTimestamp" // Firestore intrinsic timeline lock
+  "timestamp": "serverTimestamp"
 }
 ```
 
-### B. The Expenditure Engine (Subcollection Routing)
+### B. Transaction Fields & Methods
 
-**Path:** `/DailyFinancialReport/{YYYY-MM-DD}/Expenses/{UUID}`
+Individual orders in the `Status` collection use two primary fields to track flow:
 
-**CRITICAL DEVELOPMENT NOTE FOR FUTURE AI:** Absolutely *never* store daily expenditures as an Array inside the master document!
-To properly generate sweeping Monthly Dashboard charts, the expenses must exist as uncoupled, indexable sub-documents. This enables the Dashboard App to run aggressive `collectionGroup('Expenses')` functions to instantly calculate metrics like *"Total Tisu spending in Q4"*.
+1. **`transactionMethod`**:
+   - `Normal`: Regular immediate checkout.
+   - `Open Bill`: Order is kept open (unpaid) until later settlement.
+   - `Self Order`: Orders originating from the self-service web/app.
+2. **`paymentMethod`**:
+   - Initial state for Open Bills: `null`.
+   - Final state upon checkout: `Cash`, `QRIS`, or `Online`.
 
-```json
-{
-  "category": "Gaji Karyawan (Employee Wages)",
-  "totalAmount": 5000000,
-  
-  // Crucial Attribute: Allows split-payments across multiple accounts!
-  // E.g., Paying 5jt using 3jt Physical Cash and 2jt QRIS transfer.
-  "sources": {
-    "Cash": 3000000,
-    "QRIS": 2000000,
-    "Online": 0
-  },
-  
-  "timestamp": "serverTimestamp",
-  // Optional Tracking Traceability
-  "authorizedBy": "Manager_Fajrul",
-  "recipient": "Budi" 
-}
-```
+---
 
-## 🚀 Headstart Roadmap for Future Development
-When preparing to upgrade the `FinancialReportBottomSheet.dart` inside the current POS environment:
+## 🧾 Open Bill Settlement Flow
 
-1. Scrap the current `.map` arrays execution block that evaluates generic expenditures.
-2. Upgrade the UI array (`_expenses`) model to explicitly force the user to select the `sourceAccount` (Dropdown).
-3. Overhaul the `_ValidationDialog` math algorithms to exclusively compare `input` vs `netExpected`. Gross computations must remain strictly invisible from the physical counting operations!
+1. **Creation**: Status doc is created with `transactionMethod: 'Open Bill'`, `isClosed: false`, and `paymentMethod: null`. No `DailyTransaction` write occurs yet.
+2. **Settlement**: 
+   - `DailyTransaction` accumulators (`totalCash`, `totalQris`, etc.) are incremented.
+   - Status doc is updated: `isClosed: true`, `paymentMethod: 'Cash|QRIS|Online'`, and `settledAt` timestamp is set.
+   - Inventory and member points are processed in the same atomic batch.
+
+---
+
+## 🚀 Future Roadmap & Constraints
+
+1. **Expenditure Subcollections**: Currently using a flat `Expenses` collection. Scaling may require subcollections within `DailyTransaction` for massive volume.
+2. **Commission Logic**: The `platformCommission` logic is currently calculated as `grossOnline - actualOnline`. This should be reviewed if third-party aggregator APIs are integrated.
+3. **Closing Balances**: The system maintains `closingCash/Qris/Online` for running saldo across dates to detect cumulative leakages.
