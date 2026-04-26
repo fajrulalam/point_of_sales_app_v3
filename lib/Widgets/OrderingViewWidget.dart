@@ -32,10 +32,18 @@ class _OrderingViewWidgetState extends State<OrderingViewWidget> {
   String? _selectedCategory; // null = "Semua"
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  late final PageController _pageController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: _topTabIndex);
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -101,13 +109,27 @@ class _OrderingViewWidgetState extends State<OrderingViewWidget> {
           _buildTopBar(),
           // === SECOND LAYER: Category chips (hidden during search) ===
           if (_searchQuery.isEmpty) _buildCategoryChips(),
-          // === MENU ITEMS GRID ===
+          // === MENU ITEMS GRID (swipeable between Makanan / Minuman) ===
           Expanded(
-            child: _filteredItems.isEmpty
-                ? _buildEmptyState()
-                : MenuGridWidget(
-                    menuObjectList: _filteredItems,
-                    onMenuTap: widget.onMenuTap,
+            child: _searchQuery.isNotEmpty
+                ? (_filteredItems.isEmpty
+                    ? _buildEmptyState()
+                    : MenuGridWidget(
+                        menuObjectList: _filteredItems,
+                        onMenuTap: widget.onMenuTap,
+                      ))
+                : PageView(
+                    controller: _pageController,
+                    onPageChanged: (index) {
+                      setState(() {
+                        _topTabIndex = index;
+                        _selectedCategory = null;
+                      });
+                    },
+                    children: [
+                      _buildPageContent(0),
+                      _buildPageContent(1),
+                    ],
                   ),
           ),
           // === BUNGKUS CHECKBOX ===
@@ -139,6 +161,37 @@ class _OrderingViewWidgetState extends State<OrderingViewWidget> {
     );
   }
 
+  Widget _buildPageContent(int tabIndex) {
+    final items = tabIndex == 0
+        ? widget.menuObjectList_makanan
+        : widget.menuObjectList_minuman;
+
+    List<MenuObject> filtered;
+    if (_selectedCategory != null) {
+      filtered = items
+          .where((m) => m.category == _selectedCategory)
+          .toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    } else {
+      final catOrder = widget.categoryOrder;
+      filtered = List<MenuObject>.from(items)
+        ..sort((a, b) {
+          final catA = catOrder.indexOf(a.category);
+          final catB = catOrder.indexOf(b.category);
+          final orderA = catA == -1 ? 999 : catA;
+          final orderB = catB == -1 ? 999 : catB;
+          if (orderA != orderB) return orderA.compareTo(orderB);
+          return a.sortOrder.compareTo(b.sortOrder);
+        });
+    }
+
+    if (filtered.isEmpty) return _buildEmptyState();
+    return MenuGridWidget(
+      menuObjectList: filtered,
+      onMenuTap: widget.onMenuTap,
+    );
+  }
+
   Widget _buildTopTab(String label, int index) {
     final isActive = _searchQuery.isEmpty && _topTabIndex == index;
     return GestureDetector(
@@ -149,6 +202,11 @@ class _OrderingViewWidgetState extends State<OrderingViewWidget> {
           _searchQuery = '';
           _searchController.clear();
         });
+        _pageController.animateToPage(
+          index,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+        );
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),

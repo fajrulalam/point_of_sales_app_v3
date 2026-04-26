@@ -123,7 +123,7 @@ class HomeController extends ChangeNotifier {
   }
 
   void getListGambar() {
-    FirebaseFirestore.instance.collection('assets').snapshots().listen((value) {
+    FirebaseFirestore.instance.collection(Col.name('assets')).snapshots().listen((value) {
       listGambar = AssetsClass.getImageAssets(value);
       notifyListeners();
     });
@@ -147,7 +147,7 @@ class HomeController extends ChangeNotifier {
       }
       
       // 2. Delete the asset document
-      batch.delete(firestore.collection('assets').doc(asset.id));
+      batch.delete(firestore.collection(Col.name('assets')).doc(asset.id));
       
       await batch.commit();
       onShowMessage?.call('Gambar berhasil dihapus dari katalog', isError: false);
@@ -184,64 +184,75 @@ class HomeController extends ChangeNotifier {
   }
 
   // Order Management
-  Future<void> addToOrder(MenuObject menu, bool isTakeAway, {List<SelectedOption>? options}) async {
-    final selectedOpts = options ?? const [];
+  bool _addToOrderLock = false;
 
-    // Build a temporary key to find matching existing items (same name + same options)
-    final tempObj = PesananObject(
-      namaPesanan: menu.namaMenu,
-      harga: menu.harga,
-      selectedOptions: selectedOpts,
-    );
-    int orderIndex = pesananList
-        .indexWhere((element) => element.orderKey == tempObj.orderKey);
+  Future<void> addToOrder(MenuObject menu, bool isTakeAway, {List<SelectedOption>? options, int quantity = 1}) async {
+    if (_addToOrderLock) return;
+    _addToOrderLock = true;
 
-    // Calculate what the new quantity would be
-    int newQuantity = 1;
-    if (orderIndex != -1) {
-      newQuantity = pesananList[orderIndex].totalQuantity + 1;
-    }
+    try {
+      final selectedOpts = options ?? const [];
 
-    // Check availability (menu + option ingredients aggregated)
-    final inventoryService = InventoryService();
-    final optionIngredients = _resolveOptionIngredients(selectedOpts);
-    final availability = await inventoryService.checkOrderAvailability(
-      menu,
-      optionIngredients,
-      newQuantity,
-    );
-
-    if (!availability.isAvailable) {
-      onShowMessage?.call(
-        'Tidak bisa menambah ${menu.namaMenu}: ${availability.message}',
-        isError: true,
-      );
-      return;
-    }
-
-    if (availability.hasWarning) {
-      onShowMessage?.call(
-        'Peringatan: ${availability.message}',
-        isError: false,
-      );
-    }
-
-    if (orderIndex == -1) {
-      pesananList.add(PesananObject(
+      final matchKey = PesananObject(
         namaPesanan: menu.namaMenu,
         harga: menu.harga,
-        dineInQuantity: isTakeAway ? 0 : 1,
-        takeAwayQuantity: isTakeAway ? 1 : 0,
         selectedOptions: selectedOpts,
-      ));
-    } else {
-      if (isTakeAway) {
-        pesananList[orderIndex].takeAwayQuantity++;
-      } else {
-        pesananList[orderIndex].dineInQuantity++;
+      ).orderKey;
+
+      int orderIndex = pesananList
+          .indexWhere((element) => element.orderKey == matchKey);
+
+      int newQuantity = quantity;
+      if (orderIndex != -1) {
+        newQuantity = pesananList[orderIndex].totalQuantity + quantity;
       }
+
+      final inventoryService = InventoryService();
+      final optionIngredients = _resolveOptionIngredients(selectedOpts);
+      final availability = await inventoryService.checkOrderAvailability(
+        menu,
+        optionIngredients,
+        newQuantity,
+      );
+
+      if (!availability.isAvailable) {
+        onShowMessage?.call(
+          'Tidak bisa menambah ${menu.namaMenu}: ${availability.message}',
+          isError: true,
+        );
+        return;
+      }
+
+      if (availability.hasWarning) {
+        onShowMessage?.call(
+          'Peringatan: ${availability.message}',
+          isError: false,
+        );
+      }
+
+      // Re-check after the async gap to prevent duplicate rows from rapid taps
+      orderIndex = pesananList
+          .indexWhere((element) => element.orderKey == matchKey);
+
+      if (orderIndex == -1) {
+        pesananList.add(PesananObject(
+          namaPesanan: menu.namaMenu,
+          harga: menu.harga,
+          dineInQuantity: isTakeAway ? 0 : quantity,
+          takeAwayQuantity: isTakeAway ? quantity : 0,
+          selectedOptions: selectedOpts,
+        ));
+      } else {
+        if (isTakeAway) {
+          pesananList[orderIndex].takeAwayQuantity += quantity;
+        } else {
+          pesananList[orderIndex].dineInQuantity += quantity;
+        }
+      }
+      getTotal();
+    } finally {
+      _addToOrderLock = false;
     }
-    getTotal();
   }
 
   Future<void> incrementDineIn(int index) async {
@@ -460,6 +471,7 @@ class HomeController extends ChangeNotifier {
     bool? overrideIsTakeAway,
     int discountAmount = 0,
     int originalTotal = 0,
+    int? overrideBiayaBungkus,
   }) async {
     // Check actual printer connection status dynamically
     await checkIfPrinterIsConnected();
@@ -498,10 +510,17 @@ class HomeController extends ChangeNotifier {
               : '';
           print2ColumnSmall(optLine, optPrice);
         }
+        if (element.customerNote != null && element.customerNote!.isNotEmpty) {
+          printer.printCustom('  * ${element.customerNote}', 1, 0);
+        }
       }
       if (displayTakeAway) {
+        final int displayBiayaBungkus = overrideBiayaBungkus ?? biayaBungkus;
+        final int displayJumlahItem = overrideBiayaBungkus != null
+            ? displayPesananList.fold<int>(0, (sum, o) => sum + o.takeAwayQuantity)
+            : jumlahItem;
         print2ColumnSmall(
-            'Bungkus (' +  jumlahItem.toString()+")", biayaBungkus.toString());
+            'Bungkus ($displayJumlahItem)', displayBiayaBungkus.toString());
       }
       if (discountAmount > 0) {
         printer.printNewLine();
@@ -535,12 +554,25 @@ class HomeController extends ChangeNotifier {
       final int customerNumber = orderData['customerNumber'] ?? 0;
       final int total = orderData['total'] ?? 0;
       final List<dynamic> orderItems = orderData['orderItems'] ?? [];
-      final DateTime? waktuPesan = orderData['waktuPesan'] != null
-          ? (orderData['waktuPesan'] as dynamic).toDate()
-          : null;
+      DateTime? waktuPesan;
+      final rawWaktu = orderData['waktuPesan'];
+      if (rawWaktu is Timestamp) {
+        waktuPesan = rawWaktu.toDate();
+      } else if (rawWaktu is DateTime) {
+        waktuPesan = rawWaktu;
+      } else if (rawWaktu is String) {
+        final epoch = int.tryParse(rawWaktu);
+        if (epoch != null) {
+          waktuPesan = DateTime.fromMillisecondsSinceEpoch(epoch * 1000);
+        }
+      }
 
-      // Determine if it's a takeaway order
-      bool hasTakeAway = orderItems.any((item) => (item['takeAwayQuantity'] ?? 0) > 0);
+      // Detect data format: RecentlyServed uses 'quantity', Status uses 'dineInQuantity'/'takeAwayQuantity'
+      final bool isRecentlyServedFormat = orderItems.isNotEmpty && orderItems.first.containsKey('quantity');
+
+      bool hasTakeAway = isRecentlyServedFormat
+          ? orderItems.any((item) => (item['orderType'] ?? '') == 'take-away')
+          : orderItems.any((item) => (item['takeAwayQuantity'] ?? 0) > 0);
 
       printer.printCustom("Canteen 375", 3, 1);
       printer.printCustom("*** CETAK ULANG ***", 1, 1);
@@ -555,16 +587,21 @@ class HomeController extends ChangeNotifier {
 
       for (var item in orderItems) {
         String itemName = item['namaPesanan'] ?? '';
-        int dineIn = item['dineInQuantity'] ?? 0;
-        int takeAway = item['takeAwayQuantity'] ?? 0;
-        int harga = item['harga'] ?? 0;
-        int totalQty = dineIn + takeAway;
+        int harga = (item['harga'] ?? 0) is num ? (item['harga'] as num).toInt() : 0;
 
-        // Add option price adjustments to per-item price
+        int totalQty;
+        if (isRecentlyServedFormat) {
+          totalQty = (item['quantity'] ?? 0) is num ? (item['quantity'] as num).toInt() : 0;
+        } else {
+          int dineIn = (item['dineInQuantity'] ?? 0) is num ? (item['dineInQuantity'] as num).toInt() : 0;
+          int takeAway = (item['takeAwayQuantity'] ?? 0) is num ? (item['takeAwayQuantity'] as num).toInt() : 0;
+          totalQty = dineIn + takeAway;
+        }
+
         int optionsAdj = 0;
         final List<dynamic> selectedOpts = item['selectedOptions'] ?? [];
         for (var opt in selectedOpts) {
-          optionsAdj += (opt['priceAdjustment'] ?? 0) as int;
+          optionsAdj += ((opt['priceAdjustment'] ?? 0) as num).toInt();
         }
         int effectivePrice = harga + optionsAdj;
         int subtotal = effectivePrice * totalQty;
@@ -576,17 +613,32 @@ class HomeController extends ChangeNotifier {
 
         for (var opt in selectedOpts) {
           String optName = opt['optionName'] ?? '';
-          int adj = opt['priceAdjustment'] ?? 0;
+          int adj = ((opt['priceAdjustment'] ?? 0) as num).toInt();
           String optPrice = adj > 0 ? '+$adj' : '';
           print2ColumnSmall('  + $optName', optPrice);
+        }
+        final String? note = item['customerNote'];
+        if (note != null && note.isNotEmpty) {
+          printer.printCustom('  * $note', 1, 0);
         }
       }
 
       if (hasTakeAway) {
-        int takeAwayCount = orderItems.fold<int>(
-            0, (sum, item) => sum + ((item['takeAwayQuantity'] ?? 0) as int));
-        int bungkusFee = takeAwayCount * 200;
-        print2ColumnSmall('Bungkus ($takeAwayCount)', bungkusFee.toString());
+        if (isRecentlyServedFormat) {
+          int bungkusFee = (orderData['bungkus'] ?? 0) is num ? (orderData['bungkus'] as num).toInt() : 0;
+          if (bungkusFee > 0) {
+            print2ColumnSmall('Bungkus', bungkusFee.toString());
+          }
+        } else {
+          int bungkusFee = (orderData['takeAwayFee'] ?? 0) is num
+              ? (orderData['takeAwayFee'] as num).toInt()
+              : 0;
+          int takeAwayCount = orderItems.fold<int>(
+              0, (sum, item) => sum + (((item['takeAwayQuantity'] ?? 0) as num).toInt()));
+          if (bungkusFee > 0) {
+            print2ColumnSmall('Bungkus ($takeAwayCount)', bungkusFee.toString());
+          }
+        }
       }
 
       printer.printNewLine();
@@ -670,6 +722,10 @@ class HomeController extends ChangeNotifier {
             String optPrice = adj > 0 ? '+$adj' : '';
             print2ColumnSmall('  + $optName', optPrice);
           }
+          final String? note = item['customerNote'];
+          if (note != null && note.isNotEmpty) {
+            printer.printCustom('  * $note', 1, 0);
+          }
         }
       } else if (legacyOrders != null) {
         // Legacy format: orders[].items[]
@@ -700,6 +756,10 @@ class HomeController extends ChangeNotifier {
               int adj = opt['priceAdjustment'] ?? 0;
               String optPrice = adj > 0 ? '+$adj' : '';
               print2ColumnSmall('  + $optName', optPrice);
+            }
+            final String? note = item['customerNote'];
+            if (note != null && note.isNotEmpty) {
+              printer.printCustom('  * $note', 1, 0);
             }
           }
 

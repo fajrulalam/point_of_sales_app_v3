@@ -445,7 +445,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
         finalImagePath = await imageRef.getDownloadURL();
 
         // Automatically save gallery uploads to catalog
-        await FirebaseFirestore.instance.collection('assets').add({
+        await FirebaseFirestore.instance.collection(Col.name('assets')).add({
           'path': finalImagePath,
           'isMakanan': widget.makananOrMinuman == 'Makanan',
         });

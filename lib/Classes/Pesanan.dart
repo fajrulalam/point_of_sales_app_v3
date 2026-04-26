@@ -58,6 +58,7 @@ class PesananObject {
   int dineInQuantity;
   int takeAwayQuantity;
   final List<SelectedOption> selectedOptions;
+  String? customerNote;
 
   PesananObject({
     required this.namaPesanan,
@@ -65,6 +66,7 @@ class PesananObject {
     this.dineInQuantity = 0,
     this.takeAwayQuantity = 0,
     this.selectedOptions = const [],
+    this.customerNote,
   });
 
   int get totalQuantity => dineInQuantity + takeAwayQuantity;

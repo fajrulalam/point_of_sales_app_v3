@@ -25,19 +25,23 @@ class OpenBillService {
   /// Listen to all currently-open bills (objects).
   Stream<List<OpenBill>> getOpenBillsStream() {
     return _statusRef
+        .where('transactionMethod', isEqualTo: 'Open Bill')
         .where('isClosed', isEqualTo: false)
-        .orderBy('waktuPesan', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => OpenBill.fromStatusDoc(doc))
-            .toList());
+        .map((snapshot) {
+          final list = snapshot.docs
+              .map((doc) => OpenBill.fromStatusDoc(doc))
+              .toList();
+          list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          return list;
+        });
   }
 
   /// Raw QuerySnapshot stream of all active orders (for Printer Dialog).
   Stream<QuerySnapshot> getRawActiveOrdersStream() {
     return _statusRef
+        .where('transactionMethod', isEqualTo: 'Open Bill')
         .where('isClosed', isEqualTo: false)
-        .orderBy('waktuPesan', descending: true)
         .snapshots();
   }
 
@@ -72,6 +76,9 @@ class OpenBillService {
     WriteBatch? existingBatch,
     int? subTotal,
     int? takeAwayFee,
+    bool isSplitPayment = false,
+    Map<String, dynamic>? splitDetails,
+    String? voucherProgramId,
   }) async {
     final batch = existingBatch ?? _firestore.batch();
     final statusRef = _statusRef.doc(statusDocId);
@@ -86,7 +93,11 @@ class OpenBillService {
       if (subTotal != null) 'subTotal': subTotal,
       if (takeAwayFee != null) 'takeAwayFee': takeAwayFee,
       'paymentMethod': paymentMethod,
+      'transactionMethod': paymentMethod,
       'total': finalTotal,
+      if (isSplitPayment) 'isSplitPayment': true,
+      if (splitDetails != null) 'splitDetails': splitDetails,
+      if (voucherProgramId != null) 'voucherProgramId': voucherProgramId,
     });
 
     if (existingBatch == null) {

@@ -53,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _onDigitTap(String digit) {
-    if (_enteredPin.length >= 6 || _isLoading) return;
+    if (_selectedEmployee == null || _enteredPin.length >= 6 || _isLoading) return;
     setState(() {
       _enteredPin += digit;
       _errorMessage = null;
@@ -70,6 +70,14 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _validateAndLogin() async {
+    if (_selectedEmployee == null) {
+      setState(() {
+        _errorMessage = 'Pilih kasir terlebih dahulu.';
+        _enteredPin = '';
+      });
+      return;
+    }
+
     if (_enteredPin != _correctPin) {
       setState(() {
         _errorMessage = 'PIN salah. Coba lagi.';
@@ -120,29 +128,37 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       backgroundColor: _tealDark,
-      body: Center(
-        child: Container(
-          key: _cardKey,
-          width: 360,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.25),
-                blurRadius: 24,
-                offset: const Offset(0, 12),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: Stack(
-              clipBehavior: Clip.hardEdge,
-              children: [
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+              physics: const ClampingScrollPhysics(),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight - 24),
+                child: Center(
+                  child: Container(
+                    key: _cardKey,
+                    width: 360,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.25),
+                          blurRadius: 24,
+                          offset: const Offset(0, 12),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: Stack(
+                        clipBehavior: Clip.hardEdge,
+                        children: [
                 // ── Main content column ─────────────────────────────────
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -222,61 +238,85 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
 
                       const SizedBox(height: 24),
-                      Text(
-                        'Masukkan PIN untuk memulai',
-                        style: GoogleFonts.poppins(color: Colors.grey.shade500, fontSize: 12),
-                      ),
-                      const SizedBox(height: 14),
-
-                      // PIN dot indicators
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(6, (i) {
-                          final filled = i < _enteredPin.length;
-                          return Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 8),
-                            width: 14,
-                            height: 14,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: filled ? _teal : Colors.grey.shade300,
-                              border: Border.all(
-                                color: filled ? _teal : Colors.grey.shade400,
-                                width: 1.5,
+                      Opacity(
+                        opacity: _selectedEmployee != null ? 1.0 : 0.45,
+                        child: IgnorePointer(
+                          ignoring: _selectedEmployee == null,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Masukkan PIN untuk memulai',
+                                style: GoogleFonts.poppins(color: Colors.grey.shade500, fontSize: 12),
                               ),
+                              const SizedBox(height: 14),
+
+                              // PIN dot indicators
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: List.generate(6, (i) {
+                                  final filled = i < _enteredPin.length;
+                                  return Container(
+                                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                                    width: 14,
+                                    height: 14,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: filled ? _teal : Colors.grey.shade300,
+                                      border: Border.all(
+                                        color: filled ? _teal : Colors.grey.shade400,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              ),
+
+                              // Error message
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                height: _errorMessage != null ? 32 : 0,
+                                child: _errorMessage != null
+                                    ? Padding(
+                                        padding: const EdgeInsets.only(top: 10),
+                                        child: Text(
+                                          _errorMessage!,
+                                          style: GoogleFonts.poppins(
+                                            color: Colors.red.shade600,
+                                            fontSize: 12,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      )
+                                    : const SizedBox.shrink(),
+                              ),
+
+                              const SizedBox(height: 20),
+
+                              if (_isLoading)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 28),
+                                  child: CircularProgressIndicator(color: _teal),
+                                )
+                              else
+                                _buildNumberPad(),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (_selectedEmployee == null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(
+                            'Pilih kasir di atas untuk mengaktifkan PIN.',
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              color: Colors.grey.shade600,
+                              fontStyle: FontStyle.italic,
                             ),
-                          );
-                        }),
-                      ),
-
-                      // Error message
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        height: _errorMessage != null ? 32 : 0,
-                        child: _errorMessage != null
-                            ? Padding(
-                                padding: const EdgeInsets.only(top: 10),
-                                child: Text(
-                                  _errorMessage!,
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.red.shade600,
-                                    fontSize: 12,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              )
-                            : const SizedBox.shrink(),
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      if (_isLoading)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 28),
-                          child: CircularProgressIndicator(color: _teal),
-                        )
-                      else
-                        _buildNumberPad(),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
 
                       const SizedBox(height: 4),
                     ],
@@ -301,9 +341,14 @@ class _LoginScreenState extends State<LoginScreen> {
                     right: 32,
                     child: _buildDropdownOptions(otherEmployees),
                   ),
-              ],
-            ),
-          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );

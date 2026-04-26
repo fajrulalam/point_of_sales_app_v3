@@ -23,15 +23,19 @@ class SelfOrderService {
   /// Get a real-time stream of self-orders
   /// Optionally filter by status (e.g., 'Unpaid', 'Paid', 'Declined')
   Stream<List<SelfOrder>> getSelfOrdersStream({String? statusFilter}) {
-    Query<Map<String, dynamic>> query =
-        _selfOrdersCollection.orderBy('waktuPesan', descending: true);
+    Query<Map<String, dynamic>> query = _selfOrdersCollection;
 
     if (statusFilter != null && statusFilter.isNotEmpty) {
       query = query.where('status', isEqualTo: statusFilter);
     }
 
-    return query.snapshots().map((snapshot) =>
-        snapshot.docs.map((doc) => SelfOrder.fromFirestore(doc)).toList());
+    return query.snapshots().map((snapshot) {
+      final list = snapshot.docs
+          .map((doc) => SelfOrder.fromFirestore(doc))
+          .toList();
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      return list;
+    });
   }
 
   /// Get a stream of only unpaid self-orders (for main view)

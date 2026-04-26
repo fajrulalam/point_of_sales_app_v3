@@ -41,6 +41,20 @@ class InventoryService {
     return _inventoryCache[id];
   }
 
+  /// Max servings possible from current cache for a list of ingredients.
+  /// Returns null if no ingredients, or the minimum stock/quantityNeeded ratio.
+  int? getMaxServings(List<MenuIngredient> ingredients) {
+    if (ingredients.isEmpty) return null;
+    int? min;
+    for (final ing in ingredients) {
+      final item = _inventoryCache[ing.inventoryItemId];
+      if (item == null || ing.quantityNeeded <= 0) continue;
+      final servings = item.stock ~/ ing.quantityNeeded;
+      if (min == null || servings < min) min = servings;
+    }
+    return min;
+  }
+
   /// Check if a menu item is available (warns if stock is low)
   Future<MenuAvailability> checkMenuAvailability(MenuObject menu, int quantity) async {
     // If no ingredients, item is always available

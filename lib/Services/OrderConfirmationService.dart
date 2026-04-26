@@ -23,6 +23,7 @@ import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 import 'package:dropdown_search/dropdown_search.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Services/MemberService.dart';
+import 'package:point_of_sales_app_v3/Services/VoucherProgramService.dart';
 
 class OrderConfirmationService {
   static Future<void> showOrderConfirmationDialog({
@@ -129,6 +130,13 @@ class OrderConfirmationService {
         isPosVoucher: result['isPosVoucher'] ?? false,
         discountAmount: totalHarga - finalTotal,
         transactionMethod: paymentMethod,
+        isSplitPayment: result['isSplitPayment'] ?? false,
+        splitCashAmount: result['splitCashAmount'] ?? 0,
+        splitQrisAmount: result['splitQrisAmount'] ?? 0,
+        voucherProgramId: result['voucherProgramId'],
+        programNominal: result['programNominal'] ?? 0,
+        programExtraPaymentMethod: result['programExtraPaymentMethod'],
+        programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
       );
     } else {
       uangYangDiterimaController.clear();
@@ -226,6 +234,13 @@ class OrderConfirmationService {
         discountAmount: totalHarga - finalTotal,
         onOrderCompleted: onOrderCompleted,
         transactionMethod: paymentMethod,
+        isSplitPayment: result['isSplitPayment'] ?? false,
+        splitCashAmount: result['splitCashAmount'] ?? 0,
+        splitQrisAmount: result['splitQrisAmount'] ?? 0,
+        voucherProgramId: result['voucherProgramId'],
+        programNominal: result['programNominal'] ?? 0,
+        programExtraPaymentMethod: result['programExtraPaymentMethod'],
+        programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
       );
     } else {
       // User cancelled - revert status back to Unpaid
@@ -268,6 +283,13 @@ class OrderConfirmationService {
     int discountAmount = 0,
     VoidCallback? onOrderCompleted,
     String? transactionMethod,
+    bool isSplitPayment = false,
+    int splitCashAmount = 0,
+    int splitQrisAmount = 0,
+    String? voucherProgramId,
+    int programNominal = 0,
+    String? programExtraPaymentMethod,
+    int programExtraSplitQrisAmount = 0,
   }) async {
     // Validate stock availability for all items
     final inventoryService = InventoryService();
@@ -327,28 +349,7 @@ class OrderConfirmationService {
           await SelfOrderService.instance.updateStatus(
               selfOrder.id, SelfOrderStatus.unpaid);
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.error, color: Colors.white),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Stok tidak cukup untuk ${pesanan.namaPesanan}: ${availability.message}',
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 5),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          );
+          _showTopError(context, 'Stok tidak cukup untuk ${pesanan.namaPesanan}: ${availability.message}');
         }
         return;
       }
@@ -377,12 +378,21 @@ class OrderConfirmationService {
     map['total'] = FieldValue.increment(totalHarga);
     map['subTotal'] = FieldValue.increment(subTotal);
     map['takeAwayFee'] = FieldValue.increment(biayaBungkus);
-    if (transactionMethod == 'Cash') {
-      map['totalCash'] = FieldValue.increment(totalHarga);
-    } else if (transactionMethod == 'QRIS') {
-      map['totalQris'] = FieldValue.increment(totalHarga);
-    } else if (transactionMethod == 'Online') {
-      map['totalOnline'] = FieldValue.increment(totalHarga);
+    if (isSplitPayment) {
+      _incrementPaymentAccumulator(map, 'Cash', splitCashAmount);
+      _incrementPaymentAccumulator(map, 'QRIS', splitQrisAmount);
+    } else if (voucherProgramId != null) {
+      final remaining = totalHarga - programNominal;
+      if (remaining > 0 && programExtraPaymentMethod != null) {
+        if (programExtraPaymentMethod == 'Cash + QRIS') {
+          _incrementPaymentAccumulator(map, 'Cash', remaining - programExtraSplitQrisAmount);
+          _incrementPaymentAccumulator(map, 'QRIS', programExtraSplitQrisAmount);
+        } else {
+          _incrementPaymentAccumulator(map, programExtraPaymentMethod, remaining);
+        }
+      }
+    } else if (transactionMethod != null) {
+      _incrementPaymentAccumulator(map, transactionMethod, totalHarga);
     }
     map["year"] = getYear();
     map["month"] = getMonth();
@@ -428,7 +438,30 @@ class OrderConfirmationService {
     mapStatus['subTotal'] = subTotal;
     mapStatus['takeAwayFee'] = biayaBungkus;
     mapStatus['transactionMethod'] = 'Self Orders';
-    mapStatus['paymentMethod'] = transactionMethod;
+    if (isSplitPayment) {
+      mapStatus['paymentMethod'] = 'Cash/QRIS';
+      mapStatus['isSplitPayment'] = true;
+      mapStatus['splitDetails'] = {
+        'cashAmount': splitCashAmount,
+        'qrisAmount': splitQrisAmount,
+      };
+    } else if (voucherProgramId != null) {
+      mapStatus['paymentMethod'] = 'Program';
+      mapStatus['voucherProgramId'] = voucherProgramId;
+      mapStatus['programNominal'] = programNominal;
+      final remaining = totalHarga - programNominal;
+      if (remaining > 0 && programExtraPaymentMethod != null) {
+        mapStatus['programExtraPaymentMethod'] = programExtraPaymentMethod;
+        if (programExtraPaymentMethod == 'Cash + QRIS') {
+          mapStatus['programExtraSplitDetails'] = {
+            'cashAmount': remaining - programExtraSplitQrisAmount,
+            'qrisAmount': programExtraSplitQrisAmount,
+          };
+        }
+      }
+    } else {
+      mapStatus['paymentMethod'] = transactionMethod;
+    }
     mapStatus['isMember'] = isMember;
     mapStatus['canteenId'] = selfOrder.canteenId;
     mapStatus['selfOrderId'] = selfOrder.id;
@@ -455,6 +488,14 @@ class OrderConfirmationService {
 
     if (appliedVoucherCode != null) {
       await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch);
+    }
+
+    if (voucherProgramId != null) {
+      VoucherProgramService.addRedemptionToBatch(
+        batch: batch, 
+        programId: voucherProgramId, 
+        amount: programNominal > 0 ? programNominal : totalHarga,
+      );
     }
 
     try {
@@ -491,6 +532,7 @@ class OrderConfirmationService {
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: getTotal,
         setJumlahItem: setJumlahItem,
+        splitCashAmount: isSplitPayment ? splitCashAmount : 0,
       );
 
       onOrderCompleted?.call();
@@ -525,6 +567,7 @@ class OrderConfirmationService {
     required TextEditingController uangYangDiterimaController,
     required Function() getTotal,
     required Function(int) setJumlahItem,
+    int splitCashAmount = 0,
   }) async {
     await showDialog(
       context: context,
@@ -609,7 +652,7 @@ class OrderConfirmationService {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Rp ${NumberFormat.decimalPattern().format(uangYangDiterima - totalHarga).replaceAll(',', '.')}',
+                        'Rp ${NumberFormat.decimalPattern().format(uangYangDiterima - (splitCashAmount > 0 ? splitCashAmount : totalHarga)).replaceAll(',', '.')}',
                         style: GoogleFonts.montserrat(
                             fontWeight: FontWeight.w600,
                             fontSize: 22,
@@ -687,6 +730,13 @@ class OrderConfirmationService {
     bool isPosVoucher = false,
     int discountAmount = 0,
     String? transactionMethod,
+    bool isSplitPayment = false,
+    int splitCashAmount = 0,
+    int splitQrisAmount = 0,
+    String? voucherProgramId,
+    int programNominal = 0,
+    String? programExtraPaymentMethod,
+    int programExtraSplitQrisAmount = 0,
   }) async {
     // 🔍 STEP 1: Validate stock availability for all items
     final inventoryService = InventoryService();
@@ -745,28 +795,7 @@ class OrderConfirmationService {
         if (context.mounted) {
           Navigator.pop(context); // Close loader
           
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.error, color: Colors.white),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Stok tidak cukup untuk ${pesanan.namaPesanan}: ${availability.message}',
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 5),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          );
+          _showTopError(context, 'Stok tidak cukup untuk ${pesanan.namaPesanan}: ${availability.message}');
         }
         return; // Abort order
       }
@@ -795,12 +824,22 @@ class OrderConfirmationService {
     map['total'] = FieldValue.increment(totalHarga);
     map['subTotal'] = FieldValue.increment(subTotal);
     map['takeAwayFee'] = FieldValue.increment(biayaBungkus);
-    if (transactionMethod == 'Cash') {
-      map['totalCash'] = FieldValue.increment(totalHarga);
-    } else if (transactionMethod == 'QRIS') {
-      map['totalQris'] = FieldValue.increment(totalHarga);
-    } else if (transactionMethod == 'Online') {
-      map['totalOnline'] = FieldValue.increment(totalHarga);
+    if (isSplitPayment) {
+      _incrementPaymentAccumulator(map, 'Cash', splitCashAmount);
+      _incrementPaymentAccumulator(map, 'QRIS', splitQrisAmount);
+    } else if (voucherProgramId != null) {
+      // Nominal covered by program — increment accumulators for extra payment only
+      final remaining = totalHarga - programNominal;
+      if (remaining > 0 && programExtraPaymentMethod != null) {
+        if (programExtraPaymentMethod == 'Cash + QRIS') {
+          _incrementPaymentAccumulator(map, 'Cash', remaining - programExtraSplitQrisAmount);
+          _incrementPaymentAccumulator(map, 'QRIS', programExtraSplitQrisAmount);
+        } else {
+          _incrementPaymentAccumulator(map, programExtraPaymentMethod, remaining);
+        }
+      }
+    } else if (transactionMethod != null) {
+      _incrementPaymentAccumulator(map, transactionMethod, totalHarga);
     }
     map["year"] = getYear();
     map["month"] = getMonth();
@@ -845,7 +884,30 @@ class OrderConfirmationService {
     mapStatus['subTotal'] = subTotal;
     mapStatus['takeAwayFee'] = biayaBungkus;
     mapStatus['transactionMethod'] = 'Normal';
-    mapStatus['paymentMethod'] = transactionMethod;
+    if (isSplitPayment) {
+      mapStatus['paymentMethod'] = 'Cash/QRIS';
+      mapStatus['isSplitPayment'] = true;
+      mapStatus['splitDetails'] = {
+        'cashAmount': splitCashAmount,
+        'qrisAmount': splitQrisAmount,
+      };
+    } else if (voucherProgramId != null) {
+      mapStatus['paymentMethod'] = 'Program';
+      mapStatus['voucherProgramId'] = voucherProgramId;
+      mapStatus['programNominal'] = programNominal;
+      final remaining = totalHarga - programNominal;
+      if (remaining > 0 && programExtraPaymentMethod != null) {
+        mapStatus['programExtraPaymentMethod'] = programExtraPaymentMethod;
+        if (programExtraPaymentMethod == 'Cash + QRIS') {
+          mapStatus['programExtraSplitDetails'] = {
+            'cashAmount': remaining - programExtraSplitQrisAmount,
+            'qrisAmount': programExtraSplitQrisAmount,
+          };
+        }
+      }
+    } else {
+      mapStatus['paymentMethod'] = transactionMethod;
+    }
     mapStatus['canteenId'] = 'canteen375_plazaUnipdu';
     mapStatus['isMember'] = isMember;
     if (memberId != null) {
@@ -870,6 +932,14 @@ class OrderConfirmationService {
     
     if (appliedVoucherCode != null) {
       await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch);
+    }
+    
+    if (voucherProgramId != null) {
+      VoucherProgramService.addRedemptionToBatch(
+        batch: batch, 
+        programId: voucherProgramId, 
+        amount: programNominal > 0 ? programNominal : totalHarga,
+      );
     }
 
     try {
@@ -901,6 +971,7 @@ class OrderConfirmationService {
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: getTotal,
         setJumlahItem: setJumlahItem,
+        splitCashAmount: isSplitPayment ? splitCashAmount : 0,
       );
     } catch (error) {
       Navigator.pop(context);
@@ -1097,6 +1168,17 @@ class OrderConfirmationService {
     }
   }
 
+  static void _incrementPaymentAccumulator(
+      Map<String, dynamic> map, String method, int amount) {
+    if (method == 'Cash') {
+      map['totalCash'] = FieldValue.increment(amount);
+    } else if (method == 'QRIS') {
+      map['totalQris'] = FieldValue.increment(amount);
+    } else if (method == 'Online') {
+      map['totalOnline'] = FieldValue.increment(amount);
+    }
+  }
+
   static Future<void> _showSuccessDialog({
     required BuildContext context,
     required int nomorBerikutnya,
@@ -1109,6 +1191,7 @@ class OrderConfirmationService {
     required TextEditingController uangYangDiterimaController,
     required Function() getTotal,
     required Function(int) setJumlahItem,
+    int splitCashAmount = 0,
   }) async {
     await showDialog(
       context: context,
@@ -1161,7 +1244,7 @@ class OrderConfirmationService {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Rp ${NumberFormat.decimalPattern().format(uangYangDiterima - totalHarga)}',
+                        'Rp ${NumberFormat.decimalPattern().format(uangYangDiterima - (splitCashAmount > 0 ? splitCashAmount : totalHarga))}',
                         style: GoogleFonts.montserrat(
                             fontWeight: FontWeight.w600,
                             fontSize: 24,
@@ -1267,7 +1350,7 @@ class OrderConfirmationService {
       if (isPosVoucher) {
         FirebaseFirestore fs = FirebaseFirestore.instance;
         DocumentReference voucherRef =
-            fs.collection("vouchers").doc(voucherCode);
+            fs.collection(Col.name("vouchers")).doc(voucherCode);
 
         // Fetch document to get voucherGroupId
         DocumentSnapshot doc;
@@ -1285,7 +1368,7 @@ class OrderConfirmationService {
           if (transaction != null) transaction.update(voucherRef, {'status': 'CLAIMED'});
 
           if (groupId != null) {
-            var groupRef = fs.collection('voucherGroup').doc(groupId);
+            var groupRef = fs.collection(Col.name('voucherGroup')).doc(groupId);
             if (batch != null) batch.update(groupRef, {'totalClaimed': FieldValue.increment(1)});
             if (transaction != null) transaction.update(groupRef, {'totalClaimed': FieldValue.increment(1)});
             print('📈 Incremented totalClaimed for group $groupId');
@@ -1670,6 +1753,13 @@ class OrderConfirmationService {
         isPosVoucher: result['isPosVoucher'] ?? false,
         discountAmount: billTotalWithFee - finalTotal,
         transactionMethod: paymentMethod,
+        isSplitPayment: result['isSplitPayment'] ?? false,
+        splitCashAmount: result['splitCashAmount'] ?? 0,
+        splitQrisAmount: result['splitQrisAmount'] ?? 0,
+        voucherProgramId: result['voucherProgramId'],
+        programNominal: result['programNominal'] ?? 0,
+        programExtraPaymentMethod: result['programExtraPaymentMethod'],
+        programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
       );
     } else {
       uangYangDiterimaController.clear();
@@ -1695,6 +1785,13 @@ class OrderConfirmationService {
     bool isPosVoucher = false,
     int discountAmount = 0,
     String? transactionMethod,
+    bool isSplitPayment = false,
+    int splitCashAmount = 0,
+    int splitQrisAmount = 0,
+    String? voucherProgramId,
+    int programNominal = 0,
+    String? programExtraPaymentMethod,
+    int programExtraSplitQrisAmount = 0,
   }) async {
     LoaderWidget.showLoaderDialog(context, message: "Menyelesaikan tagihan...");
     
@@ -1710,12 +1807,21 @@ class OrderConfirmationService {
     map['total'] = FieldValue.increment(totalHarga);
     map['subTotal'] = FieldValue.increment(subTotal);
     map['takeAwayFee'] = FieldValue.increment(totalTakeAwayFee);
-    if (transactionMethod == 'Cash') {
-      map['totalCash'] = FieldValue.increment(totalHarga);
-    } else if (transactionMethod == 'QRIS') {
-      map['totalQris'] = FieldValue.increment(totalHarga);
-    } else if (transactionMethod == 'Online') {
-      map['totalOnline'] = FieldValue.increment(totalHarga);
+    if (isSplitPayment) {
+      _incrementPaymentAccumulator(map, 'Cash', splitCashAmount);
+      _incrementPaymentAccumulator(map, 'QRIS', splitQrisAmount);
+    } else if (voucherProgramId != null) {
+      final remaining = totalHarga - programNominal;
+      if (remaining > 0 && programExtraPaymentMethod != null) {
+        if (programExtraPaymentMethod == 'Cash + QRIS') {
+          _incrementPaymentAccumulator(map, 'Cash', remaining - programExtraSplitQrisAmount);
+          _incrementPaymentAccumulator(map, 'QRIS', programExtraSplitQrisAmount);
+        } else {
+          _incrementPaymentAccumulator(map, programExtraPaymentMethod, remaining);
+        }
+      }
+    } else if (transactionMethod != null) {
+      _incrementPaymentAccumulator(map, transactionMethod, totalHarga);
     }
     map["year"] = getYear();
     map["month"] = getMonth();
@@ -1747,11 +1853,24 @@ class OrderConfirmationService {
           takeAwayFee: totalTakeAwayFee,
           voucherCode: appliedVoucherCode,
           existingBatch: batch,
+          isSplitPayment: isSplitPayment,
+          splitDetails: isSplitPayment
+              ? {'cashAmount': splitCashAmount, 'qrisAmount': splitQrisAmount}
+              : null,
+          voucherProgramId: voucherProgramId,
         );
       }
 
       if (appliedVoucherCode != null) {
         await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch);
+      }
+      
+      if (voucherProgramId != null) {
+        VoucherProgramService.addRedemptionToBatch(
+          batch: batch, 
+          programId: voucherProgramId, 
+          amount: programNominal > 0 ? programNominal : totalHarga,
+        );
       }
 
       // 🏆 Commit the entire batch (Financials + Settlement) together!
@@ -1788,6 +1907,7 @@ class OrderConfirmationService {
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: () {},
         setJumlahItem: setJumlahItem,
+        splitCashAmount: isSplitPayment ? splitCashAmount : 0,
       );
     } catch (e) {
       Navigator.pop(context);
@@ -1846,6 +1966,17 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   bool isMember = true;
   String? _memberError;
   String? _selectedPaymentMethod;
+  bool _isSplitPayment = false;
+  int _splitQrisAmount = 0;
+  TextEditingController _splitQrisController = TextEditingController();
+  List<Map<String, dynamic>> _activePrograms = [];
+  String? _selectedProgramId;
+  TextEditingController _programNominalController = TextEditingController();
+  int _programNominal = 0;
+  String? _programExtraPaymentMethod;
+  bool _isProgramExtraSplit = false;
+  TextEditingController _programExtraQrisController = TextEditingController();
+  int _programExtraQrisAmount = 0;
   String _lastSearchQuery = '';
   Iterable<Member> _lastOptionsFound = const Iterable<Member>.empty();
 
@@ -1861,6 +1992,16 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
     voucherFocusNode = FocusNode();
     currentTotal = widget.totalHarga; // Initialize with the starting total
     _loadMembers();
+    _loadPrograms();
+  }
+
+  Future<void> _loadPrograms() async {
+    final programs = await VoucherProgramService.getActivePrograms();
+    if (mounted) {
+      setState(() {
+        _activePrograms = programs;
+      });
+    }
   }
 
   @override
@@ -1868,6 +2009,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
     customerNameFocusNode.dispose();
     uangFocusNode.dispose();
     voucherFocusNode.dispose();
+    _programNominalController.dispose();
+    _programExtraQrisController.dispose();
     super.dispose();
   }
 
@@ -2313,150 +2456,375 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      children: ['Cash', 'QRIS', 'Online'].map((method) {
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: ['Cash', 'QRIS', 'Online', 'Cash + QRIS', 'Program'].map((method) {
                         final isSelected = _selectedPaymentMethod == method;
-                        return Expanded(
-                          child: Padding(
-                            padding: EdgeInsets.only(
-                              right: method != 'Online' ? 8 : 0,
-                            ),
-                            child: ChoiceChip(
-                              label: SizedBox(
-                                width: double.infinity,
-                                child: Text(method, textAlign: TextAlign.center),
+                        return ChoiceChip(
+                          label: Text(method),
+                          selected: isSelected,
+                          selectedColor: const Color(0xFFC8E6C9),
+                          labelStyle: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                            color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
+                          ),
+                          onSelected: (selected) {
+                            setState(() {
+                              _selectedPaymentMethod = selected ? method : null;
+                              if (selected && method == 'Cash + QRIS') {
+                                _isSplitPayment = true;
+                                widget.uangYangDiterimaController.clear();
+                                _splitQrisController.clear();
+                                _splitQrisAmount = 0;
+                              } else {
+                                _isSplitPayment = false;
+                                if (selected && method != 'Cash') {
+                                  final format = NumberFormat("#,###", "id_ID");
+                                  widget.uangYangDiterimaController.text =
+                                      format.format(displayTotal);
+                                } else if (selected && method == 'Cash') {
+                                  widget.uangYangDiterimaController.clear();
+                                }
+                              }
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    if (_isSplitPayment) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _splitQrisController,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction((oldValue, newValue) {
+                                  final plainNumber = newValue.text.replaceAll('.', '');
+                                  if (plainNumber.isEmpty) return newValue;
+                                  final format = NumberFormat("#,###", "id_ID");
+                                  final newText = format.format(int.parse(plainNumber));
+                                  return newValue.copyWith(
+                                    text: newText,
+                                    selection: TextSelection.collapsed(offset: newText.length),
+                                  );
+                                }),
+                              ],
+                              decoration: InputDecoration(
+                                labelText: 'Jumlah QRIS (Rp)',
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
                               ),
-                              selected: isSelected,
-                              selectedColor: const Color(0xFFC8E6C9),
-                              labelStyle: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
-                              ),
-                              onSelected: (selected) {
+                              onChanged: (val) {
                                 setState(() {
-                                  _selectedPaymentMethod = selected ? method : null;
-                                  if (selected && method != 'Cash') {
-                                    final format = NumberFormat("#,###", "id_ID");
-                                    widget.uangYangDiterimaController.text =
-                                        format.format(displayTotal);
-                                  } else if (selected && method == 'Cash') {
-                                    widget.uangYangDiterimaController.clear();
-                                  }
+                                  _splitQrisAmount = int.tryParse(val.replaceAll('.', '')) ?? 0;
                                 });
                               },
                             ),
                           ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 7,
-                          child: TextField(
-                            focusNode: uangFocusNode,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(
-                                  RegExp(r'[0-9.]')),
-                              TextInputFormatter.withFunction(
-                                  (oldValue, newValue) {
-                                final plainNumber =
-                                    newValue.text.replaceAll('.', '');
-                                final format = NumberFormat("#,###", "id_ID");
-                                final newText =
-                                    format.format(int.parse(plainNumber));
-                                return TextEditingValue(
-                                  text: newText,
-                                  selection: TextSelection.collapsed(
-                                      offset: newText.length),
-                                );
-                              }),
-                            ],
-                            controller: widget.uangYangDiterimaController,
-                            decoration: InputDecoration(
-                              labelText: 'Uang yang diterima (Rp)',
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(4.0),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.blue.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)),
+                                  Text(
+                                    'Rp ${NumberFormat("#,###", "id_ID").format((displayTotal - _splitQrisAmount).clamp(0, displayTotal))}',
+                                    style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
+                        ],
+                      ),
+                    ],
+                    if (_selectedPaymentMethod == 'Program' && _activePrograms.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: _selectedProgramId,
+                        items: _activePrograms.map((p) {
+                          return DropdownMenuItem<String>(
+                            value: p['id'],
+                            child: Text('${p['programName']} (${p['institutionName']})'),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          setState(() {
+                            _selectedProgramId = val;
+                            if (val != null) {
+                              final prog = _activePrograms.firstWhere((p) => p['id'] == val, orElse: () => {});
+                              final defNominal = ((prog['defaultNominal'] ?? 0) as num).toInt();
+                              _programNominal = defNominal;
+                              _programNominalController.text = defNominal > 0 ? NumberFormat('#,###', 'id_ID').format(defNominal) : '';
+                              _programExtraPaymentMethod = null;
+                              _isProgramExtraSplit = false;
+                              _programExtraQrisAmount = 0;
+                              _programExtraQrisController.clear();
+                              widget.uangYangDiterimaController.clear();
+                            }
+                          });
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Pilih Program Voucher',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2E7D32),
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: () {
-                              if (isMember && _selectedMember == null) {
+                      ),
+                    ],
+                    // ─── PROGRAM PAYMENT SECTION ───
+                    if (_selectedPaymentMethod == 'Program' && _selectedProgramId != null) ...[ 
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _programNominalController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                          TextInputFormatter.withFunction((oldValue, newValue) {
+                            final plain = newValue.text.replaceAll('.', '');
+                            if (plain.isEmpty) return newValue;
+                            final fmt = NumberFormat('#,###', 'id_ID');
+                            final t = fmt.format(int.parse(plain));
+                            return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
+                          }),
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Nominal Voucher (Rp)',
+                          helperText: 'Jumlah yang ditanggung program',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                        ),
+                        onChanged: (val) {
+                          setState(() {
+                            _programNominal = int.tryParse(val.replaceAll('.', '')) ?? 0;
+                            _programExtraPaymentMethod = null;
+                            _isProgramExtraSplit = false;
+                            _programExtraQrisAmount = 0;
+                            _programExtraQrisController.clear();
+                            widget.uangYangDiterimaController.clear();
+                          });
+                        },
+                      ),
+                      Builder(builder: (ctx) {
+                        final remaining = displayTotal - _programNominal;
+                        if (remaining <= 0) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(children: [
+                              const Icon(Icons.check_circle, color: Colors.green, size: 16),
+                              const SizedBox(width: 6),
+                              Text('Voucher menutupi seluruh tagihan', style: GoogleFonts.poppins(fontSize: 12, color: Colors.green.shade700)),
+                            ]),
+                          );
+                        }
+                        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.orange.shade200)),
+                            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                              Text('Sisa yang harus dibayar:', style: GoogleFonts.poppins(fontSize: 12, color: Colors.orange.shade800)),
+                              Text('Rp ${NumberFormat("#,###", "id_ID").format(remaining)}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.orange.shade900)),
+                            ]),
+                          ),
+                          const SizedBox(height: 10),
+                          Text('Metode Pembayaran Sisa', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.grey.shade700)),
+                          const SizedBox(height: 6),
+                          Wrap(spacing: 8, runSpacing: 8, children: ['Cash', 'QRIS', 'Cash + QRIS'].map((m) {
+                            final isSel = _programExtraPaymentMethod == m;
+                            return ChoiceChip(
+                              label: Text(m, style: GoogleFonts.poppins(fontSize: 12)),
+                              selected: isSel,
+                              selectedColor: const Color(0xFFC8E6C9),
+                              labelStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: isSel ? const Color(0xFF2E7D32) : Colors.black87),
+                              onSelected: (sel) {
                                 setState(() {
-                                  _memberError = widget.customerNameController.text.trim().isEmpty
-                                      ? 'Nama member wajib diisi'
-                                      : 'Nama tidak ditemukan, pilih dari daftar';
+                                  _programExtraPaymentMethod = sel ? m : null;
+                                  _isProgramExtraSplit = sel && m == 'Cash + QRIS';
+                                  _programExtraQrisAmount = 0;
+                                  _programExtraQrisController.clear();
+                                  if (sel && m == 'QRIS') {
+                                    widget.uangYangDiterimaController.text = NumberFormat('#,###', 'id_ID').format(remaining);
+                                  } else {
+                                    widget.uangYangDiterimaController.clear();
+                                  }
                                 });
-                                return;
+                              },
+                            );
+                          }).toList()),
+                          if (_isProgramExtraSplit) ...[ 
+                            const SizedBox(height: 10),
+                            Row(children: [
+                              Expanded(child: TextField(
+                                controller: _programExtraQrisController,
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                  TextInputFormatter.withFunction((oldValue, newValue) {
+                                    final plain = newValue.text.replaceAll('.', '');
+                                    if (plain.isEmpty) return newValue;
+                                    final t = NumberFormat('#,###', 'id_ID').format(int.parse(plain));
+                                    return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
+                                  }),
+                                ],
+                                decoration: InputDecoration(labelText: 'Jumlah QRIS (Rp)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(4))),
+                                onChanged: (val) => setState(() => _programExtraQrisAmount = int.tryParse(val.replaceAll('.', '')) ?? 0),
+                              )),
+                              const SizedBox(width: 12),
+                              Expanded(child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                                decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.blue.shade200)),
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)),
+                                  Text('Rp ${NumberFormat("#,###", "id_ID").format((remaining - _programExtraQrisAmount).clamp(0, remaining))}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
+                                ]),
+                              )),
+                            ]),
+                          ],
+                          if (_programExtraPaymentMethod != null && _programExtraPaymentMethod != 'QRIS') ...[ 
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: widget.uangYangDiterimaController,
+                              focusNode: uangFocusNode,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction((oldValue, newValue) {
+                                  final plain = newValue.text.replaceAll('.', '');
+                                  if (plain.isEmpty) return newValue;
+                                  final t = NumberFormat('#,###', 'id_ID').format(int.parse(plain));
+                                  return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
+                                }),
+                              ],
+                              decoration: InputDecoration(
+                                labelText: _isProgramExtraSplit ? 'Cash Diterima (Rp)' : 'Uang Diterima (Rp)',
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                              ),
+                            ),
+                            Builder(builder: (ctx) {
+                              final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
+                              final cashNeeded = _isProgramExtraSplit ? (remaining - _programExtraQrisAmount).clamp(0, remaining) : remaining;
+                              final change = cashReceived - cashNeeded;
+                              if (change <= 0) return const SizedBox.shrink();
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text('Kembalian: Rp ${NumberFormat("#,###", "id_ID").format(change)}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700, fontWeight: FontWeight.w600)),
+                              );
+                            }),
+                          ],
+                        ]);
+                      }),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                          onPressed: () {
+                            if (isMember && _selectedMember == null) {
+                              setState(() { _memberError = widget.customerNameController.text.trim().isEmpty ? 'Nama member wajib diisi' : 'Nama tidak ditemukan, pilih dari daftar'; });
+                              return;
+                            }
+                            if (_programNominal <= 0) { _showTopError(context, 'Masukkan nominal voucher'); return; }
+                            final remaining = displayTotal - _programNominal;
+                            int extraQris = 0;
+                            if (remaining > 0) {
+                              if (_programExtraPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran sisa'); return; }
+                              if (_isProgramExtraSplit) {
+                                if (_programExtraQrisAmount <= 0 || _programExtraQrisAmount >= remaining) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; }
+                                extraQris = _programExtraQrisAmount;
+                                final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
+                                if (cashReceived < remaining - extraQris) { _showTopError(context, 'Cash yang diterima kurang'); return; }
+                              } else if (_programExtraPaymentMethod == 'Cash') {
+                                final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
+                                if (cashReceived < remaining) { _showTopError(context, 'Cash yang diterima kurang'); return; }
                               }
-                              if (_selectedPaymentMethod == null) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Pilih metode pembayaran'),
-                                    backgroundColor: Colors.redAccent,
-                                  ),
-                                );
-                                return;
-                              }
-                              final inputText = widget
-                                  .uangYangDiterimaController.text
-                                  .replaceAll('.', '');
-                              if (inputText.isEmpty) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Masukkan uang yang diterima'),
-                                    backgroundColor: Colors.redAccent,
-                                  ),
-                                );
-                                return;
-                              }
-                              int uangYangDiterima = int.parse(inputText);
-                              if (uangYangDiterima >= displayTotal) {
-                                Navigator.pop(context, {
-                                  'confirmed': true,
-                                  'finalTotal': displayTotal,
-                                  'paymentMethod': _selectedPaymentMethod,
-                                  'isMember': isMember,
-                                  'memberId': _selectedMember?.id,
-                                  'memberPhone': _selectedMember?.phoneNumber,
-                                  'voucherCode': voucherApplied
-                                      ? voucherController.text
-                                      : null,
-                                  'isPosVoucher': voucherApplied ? isPosVoucher : false,
-                                });
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content:
-                                        Text('Uang yang diterima masih kurang'),
-                                    backgroundColor: Colors.redAccent,
-                                  ),
-                                );
-                              }
-                            },
-                            child: Text(
-                              'OK',
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
+                            }
+                            Navigator.pop(context, {
+                              'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': 'Program',
+                              'voucherProgramId': _selectedProgramId,
+                              'programNominal': _programNominal,
+                              'programExtraPaymentMethod': remaining > 0 ? _programExtraPaymentMethod : null,
+                              'programExtraSplitQrisAmount': extraQris,
+                              'isMember': isMember, 'memberId': _selectedMember?.id, 'memberPhone': _selectedMember?.phoneNumber,
+                              'voucherCode': voucherApplied ? voucherController.text : null,
+                              'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                            });
+                          },
+                          child: Text('OK', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ],
+                    // ─── NORMAL PAYMENT SECTION ───
+                    if (_selectedPaymentMethod != 'Program') ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 7,
+                            child: TextField(
+                              focusNode: uangFocusNode,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction((oldValue, newValue) {
+                                  final plainNumber = newValue.text.replaceAll('.', '');
+                                  final format = NumberFormat("#,###", "id_ID");
+                                  final newText = format.format(int.parse(plainNumber));
+                                  return TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
+                                }),
+                              ],
+                              controller: widget.uangYangDiterimaController,
+                              decoration: InputDecoration(
+                                labelText: 'Uang yang diterima (Rp)',
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4.0)),
                               ),
                             ),
                           ),
-                        )
-                      ],
-                    ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+                              onPressed: () {
+                                if (isMember && _selectedMember == null) {
+                                  setState(() { _memberError = widget.customerNameController.text.trim().isEmpty ? 'Nama member wajib diisi' : 'Nama tidak ditemukan, pilih dari daftar'; });
+                                  return;
+                                }
+                                if (_selectedPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran'); return; }
+                                if (_isSplitPayment) {
+                                  if (_splitQrisAmount <= 0 || _splitQrisAmount >= displayTotal) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; }
+                                }
+                                final inputText = widget.uangYangDiterimaController.text.replaceAll('.', '');
+                                if (inputText.isEmpty) { _showTopError(context, 'Masukkan uang yang diterima'); return; }
+                                int uangYangDiterima = int.parse(inputText);
+                                final cashNeeded = _isSplitPayment ? displayTotal - _splitQrisAmount : displayTotal;
+                                if (uangYangDiterima >= cashNeeded) {
+                                  Navigator.pop(context, {
+                                    'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': _selectedPaymentMethod,
+                                    'isSplitPayment': _isSplitPayment, 'splitCashAmount': displayTotal - _splitQrisAmount, 'splitQrisAmount': _splitQrisAmount,
+                                    'voucherProgramId': null,
+                                    'isMember': isMember, 'memberId': _selectedMember?.id, 'memberPhone': _selectedMember?.phoneNumber,
+                                    'voucherCode': voucherApplied ? voucherController.text : null,
+                                    'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                                  });
+                                } else {
+                                  _showTopError(context, 'Uang yang diterima masih kurang');
+                                }
+                              },
+                              child: Text('OK', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     if (isMember && _selectedMember != null) ...[
                       const SizedBox(height: 12),
                       SizedBox(
@@ -2566,6 +2934,17 @@ class _SelfOrderConfirmationDialogState
   List<Member> _members = [];
   Member? _selectedMember;
   String? _selectedPaymentMethod;
+  bool _isSplitPayment = false;
+  int _splitQrisAmount = 0;
+  TextEditingController _splitQrisController = TextEditingController();
+  List<Map<String, dynamic>> _activePrograms = [];
+  String? _selectedProgramId;
+  TextEditingController _programNominalController = TextEditingController();
+  int _programNominal = 0;
+  String? _programExtraPaymentMethod;
+  bool _isProgramExtraSplit = false;
+  TextEditingController _programExtraQrisController = TextEditingController();
+  int _programExtraQrisAmount = 0;
 
   late FocusNode uangFocusNode;
   late FocusNode voucherFocusNode;
@@ -2577,15 +2956,28 @@ class _SelfOrderConfirmationDialogState
     voucherFocusNode = FocusNode();
     currentTotal = widget.totalHarga;
     _loadMembers();
+    _loadPrograms();
     
     // Pre-fill customer name from self-order
     widget.customerNameController.text = widget.selfOrder.namaCustomer;
+  }
+
+  Future<void> _loadPrograms() async {
+    final programs = await VoucherProgramService.getActivePrograms();
+    if (mounted) {
+      setState(() {
+        _activePrograms = programs;
+      });
+    }
   }
 
   @override
   void dispose() {
     uangFocusNode.dispose();
     voucherFocusNode.dispose();
+    _splitQrisController.dispose();
+    _programNominalController.dispose();
+    _programExtraQrisController.dispose();
     super.dispose();
   }
 
@@ -2918,159 +3310,301 @@ class _SelfOrderConfirmationDialogState
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      children: ['Cash', 'QRIS', 'Online'].map((method) {
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: ['Cash', 'QRIS', 'Online', 'Cash + QRIS', 'Program'].map((method) {
                         final isSelected = _selectedPaymentMethod == method;
-                        return Expanded(
-                          child: Padding(
-                            padding: EdgeInsets.only(
-                              right: method != 'Online' ? 8 : 0,
-                            ),
-                            child: ChoiceChip(
-                              label: SizedBox(
-                                width: double.infinity,
-                                child: Text(method, textAlign: TextAlign.center),
+                        return ChoiceChip(
+                          label: Text(method),
+                          selected: isSelected,
+                          selectedColor: const Color(0xFFC8E6C9),
+                          labelStyle: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                            color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
+                          ),
+                          onSelected: (selected) {
+                            setState(() {
+                              _selectedPaymentMethod = selected ? method : null;
+                              if (selected && method == 'Cash + QRIS') {
+                                _isSplitPayment = true;
+                                widget.uangYangDiterimaController.clear();
+                                _splitQrisController.clear();
+                                _splitQrisAmount = 0;
+                              } else {
+                                _isSplitPayment = false;
+                                if (selected && method != 'Cash') {
+                                  final format = NumberFormat("#,###", "id_ID");
+                                  widget.uangYangDiterimaController.text =
+                                      format.format(displayTotal);
+                                } else if (selected && method == 'Cash') {
+                                  widget.uangYangDiterimaController.clear();
+                                }
+                              }
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    if (_isSplitPayment) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _splitQrisController,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction((oldValue, newValue) {
+                                  final plainNumber = newValue.text.replaceAll('.', '');
+                                  if (plainNumber.isEmpty) return newValue;
+                                  final format = NumberFormat("#,###", "id_ID");
+                                  final newText = format.format(int.parse(plainNumber));
+                                  return newValue.copyWith(
+                                    text: newText,
+                                    selection: TextSelection.collapsed(offset: newText.length),
+                                  );
+                                }),
+                              ],
+                              decoration: InputDecoration(
+                                labelText: 'Jumlah QRIS (Rp)',
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
                               ),
-                              selected: isSelected,
-                              selectedColor: const Color(0xFFC8E6C9),
-                              labelStyle: GoogleFonts.poppins(
-                                fontSize: 13,
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
-                              ),
-                              onSelected: (selected) {
+                              onChanged: (val) {
                                 setState(() {
-                                  _selectedPaymentMethod = selected ? method : null;
-                                  if (selected && method != 'Cash') {
-                                    final format = NumberFormat("#,###", "id_ID");
-                                    widget.uangYangDiterimaController.text =
-                                        format.format(displayTotal);
-                                  } else if (selected && method == 'Cash') {
-                                    widget.uangYangDiterimaController.clear();
-                                  }
+                                  _splitQrisAmount = int.tryParse(val.replaceAll('.', '')) ?? 0;
                                 });
                               },
                             ),
                           ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Cash input
-                    TextField(
-                      focusNode: uangFocusNode,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                        TextInputFormatter.withFunction((oldValue, newValue) {
-                          if (newValue.text.isEmpty) return newValue;
-                          final plainNumber = newValue.text.replaceAll('.', '');
-                          if (plainNumber.isEmpty) return newValue;
-                          final format = NumberFormat("#,###", "id_ID");
-                          final newText = format.format(int.parse(plainNumber));
-                          return TextEditingValue(
-                            text: newText,
-                            selection:
-                                TextSelection.collapsed(offset: newText.length),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.blue.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)),
+                                  Text(
+                                    'Rp ${NumberFormat("#,###", "id_ID").format((displayTotal - _splitQrisAmount).clamp(0, displayTotal))}',
+                                    style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    if (_selectedPaymentMethod == 'Program' && _activePrograms.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: _selectedProgramId,
+                        items: _activePrograms.map((p) {
+                          return DropdownMenuItem<String>(
+                            value: p['id'],
+                            child: Text('${p['programName']} (${p['institutionName']})'),
                           );
-                        }),
-                      ],
-                      controller: widget.uangYangDiterimaController,
-                      decoration: InputDecoration(
-                        labelText: 'Uang yang diterima (Rp)',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                        }).toList(),
+                        onChanged: (val) {
+                          setState(() {
+                            _selectedProgramId = val;
+                            if (val != null) {
+                              final prog = _activePrograms.firstWhere((p) => p['id'] == val, orElse: () => {});
+                              final defNominal = ((prog['defaultNominal'] ?? 0) as num).toInt();
+                              _programNominal = defNominal;
+                              _programNominalController.text = defNominal > 0 ? NumberFormat('#,###', 'id_ID').format(defNominal) : '';
+                              _programExtraPaymentMethod = null;
+                              _isProgramExtraSplit = false;
+                              _programExtraQrisAmount = 0;
+                              _programExtraQrisController.clear();
+                              widget.uangYangDiterimaController.clear();
+                            }
+                          });
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Pilih Program Voucher',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Action buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(context, null),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              side: BorderSide(color: Colors.grey.shade400),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: Text(
-                              'Batal',
-                              style: GoogleFonts.poppins(color: Colors.grey.shade700),
-                            ),
+                    ],
+                    // ─── PROGRAM PAYMENT SECTION ───
+                    if (_selectedPaymentMethod == 'Program' && _selectedProgramId != null) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _programNominalController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                          TextInputFormatter.withFunction((oldValue, newValue) {
+                            final plain = newValue.text.replaceAll('.', '');
+                            if (plain.isEmpty) return newValue;
+                            final t = NumberFormat('#,###', 'id_ID').format(int.parse(plain));
+                            return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
+                          }),
+                        ],
+                        decoration: InputDecoration(labelText: 'Nominal Voucher (Rp)', helperText: 'Jumlah yang ditanggung program', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                        onChanged: (val) {
+                          setState(() {
+                            _programNominal = int.tryParse(val.replaceAll('.', '')) ?? 0;
+                            _programExtraPaymentMethod = null; _isProgramExtraSplit = false;
+                            _programExtraQrisAmount = 0; _programExtraQrisController.clear();
+                            widget.uangYangDiterimaController.clear();
+                          });
+                        },
+                      ),
+                      Builder(builder: (ctx) {
+                        final remaining = displayTotal - _programNominal;
+                        if (remaining <= 0) {
+                          return Padding(padding: const EdgeInsets.only(top: 8), child: Row(children: [
+                            const Icon(Icons.check_circle, color: Colors.green, size: 16), const SizedBox(width: 6),
+                            Text('Voucher menutupi seluruh tagihan', style: GoogleFonts.poppins(fontSize: 12, color: Colors.green.shade700)),
+                          ]));
+                        }
+                        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.orange.shade200)),
+                            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                              Text('Sisa yang harus dibayar:', style: GoogleFonts.poppins(fontSize: 12, color: Colors.orange.shade800)),
+                              Text('Rp ${NumberFormat("#,###", "id_ID").format(remaining)}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.orange.shade900)),
+                            ]),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2E7D32),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            onPressed: () {
-                              if (_selectedPaymentMethod == null) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Pilih metode pembayaran'),
-                                    backgroundColor: Colors.redAccent,
-                                  ),
-                                );
-                                return;
-                              }
-                              final inputText = widget
-                                  .uangYangDiterimaController.text
-                                  .replaceAll('.', '');
-                              if (inputText.isEmpty) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Masukkan uang yang diterima'),
-                                    backgroundColor: Colors.redAccent,
-                                  ),
-                                );
-                                return;
-                              }
-                              int uangYangDiterima = int.parse(inputText);
-                              if (uangYangDiterima >= displayTotal) {
-                                Navigator.pop(context, {
-                                  'confirmed': true,
-                                  'finalTotal': displayTotal,
-                                  'paymentMethod': _selectedPaymentMethod,
-                                  'isMember': _selectedMember != null,
-                                  'memberId': _selectedMember?.id ??
-                                      widget.selfOrder.userId,
-                                  'memberPhone': _selectedMember?.phoneNumber,
-                                  'voucherCode':
-                                      voucherApplied ? voucherController.text : null,
-                                  'isPosVoucher':
-                                      voucherApplied ? isPosVoucher : false,
+                          const SizedBox(height: 10),
+                          Text('Metode Pembayaran Sisa', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.grey.shade700)),
+                          const SizedBox(height: 6),
+                          Wrap(spacing: 8, runSpacing: 8, children: ['Cash', 'QRIS', 'Cash + QRIS'].map((m) {
+                            final isSel = _programExtraPaymentMethod == m;
+                            return ChoiceChip(
+                              label: Text(m, style: GoogleFonts.poppins(fontSize: 12)), selected: isSel,
+                              selectedColor: const Color(0xFFC8E6C9),
+                              labelStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: isSel ? const Color(0xFF2E7D32) : Colors.black87),
+                              onSelected: (sel) {
+                                setState(() {
+                                  _programExtraPaymentMethod = sel ? m : null; _isProgramExtraSplit = sel && m == 'Cash + QRIS';
+                                  _programExtraQrisAmount = 0; _programExtraQrisController.clear();
+                                  if (sel && m == 'QRIS') { widget.uangYangDiterimaController.text = NumberFormat('#,###', 'id_ID').format(remaining); }
+                                  else { widget.uangYangDiterimaController.clear(); }
                                 });
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Uang yang diterima masih kurang'),
-                                    backgroundColor: Colors.redAccent,
-                                  ),
-                                );
+                              },
+                            );
+                          }).toList()),
+                          if (_isProgramExtraSplit) ...[
+                            const SizedBox(height: 10),
+                            Row(children: [
+                              Expanded(child: TextField(controller: _programExtraQrisController, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })], decoration: InputDecoration(labelText: 'Jumlah QRIS (Rp)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(4))), onChanged: (val) => setState(() => _programExtraQrisAmount = int.tryParse(val.replaceAll('.','')) ?? 0))),
+                              const SizedBox(width: 12),
+                              Expanded(child: Container(padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12), decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.blue.shade200)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)), Text('Rp ${NumberFormat("#,###","id_ID").format((remaining - _programExtraQrisAmount).clamp(0, remaining))}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900))]))),
+                            ]),
+                          ],
+                          if (_programExtraPaymentMethod != null && _programExtraPaymentMethod != 'QRIS') ...[
+                            const SizedBox(height: 10),
+                            TextField(controller: widget.uangYangDiterimaController, focusNode: uangFocusNode, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })], decoration: InputDecoration(labelText: _isProgramExtraSplit ? 'Cash Diterima (Rp)' : 'Uang Diterima (Rp)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
+                            Builder(builder: (ctx) {
+                              final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
+                              final cashNeeded = _isProgramExtraSplit ? (remaining - _programExtraQrisAmount).clamp(0, remaining) : remaining;
+                              final change = cashReceived - cashNeeded;
+                              if (change <= 0) return const SizedBox.shrink();
+                              return Padding(padding: const EdgeInsets.only(top: 6), child: Text('Kembalian: Rp ${NumberFormat("#,###","id_ID").format(change)}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700, fontWeight: FontWeight.w600)));
+                            }),
+                          ],
+                        ]);
+                      }),
+                      const SizedBox(height: 20),
+                      Row(children: [
+                        Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context, null), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), side: BorderSide(color: Colors.grey.shade400), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey.shade700)))),
+                        const SizedBox(width: 12),
+                        Expanded(flex: 2, child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                          onPressed: () {
+                            if (_programNominal <= 0) { _showTopError(context, 'Masukkan nominal voucher'); return; }
+                            final remaining = displayTotal - _programNominal;
+                            int extraQris = 0;
+                            if (remaining > 0) {
+                              if (_programExtraPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran sisa'); return; }
+                              if (_isProgramExtraSplit) {
+                                if (_programExtraQrisAmount <= 0 || _programExtraQrisAmount >= remaining) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; }
+                                extraQris = _programExtraQrisAmount;
+                                final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.','')) ?? 0;
+                                if (cashReceived < remaining - extraQris) { _showTopError(context, 'Cash yang diterima kurang'); return; }
+                              } else if (_programExtraPaymentMethod == 'Cash') {
+                                final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.','')) ?? 0;
+                                if (cashReceived < remaining) { _showTopError(context, 'Cash yang diterima kurang'); return; }
                               }
-                            },
-                            child: Text(
-                              'Konfirmasi Pembayaran',
-                              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                            }
+                            Navigator.pop(context, {
+                              'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': 'Program',
+                              'voucherProgramId': _selectedProgramId, 'programNominal': _programNominal,
+                              'programExtraPaymentMethod': remaining > 0 ? _programExtraPaymentMethod : null,
+                              'programExtraSplitQrisAmount': extraQris,
+                              'isMember': _selectedMember != null, 'memberId': _selectedMember?.id ?? widget.selfOrder.userId,
+                              'memberPhone': _selectedMember?.phoneNumber,
+                              'voucherCode': voucherApplied ? voucherController.text : null,
+                              'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                            });
+                          },
+                          child: Text('Konfirmasi Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                        )),
+                      ]),
+                    ],
+                    // ─── NORMAL PAYMENT SECTION ───
+                    if (_selectedPaymentMethod != 'Program') ...[
+                      const SizedBox(height: 16),
+                      TextField(
+                        focusNode: uangFocusNode, keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                          TextInputFormatter.withFunction((oldValue, newValue) {
+                            if (newValue.text.isEmpty) return newValue;
+                            final plainNumber = newValue.text.replaceAll('.', '');
+                            if (plainNumber.isEmpty) return newValue;
+                            final format = NumberFormat("#,###", "id_ID");
+                            final newText = format.format(int.parse(plainNumber));
+                            return TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
+                          }),
+                        ],
+                        controller: widget.uangYangDiterimaController,
+                        decoration: InputDecoration(labelText: 'Uang yang diterima (Rp)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                      ),
+                      const SizedBox(height: 20),
+                      Row(children: [
+                        Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context, null), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), side: BorderSide(color: Colors.grey.shade400), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey.shade700)))),
+                        const SizedBox(width: 12),
+                        Expanded(flex: 2, child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                          onPressed: () {
+                            if (_selectedPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran'); return; }
+                            final inputText = widget.uangYangDiterimaController.text.replaceAll('.', '');
+                            if (inputText.isEmpty) { _showTopError(context, 'Masukkan uang yang diterima'); return; }
+                            int uangYangDiterima = int.parse(inputText);
+                            final cashNeeded = _isSplitPayment ? displayTotal - _splitQrisAmount : displayTotal;
+                            if (uangYangDiterima >= cashNeeded) {
+                              Navigator.pop(context, {
+                                'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': _selectedPaymentMethod,
+                                'isSplitPayment': _isSplitPayment, 'splitCashAmount': displayTotal - _splitQrisAmount, 'splitQrisAmount': _splitQrisAmount,
+                                'voucherProgramId': null,
+                                'isMember': _selectedMember != null, 'memberId': _selectedMember?.id ?? widget.selfOrder.userId,
+                                'memberPhone': _selectedMember?.phoneNumber,
+                                'voucherCode': voucherApplied ? voucherController.text : null,
+                                'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                              });
+                            } else {
+                              _showTopError(context, 'Uang yang diterima masih kurang');
+                            }
+                          },
+                          child: Text('Konfirmasi Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                        )),
+                      ]),
+                    ],
                   ],
                 ),
               ),
@@ -3138,6 +3672,14 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
   bool isValidatingVoucher = false;
   bool isPosVoucher = false;
   String? _selectedPaymentMethod;
+  List<Map<String, dynamic>> _activePrograms = [];
+  String? _selectedProgramId;
+  TextEditingController _programNominalController = TextEditingController();
+  int _programNominal = 0;
+  String? _programExtraPaymentMethod;
+  bool _isProgramExtraSplit = false;
+  TextEditingController _programExtraQrisController = TextEditingController();
+  int _programExtraQrisAmount = 0;
 
   late FocusNode uangFocusNode;
   late FocusNode voucherFocusNode;
@@ -3148,12 +3690,29 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
     uangFocusNode = FocusNode();
     voucherFocusNode = FocusNode();
     widget.uangYangDiterimaController.clear();
+    _loadPrograms();
   }
+
+  Future<void> _loadPrograms() async {
+    final programs = await VoucherProgramService.getActivePrograms();
+    if (mounted) {
+      setState(() {
+        _activePrograms = programs;
+      });
+    }
+  }
+
+  bool _isSplitPayment = false;
+  int _splitQrisAmount = 0;
+  TextEditingController _splitQrisController = TextEditingController();
 
   @override
   void dispose() {
     uangFocusNode.dispose();
     voucherFocusNode.dispose();
+    _splitQrisController.dispose();
+    _programNominalController.dispose();
+    _programExtraQrisController.dispose();
     super.dispose();
   }
 
@@ -3343,56 +3902,177 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                 style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
               ),
               const SizedBox(height: 8),
-              Row(
-                children: ['Cash', 'QRIS', 'Online'].map((method) {
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: ['Cash', 'QRIS', 'Online', 'Cash + QRIS', 'Program'].map((method) {
                   final isSelected = _selectedPaymentMethod == method;
-                  return Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: ChoiceChip(
-                        label: Center(child: Text(method)),
-                        selected: isSelected,
-                        onSelected: (val) {
+                  return ChoiceChip(
+                    label: Text(method),
+                    selected: isSelected,
+                    selectedColor: const Color(0xFFC8E6C9),
+                    labelStyle: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                      color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
+                    ),
+                    onSelected: (val) {
+                      setState(() {
+                        _selectedPaymentMethod = val ? method : null;
+                        if (val && method == 'Cash + QRIS') {
+                          _isSplitPayment = true;
+                          widget.uangYangDiterimaController.clear();
+                          _splitQrisController.clear();
+                          _splitQrisAmount = 0;
+                        } else {
+                          _isSplitPayment = false;
+                          if (val && method != 'Cash') {
+                            widget.uangYangDiterimaController.text =
+                                NumberFormat("#,###", "id_ID").format(displayTotal);
+                          } else if (val && method == 'Cash') {
+                            widget.uangYangDiterimaController.clear();
+                          }
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+              if (_isSplitPayment) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _splitQrisController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                          TextInputFormatter.withFunction((oldValue, newValue) {
+                            final plainNumber = newValue.text.replaceAll('.', '');
+                            if (plainNumber.isEmpty) return newValue;
+                            final format = NumberFormat("#,###", "id_ID");
+                            final newText = format.format(int.parse(plainNumber));
+                            return newValue.copyWith(
+                              text: newText,
+                              selection: TextSelection.collapsed(offset: newText.length),
+                            );
+                          }),
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Jumlah QRIS (Rp)',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                        ),
+                        onChanged: (val) {
                           setState(() {
-                            _selectedPaymentMethod = val ? method : null;
-                            if (val && method != 'Cash') {
-                              widget.uangYangDiterimaController.text =
-                                  NumberFormat("#,###", "id_ID").format(displayTotal);
-                            } else {
-                              widget.uangYangDiterimaController.clear();
-                            }
+                            _splitQrisAmount = int.tryParse(val.replaceAll('.', '')) ?? 0;
                           });
                         },
                       ),
                     ),
-                  );
-                }).toList(),
-              ),
-              
-              const SizedBox(height: 16),
-              
-              TextField(
-                controller: widget.uangYangDiterimaController,
-                focusNode: uangFocusNode,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  TextInputFormatter.withFunction((oldValue, newValue) {
-                     if (newValue.text.isEmpty) return newValue;
-                     final intValue = int.parse(newValue.text);
-                     final newText = NumberFormat("#,###", "id_ID").format(intValue);
-                     return TextEditingValue(
-                        text: newText,
-                        selection: TextSelection.collapsed(offset: newText.length),
-                     );
-                  }),
-                ],
-                decoration: const InputDecoration(
-                  labelText: 'Uang yang Diterima',
-                  border: OutlineInputBorder(),
-                  prefixText: 'Rp ',
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)),
+                            Text(
+                              'Rp ${NumberFormat("#,###", "id_ID").format((displayTotal - _splitQrisAmount).clamp(0, displayTotal))}',
+                              style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
+              ],
+              if (_selectedPaymentMethod == 'Program' && _activePrograms.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: _selectedProgramId,
+                  items: _activePrograms.map((p) {
+                    return DropdownMenuItem<String>(
+                      value: p['id'],
+                      child: Text('${p['programName']} (${p['institutionName']})'),
+                    );
+                  }).toList(),
+                  onChanged: (val) {
+                    setState(() {
+                      _selectedProgramId = val;
+                      if (val != null) {
+                        final prog = _activePrograms.firstWhere((p) => p['id'] == val, orElse: () => {});
+                        final defNominal = ((prog['defaultNominal'] ?? 0) as num).toInt();
+                        _programNominal = defNominal;
+                        _programNominalController.text = defNominal > 0 ? NumberFormat('#,###', 'id_ID').format(defNominal) : '';
+                        _programExtraPaymentMethod = null;
+                        _isProgramExtraSplit = false;
+                        _programExtraQrisAmount = 0;
+                        _programExtraQrisController.clear();
+                        widget.uangYangDiterimaController.clear();
+                      }
+                    });
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Pilih Program Voucher',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                  ),
+                ),
+              ],
+              
+              // ─── PROGRAM PAYMENT SECTION ───
+              if (_selectedPaymentMethod == 'Program' && _selectedProgramId != null) ...[  
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _programNominalController, keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })],
+                  decoration: InputDecoration(labelText: 'Nominal Voucher (Rp)', helperText: 'Jumlah yang ditanggung program', border: const OutlineInputBorder()),
+                  onChanged: (val) {
+                    setState(() {
+                      _programNominal = int.tryParse(val.replaceAll('.', '')) ?? 0;
+                      _programExtraPaymentMethod = null; _isProgramExtraSplit = false;
+                      _programExtraQrisAmount = 0; _programExtraQrisController.clear();
+                      widget.uangYangDiterimaController.clear();
+                    });
+                  },
+                ),
+                Builder(builder: (ctx) {
+                  final remaining = displayTotal - _programNominal;
+                  if (remaining <= 0) {
+                    return Padding(padding: const EdgeInsets.only(top: 8), child: Row(children: [const Icon(Icons.check_circle, color: Colors.green, size: 16), const SizedBox(width: 6), Text('Voucher menutupi seluruh tagihan', style: GoogleFonts.poppins(fontSize: 12, color: Colors.green.shade700))]));
+                  }
+                  return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    const SizedBox(height: 8),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.orange.shade200)), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Sisa:', style: GoogleFonts.poppins(fontSize: 12, color: Colors.orange.shade800)), Text('Rp ${NumberFormat("#,###","id_ID").format(remaining)}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.orange.shade900))])),
+                    const SizedBox(height: 10),
+                    Text('Metode Pembayaran Sisa', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.grey.shade700)),
+                    const SizedBox(height: 6),
+                    Wrap(spacing: 8, runSpacing: 8, children: ['Cash', 'QRIS', 'Cash + QRIS'].map((m) {
+                      final isSel = _programExtraPaymentMethod == m;
+                      return ChoiceChip(label: Text(m, style: GoogleFonts.poppins(fontSize: 12)), selected: isSel, selectedColor: const Color(0xFFC8E6C9), labelStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: isSel ? const Color(0xFF2E7D32) : Colors.black87),
+                        onSelected: (sel) { setState(() { _programExtraPaymentMethod = sel ? m : null; _isProgramExtraSplit = sel && m == 'Cash + QRIS'; _programExtraQrisAmount = 0; _programExtraQrisController.clear(); if (sel && m == 'QRIS') { widget.uangYangDiterimaController.text = NumberFormat('#,###','id_ID').format(remaining); } else { widget.uangYangDiterimaController.clear(); } }); });
+                    }).toList()),
+                    if (_isProgramExtraSplit) ...[const SizedBox(height: 10), Row(children: [Expanded(child: TextField(controller: _programExtraQrisController, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })], decoration: const InputDecoration(labelText: 'Jumlah QRIS (Rp)', border: OutlineInputBorder()), onChanged: (val) => setState(() => _programExtraQrisAmount = int.tryParse(val.replaceAll('.','')) ?? 0))), const SizedBox(width: 12), Expanded(child: Container(padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12), decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.blue.shade200)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)), Text('Rp ${NumberFormat("#,###","id_ID").format((remaining - _programExtraQrisAmount).clamp(0, remaining))}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900))])))])],
+                    if (_programExtraPaymentMethod != null && _programExtraPaymentMethod != 'QRIS') ...[const SizedBox(height: 10), TextField(controller: widget.uangYangDiterimaController, focusNode: uangFocusNode, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })], decoration: InputDecoration(labelText: _isProgramExtraSplit ? 'Cash Diterima (Rp)' : 'Uang Diterima (Rp)', border: const OutlineInputBorder(), prefixText: 'Rp ')), Builder(builder: (ctx) { final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0; final cashNeeded = _isProgramExtraSplit ? (remaining - _programExtraQrisAmount).clamp(0, remaining) : remaining; final change = cashReceived - cashNeeded; if (change <= 0) return const SizedBox.shrink(); return Padding(padding: const EdgeInsets.only(top: 6), child: Text('Kembalian: Rp ${NumberFormat("#,###","id_ID").format(change)}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700, fontWeight: FontWeight.w600))); })],
+                  ]);
+                }),
+              ],
+              // ─── NORMAL PAYMENT SECTION ───
+              if (_selectedPaymentMethod != 'Program') ...[  
+                const SizedBox(height: 16),
+                TextField(
+                  controller: widget.uangYangDiterimaController, focusNode: uangFocusNode, keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, TextInputFormatter.withFunction((oldValue, newValue) { if (newValue.text.isEmpty) return newValue; final intValue = int.parse(newValue.text); final newText = NumberFormat('#,###', 'id_ID').format(intValue); return TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length)); })],
+                  decoration: const InputDecoration(labelText: 'Uang yang Diterima', border: OutlineInputBorder(), prefixText: 'Rp '),
+                ),
+              ],
             ],
           ),
         ),
@@ -3404,22 +4084,43 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
         ),
         ElevatedButton(
           onPressed: () {
-            if (_selectedPaymentMethod == null) {
-               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pilih metode pembayaran')));
-               return;
+            if (_selectedPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran'); return; }
+            if (_selectedPaymentMethod == 'Program') {
+              if (_selectedProgramId == null) { _showTopError(context, 'Pilih program voucher'); return; }
+              if (_programNominal <= 0) { _showTopError(context, 'Masukkan nominal voucher'); return; }
+              final remaining = displayTotal - _programNominal;
+              int extraQris = 0;
+              if (remaining > 0) {
+                if (_programExtraPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran sisa'); return; }
+                if (_isProgramExtraSplit) {
+                  if (_programExtraQrisAmount <= 0 || _programExtraQrisAmount >= remaining) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; }
+                  extraQris = _programExtraQrisAmount;
+                  final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.','')) ?? 0;
+                  if (cashReceived < remaining - extraQris) { _showTopError(context, 'Cash yang diterima kurang'); return; }
+                } else if (_programExtraPaymentMethod == 'Cash') {
+                  final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.','')) ?? 0;
+                  if (cashReceived < remaining) { _showTopError(context, 'Cash yang diterima kurang'); return; }
+                }
+              }
+              Navigator.pop(context, {
+                'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': 'Program',
+                'isSplitPayment': false, 'splitCashAmount': 0, 'splitQrisAmount': 0,
+                'voucherProgramId': _selectedProgramId, 'programNominal': _programNominal,
+                'programExtraPaymentMethod': remaining > 0 ? _programExtraPaymentMethod : null,
+                'programExtraSplitQrisAmount': extraQris,
+                'voucherCode': voucherApplied ? voucherController.text : null, 'isPosVoucher': isPosVoucher,
+              });
+              return;
             }
+            if (_isSplitPayment) { if (_splitQrisAmount <= 0 || _splitQrisAmount >= displayTotal) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; } }
             final totalDiterima = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
-            if (totalDiterima < displayTotal) {
-               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uang kurang')));
-               return;
-            }
-            
+            final cashNeeded = _isSplitPayment ? displayTotal - _splitQrisAmount : displayTotal;
+            if (totalDiterima < cashNeeded) { _showTopError(context, 'Uang kurang'); return; }
             Navigator.pop(context, {
-              'confirmed': true,
-              'finalTotal': displayTotal,
-              'paymentMethod': _selectedPaymentMethod,
-              'voucherCode': voucherApplied ? voucherController.text : null,
-              'isPosVoucher': isPosVoucher,
+              'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': _selectedPaymentMethod,
+              'isSplitPayment': _isSplitPayment, 'splitCashAmount': displayTotal - _splitQrisAmount, 'splitQrisAmount': _splitQrisAmount,
+              'voucherProgramId': null,
+              'voucherCode': voucherApplied ? voucherController.text : null, 'isPosVoucher': isPosVoucher,
             });
           },
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
@@ -3428,4 +4129,53 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
       ],
     );
   }
+}
+
+void _showTopError(BuildContext context, String message) {
+  final overlay = Overlay.of(context);
+  if (overlay == null) return;
+  
+  late OverlayEntry overlayEntry;
+  overlayEntry = OverlayEntry(
+    builder: (context) => SafeArea(
+      child: Material(
+        color: Colors.transparent,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Container(
+            margin: const EdgeInsets.only(top: 10, left: 20, right: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.redAccent,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4))],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(
+                    message,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () => overlayEntry.remove(),
+                  child: const Icon(Icons.close, color: Colors.white, size: 20),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  
+  overlay.insert(overlayEntry);
+  Future.delayed(const Duration(seconds: 4), () {
+    if (overlayEntry.mounted) overlayEntry.remove();
+  });
 }

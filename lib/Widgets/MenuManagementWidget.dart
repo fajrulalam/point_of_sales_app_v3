@@ -1731,7 +1731,6 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               },
               child: const Text('Hapus', style: TextStyle(color: Colors.red)),
             ),
-            const Spacer(),
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Batal'),

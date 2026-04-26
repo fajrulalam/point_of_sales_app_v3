@@ -77,6 +77,7 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
 
       final snap = await FirebaseFirestore.instance
           .collection(Col.name('Expenses'))
+          .where('addedFromDashboardWeb', isEqualTo: false)
           .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
           .where('timestamp', isLessThan: Timestamp.fromDate(endOfDay))
           .orderBy('timestamp', descending: true)
@@ -125,6 +126,7 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
         'amount': amount,
         'sourceAccount': _sourceAccount,
         'timestamp': FieldValue.serverTimestamp(),
+        'addedFromDashboardWeb': false,
       });
 
       _categoryController.clear();

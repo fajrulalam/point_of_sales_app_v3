@@ -154,6 +154,19 @@ class ShoppingService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String canteenId = 'canteen375';
 
+  /// Resolves a supplier/order item's display name to the linked inventory
+  /// item's current name, falling back to [fallback] when no inventoryItemId
+  /// is set or the cache cannot resolve it. Callers should ensure the
+  /// InventoryService cache is warm (call `refreshInventoryCache` on screen
+  /// init) so renames in Inventory propagate to Shopping immediately.
+  static String displayName(String? inventoryItemId, String fallback) {
+    if (inventoryItemId != null && inventoryItemId.isNotEmpty) {
+      final inv = InventoryService().allInventoryItems[inventoryItemId];
+      if (inv != null) return inv.name;
+    }
+    return fallback;
+  }
+
   static Stream<List<Supplier>> getSuppliersStream() {
     return _firestore
         .collection(Col.name('Canteens'))
@@ -262,115 +275,163 @@ class ShoppingService {
   }
 
   static Future<void> completeOrder(ShoppingOrder order) async {
-    final batch = _firestore.batch();
-    
-    // Update order status
     final orderRef = _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('shoppingOrders')
         .doc(order.id);
-    batch.update(orderRef, {'status': 'completed'});
 
-    // Memory aggregators to prevent multi-update errors per-batch and name collision races
-    final Map<String, int> incrementById = {};
-    final Map<String, int> incrementByName = {};
-    final Map<String, ShoppingOrderItem> rawNewItems = {};
+    // Guard: re-fetch current status to avoid double-increment on rapid double-tap
+    // or concurrent completion from another device.
+    final orderSnap = await orderRef.get();
+    if (!orderSnap.exists) {
+      throw Exception('Pesanan tidak ditemukan.');
+    }
+    if ((orderSnap.data()?['status'] as String?) == 'completed') {
+      return;
+    }
 
-    final inventoryService = InventoryService();
-    
-    // Process items entirely in memory first
-    for (var item in order.items) {
-      if (item.inventoryItemId != null && item.inventoryItemId!.isNotEmpty) {
-        incrementById[item.inventoryItemId!] = (incrementById[item.inventoryItemId!] ?? 0) + item.quantity;
-      } else {
-        // Fallback to name search
-        final existingSnapshot = await _firestore
-            .collection(Col.name('Canteens'))
-            .doc(canteenId)
-            .collection('Inventory')
+    final inventoryCol = _firestore
+        .collection(Col.name('Canteens'))
+        .doc(canteenId)
+        .collection('Inventory');
+    final dailyLogsCol = _firestore
+        .collection(Col.name('Canteens'))
+        .doc(canteenId)
+        .collection('DailyStockLogs');
+
+    // Aggregate quantities in memory, keyed by the inventory doc id we resolve to.
+    // `_StockTarget.exists` tells us whether we can update() or must create/merge-set().
+    final Map<String, _StockTarget> targets = {};
+    // Names pending creation inside this order (no id, no name match in DB) —
+    // reused so duplicate names within one order coalesce into one new inventory doc.
+    final Map<String, String> pendingDocIdsByName = {};
+
+    for (final item in order.items) {
+      if (item.quantity <= 0) continue;
+
+      String? docId = item.inventoryItemId;
+      bool existsInDb = false;
+
+      if (docId != null && docId.isNotEmpty) {
+        final snap = await inventoryCol.doc(docId).get();
+        existsInDb = snap.exists;
+      }
+
+      // Fallback: no id OR the linked doc was deleted — try matching by name
+      if (docId == null || docId.isEmpty || !existsInDb) {
+        final nameMatch = await inventoryCol
             .where('name', isEqualTo: item.name)
             .limit(1)
             .get();
 
-        if (existingSnapshot.docs.isNotEmpty) {
-           final docId = existingSnapshot.docs.first.id;
-           incrementById[docId] = (incrementById[docId] ?? 0) + item.quantity;
+        if (nameMatch.docs.isNotEmpty) {
+          docId = nameMatch.docs.first.id;
+          existsInDb = true;
+        } else if (pendingDocIdsByName.containsKey(item.name)) {
+          // Same name already queued for creation in this order — reuse the id
+          docId = pendingDocIdsByName[item.name]!;
+          existsInDb = false;
         } else {
-           incrementByName[item.name] = (incrementByName[item.name] ?? 0) + item.quantity;
-           rawNewItems[item.name] = item;
+          final epoch = DateTime.now().millisecondsSinceEpoch;
+          final encodedName = item.name.replaceAll(' ', '_');
+          docId = '${encodedName}_$epoch';
+          pendingDocIdsByName[item.name] = docId;
+          existsInDb = false;
         }
+      }
+
+      final existing = targets[docId];
+      if (existing != null) {
+        existing.qty += item.quantity;
+      } else {
+        targets[docId] = _StockTarget(
+          item: item,
+          qty: item.quantity,
+          exists: existsInDb,
+        );
       }
     }
 
-    // Translate aggregations to batch writes safely
-    for (var docId in incrementById.keys) {
-      final ref = _firestore
-          .collection(Col.name('Canteens'))
-          .doc(canteenId)
-          .collection('Inventory')
-          .doc(docId);
-      batch.update(ref, {'stock': FieldValue.increment(incrementById[docId]!)});
-    }
+    // Single batch so order-status update + all inventory writes commit atomically.
+    // Each item contributes at most 2 writes (inventory + daily log) plus the
+    // order update, so a realistic shopping order stays well under the 500-op limit.
+    final batch = _firestore.batch();
+    batch.update(orderRef, {'status': 'completed'});
 
-    for (var name in incrementByName.keys) {
-      final item = rawNewItems[name]!;
-      final epoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final encodedName = name.replaceAll(' ', '_');
-      final newDocId = '${encodedName}_$epoch';
+    final today = _getTodayDateString();
 
-      final inventoryRef = _firestore
-          .collection(Col.name('Canteens'))
-          .doc(canteenId)
-          .collection('Inventory')
-          .doc(newDocId);
+    for (final entry in targets.entries) {
+      final docId = entry.key;
+      final target = entry.value;
+      final invRef = inventoryCol.doc(docId);
 
-      batch.set(inventoryRef, {
-        'name': name,
-        'stock': incrementByName[name]!,
-        'unit': item.unit.isEmpty ? 'pcs' : item.unit,
-        'isPerishable': item.isPerishable,
-      });
+      if (target.exists) {
+        batch.update(invRef, {'stock': FieldValue.increment(target.qty)});
+      } else {
+        // Either the linked doc was deleted post-order, or the item has no id and
+        // no name match — create/merge the doc so stock is not lost.
+        batch.set(invRef, {
+          'name': target.item.name,
+          'stock': FieldValue.increment(target.qty),
+          'unit': target.item.unit.isEmpty ? 'pcs' : target.item.unit,
+          'isPerishable': target.item.isPerishable,
+        }, SetOptions(merge: true));
+      }
+
+      // Audit trail — keep parity with InventoryService._logStockAdded so daily
+      // reports reflect stock received from shopping orders.
+      final logRef = dailyLogsCol.doc('${today}_$docId');
+      batch.set(logRef, {
+        'date': today,
+        'inventoryItemId': docId,
+        'inventoryItemName': displayName(docId, target.item.name),
+        'isPerishable': target.item.isPerishable,
+        'stockAdded': FieldValue.increment(target.qty),
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     }
 
     await batch.commit();
-    await inventoryService.refreshInventoryCache();
+    await InventoryService().refreshInventoryCache();
+  }
+
+  static String _getTodayDateString() {
+    final now = DateTime.now();
+    return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
 
   static Future<void> generateOrderPdf(ShoppingOrder order) async {
     final doc = pw.Document();
 
     doc.addPage(
-      pw.Page(
+      pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text('Pesanan Belanja (Shopping Order)',
-                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 20),
-              pw.Text('Supplier: ${order.supplierName}',
-                  style: pw.TextStyle(fontSize: 18)),
-              pw.Text(
-                  'Tanggal: ${order.date.day}/${order.date.month}/${order.date.year}',
-                  style: const pw.TextStyle(fontSize: 16)),
-              pw.SizedBox(height: 30),
-              pw.Table.fromTextArray(
-                context: context,
-                border: pw.TableBorder.all(),
-                headerAlignment: pw.Alignment.centerLeft,
-                data: <List<String>>[
-                  <String>['Nama Item', 'Unit', 'Jumlah'],
-                  ...order.items.map((item) => [
-                        item.name,
-                        item.unit,
-                        item.quantity.toString(),
-                      ]),
-                ],
-              ),
-            ],
-          );
+          return [
+            pw.Text('Pesanan Belanja (Shopping Order)',
+                style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 20),
+            pw.Text('Supplier: ${order.supplierName}',
+                style: pw.TextStyle(fontSize: 18)),
+            pw.Text(
+                'Tanggal: ${order.date.day}/${order.date.month}/${order.date.year}',
+                style: const pw.TextStyle(fontSize: 16)),
+            pw.SizedBox(height: 30),
+            pw.Table.fromTextArray(
+              context: context,
+              border: pw.TableBorder.all(),
+              headerAlignment: pw.Alignment.centerLeft,
+              data: <List<String>>[
+                <String>['Nama Item', 'Unit', 'Jumlah'],
+                ...order.items.map((item) => [
+                      displayName(item.inventoryItemId, item.name),
+                      item.unit,
+                      item.quantity.toString(),
+                    ]),
+              ],
+            ),
+          ];
         },
       ),
     );
@@ -379,13 +440,18 @@ class ShoppingService {
         onLayout: (PdfPageFormat format) async => doc.save());
   }
 
-  /// Renders the order PDF as a PNG image and returns the file path.
   static Future<String> saveOrderAsImage(ShoppingOrder order) async {
     final doc = pw.Document();
 
+    final calculatedHeight = 250.0 + (order.items.length + 1) * 35.0;
+    final pageFormat = PdfPageFormat(
+      PdfPageFormat.a4.width,
+      calculatedHeight > PdfPageFormat.a4.height ? calculatedHeight : PdfPageFormat.a4.height,
+    );
+
     doc.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat.a4,
+        pageFormat: pageFormat,
         build: (pw.Context context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -406,7 +472,7 @@ class ShoppingService {
                 data: <List<String>>[
                   <String>['Nama Item', 'Unit', 'Jumlah'],
                   ...order.items.map((item) => [
-                        item.name,
+                        displayName(item.inventoryItemId, item.name),
                         item.unit,
                         item.quantity.toString(),
                       ]),
@@ -457,4 +523,16 @@ class ShoppingService {
     final imagePath = await saveOrderAsImage(order);
     await OpenFile.open(imagePath);
   }
+}
+
+class _StockTarget {
+  final ShoppingOrderItem item;
+  int qty;
+  final bool exists;
+
+  _StockTarget({
+    required this.item,
+    required this.qty,
+    required this.exists,
+  });
 }

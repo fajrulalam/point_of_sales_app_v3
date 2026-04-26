@@ -27,6 +27,7 @@ class SidebarWidget extends StatefulWidget {
   final VoidCallback? onLogoutPressed;
   final VoidCallback? onFinancialReportPressed;
   final VoidCallback? onQuickExpensePressed;
+  final VoidCallback? onVoucherProgramPressed;
   final VoidCallback? onTestingModeToggled;
 
   // New controlled state props
@@ -57,6 +58,7 @@ class SidebarWidget extends StatefulWidget {
     this.onLogoutPressed,
     this.onFinancialReportPressed,
     this.onQuickExpensePressed,
+    this.onVoucherProgramPressed,
     this.onTestingModeToggled,
   }) : super(key: key);
 
@@ -189,6 +191,14 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                               onTap: widget.onFinancialReportPressed!,
                               showLabels: showLabels,
                             ),
+                          if (widget.onVoucherProgramPressed != null)
+                            _navItem(
+                              icon: Icons.card_giftcard_rounded,
+                              label: 'Voucher B2B',
+                              routeKey: 'voucher_program',
+                              onTap: widget.onVoucherProgramPressed!,
+                              showLabels: showLabels,
+                            ),
                         ],
                       ),
                     ),
@@ -270,7 +280,8 @@ class _SidebarWidgetState extends State<SidebarWidget> {
           Expanded(
             child: Text(
               'Canteen 375',
-              style: GoogleFonts.montserrat(
+              style: const TextStyle(
+                fontFamily: 'Montserrat',
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
                 color: kDarkTeal,
@@ -354,7 +365,8 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                   Expanded(
                     child: Text(
                       label,
-                      style: GoogleFonts.montserrat(
+                      style: TextStyle(
+                        fontFamily: 'Montserrat',
                         fontSize: 13,
                         fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                         color: isActive ? kDarkTeal : kDarkTeal.withOpacity(0.65),
@@ -418,7 +430,8 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                     Expanded(
                       child: Text(
                         'Testing',
-                        style: GoogleFonts.montserrat(
+                        style: TextStyle(
+                          fontFamily: 'Montserrat',
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                           color: isTesting ? Colors.orange.shade700 : kDarkTeal.withOpacity(0.65),
@@ -463,11 +476,11 @@ class _SidebarWidgetState extends State<SidebarWidget> {
               children: [
                 Text(
                   'Cashier',
-                  style: GoogleFonts.montserrat(fontSize: 12, fontWeight: FontWeight.w600, color: kDarkTeal),
+                  style: const TextStyle(fontFamily: 'Montserrat', fontSize: 12, fontWeight: FontWeight.w600, color: kDarkTeal),
                 ),
                 Text(
                   'Admin Mode',
-                  style: GoogleFonts.montserrat(fontSize: 10, color: kDarkTeal.withOpacity(0.5)),
+                  style: TextStyle(fontFamily: 'Montserrat', fontSize: 10, color: kDarkTeal.withOpacity(0.5)),
                 ),
               ],
             ),

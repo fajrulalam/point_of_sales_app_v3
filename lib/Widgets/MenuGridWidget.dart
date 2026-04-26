@@ -16,9 +16,8 @@ class MenuGridWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Check if any item uses portrait (3:4) aspect ratio
     final hasPortraitImage = menuObjectList.any((m) => m.imageAspectRatio == '3:4');
-    final gridAspectRatio = hasPortraitImage ? 0.65 : 1.0;
+    final gridAspectRatio = hasPortraitImage ? 0.6 : 0.8;
 
     return GridView.builder(
       itemCount: menuObjectList.length,
@@ -114,7 +113,8 @@ class MenuGridWidget extends StatelessWidget {
                               child: Text(
                                 menu.namaMenu,
                                 textAlign: TextAlign.center,
-                                style: GoogleFonts.montserrat(
+                                style: const TextStyle(
+                                  fontFamily: 'Montserrat',
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -123,57 +123,44 @@ class MenuGridWidget extends StatelessWidget {
                           ],
                         ),
                       ),
-                      // Ingredient indicator
                       if (menu.ingredients.isNotEmpty)
                         Positioned(
                           top: 4,
                           right: 4,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: hasWarning
-                                  ? Colors.orange
-                                  : (isAvailable ? Colors.green : Colors.red),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.inventory_2,
-                                  size: 12,
-                                  color: Colors.white,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  hasWarning ? 'LOW' : (isAvailable ? 'OK' : 'X'),
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
+                          child: Builder(builder: (_) {
+                            final maxServings = InventoryService().getMaxServings(menu.ingredients);
+                            final count = maxServings ?? 0;
+                            final Color bg;
+                            if (count <= 0) {
+                              bg = Colors.red;
+                            } else if (count <= 5) {
+                              bg = Colors.orange;
+                            } else {
+                              bg = Colors.green;
+                            }
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: bg,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.inventory_2, size: 12, color: Colors.white),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '$count',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      // Warning overlay for Low Stock
-                      if (hasWarning)
-                        Positioned(
-                          bottom: 4,
-                          right: 4,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(
-                              color: Colors.orange,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.warning_amber_rounded,
-                                size: 16, color: Colors.white),
-                          ),
+                                ],
+                              ),
+                            );
+                          }),
                         ),
                     ],
                   ),

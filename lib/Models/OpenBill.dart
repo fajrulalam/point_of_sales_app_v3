@@ -53,6 +53,7 @@ class OpenBill {
   final String status;
   final String? statusDocId;
   final int customerNumber;
+  final int takeAwayFee;
 
   OpenBill({
     required this.memberId,
@@ -63,45 +64,55 @@ class OpenBill {
     required this.status,
     this.statusDocId,
     this.customerNumber = 0,
+    this.takeAwayFee = 0,
   });
 
   /// Parse from a root Status doc (NEW data flow)
   factory OpenBill.fromStatusDoc(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
 
-    DateTime parsedCreatedAt = data['waktuPesan'] != null 
-        ? (data['waktuPesan'] as Timestamp).toDate() 
+    DateTime parsedCreatedAt = data['waktuPesan'] != null
+        ? (data['waktuPesan'] as Timestamp).toDate()
         : DateTime.now();
 
-    // Build a single OpenBillOrder from the flat orderItems array
-    List<SelfOrderItem> allItems = [];
-    if (data['orderItems'] != null && data['orderItems'] is List) {
-      allItems = (data['orderItems'] as List)
-          .map((item) => SelfOrderItem.fromMap(item as Map<String, dynamic>))
+    int storedTakeAwayFee = (data['takeAwayFee'] ?? 0).toInt();
+
+    // Parse order history if available; fall back to flat orderItems for legacy docs
+    List<OpenBillOrder> parsedOrders = [];
+    if (data['orderHistory'] != null && data['orderHistory'] is List && (data['orderHistory'] as List).isNotEmpty) {
+      parsedOrders = (data['orderHistory'] as List)
+          .map((o) => OpenBillOrder.fromMap(o as Map<String, dynamic>))
           .toList();
+    } else {
+      // Legacy: build a single OpenBillOrder from the flat orderItems array
+      List<SelfOrderItem> allItems = [];
+      if (data['orderItems'] != null && data['orderItems'] is List) {
+        allItems = (data['orderItems'] as List)
+            .map((item) => SelfOrderItem.fromMap(item as Map<String, dynamic>))
+            .toList();
+      }
+      if (allItems.isNotEmpty) {
+        parsedOrders = [
+          OpenBillOrder(
+            timestamp: parsedCreatedAt,
+            items: allItems,
+            orderTotal: (data['total'] ?? 0).toInt(),
+            orderTakeAwayFee: storedTakeAwayFee,
+          )
+        ];
+      }
     }
-
-    // Calculate takeaway fee by checking for takeaway items
-    int totalTakeAwayFee = 0;
-    // Since the flat list doesn't track per-order takeaway fee,
-    // we'll just store 0 and let the settlement recalculate if needed.
-
-    final singleOrder = OpenBillOrder(
-      timestamp: parsedCreatedAt,
-      items: allItems,
-      orderTotal: (data['total'] ?? 0).toInt(),
-      orderTakeAwayFee: totalTakeAwayFee,
-    );
 
     return OpenBill(
       memberId: data['memberId'] ?? doc.id,
       memberName: data['namaCustomer'] ?? '',
       createdAt: parsedCreatedAt,
       totalAmount: (data['total'] ?? 0).toInt(),
-      orders: allItems.isEmpty ? [] : [singleOrder],
+      orders: parsedOrders,
       status: (data['isClosed'] == true) ? 'settled' : 'open',
       statusDocId: doc.id,
       customerNumber: (data['customerNumber'] ?? 0).toInt(),
+      takeAwayFee: storedTakeAwayFee,
     );
   }
 
@@ -142,6 +153,7 @@ class OpenBill {
       'status': status,
       if (statusDocId != null) 'statusDocId': statusDocId,
       'customerNumber': customerNumber,
+      'takeAwayFee': takeAwayFee,
     };
   }
   

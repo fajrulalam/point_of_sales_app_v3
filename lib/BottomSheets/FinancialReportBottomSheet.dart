@@ -21,6 +21,7 @@ class _FinancialReportBottomSheetState
   final _onlineController = TextEditingController();
 
   int? _systemTotal;
+  int _totalVoucher = 0;
   bool _isLoadingTotal = true;
 
   // Expenses fetched from Firestore
@@ -53,17 +54,20 @@ class _FinancialReportBottomSheetState
       if (doc.exists && doc.data() != null) {
         setState(() {
           _systemTotal = (doc.data()!['total'] ?? 0) as int;
+          _totalVoucher = (doc.data()!['totalVoucher'] ?? 0) as int;
           _isLoadingTotal = false;
         });
       } else {
         setState(() {
           _systemTotal = 0;
+          _totalVoucher = 0;
           _isLoadingTotal = false;
         });
       }
     } catch (e) {
       setState(() {
         _systemTotal = 0;
+        _totalVoucher = 0;
         _isLoadingTotal = false;
       });
     }
@@ -85,7 +89,10 @@ class _FinancialReportBottomSheetState
 
       if (mounted) {
         setState(() {
-          _todayExpenses = snap.docs.map((d) => d.data()).toList();
+          _todayExpenses = snap.docs
+              .map((d) => d.data())
+              .where((e) => e['addedFromDashboardWeb'] != true)
+              .toList();
           _isLoadingExpenses = false;
         });
       }
@@ -159,20 +166,20 @@ class _FinancialReportBottomSheetState
         await fs.collection(Col.name('DailyTransaction')).doc(today).get();
 
     final data = doc.data() ?? {};
-    final grossCash = (data['totalCash'] ?? 0) as int;
-    final grossQris = (data['totalQris'] ?? 0) as int;
-    final grossOnline = (data['totalOnline'] ?? 0) as int;
+    final totalCash = (data['totalCash'] ?? 0) as int;
+    final totalQris = (data['totalQris'] ?? 0) as int;
+    final totalOnline = (data['totalOnline'] ?? 0) as int;
 
     final expensesCash = _expensesCash;
     final expensesQris = _expensesQris;
     final expensesOnline = _expensesOnline;
 
-    final netExpectedCash = grossCash - expensesCash;
-    final netExpectedQris = grossQris - expensesQris;
+    final netExpectedCash = totalCash - expensesCash;
+    final netExpectedQris = totalQris - expensesQris;
 
     final cashMatch = inputCash == netExpectedCash;
     final qrisMatch = inputQris == netExpectedQris;
-    final platformCommission = grossOnline - inputOnline;
+    final platformCommission = inputOnline - (totalOnline - expensesOnline);
     const onlineMatch = true;
     final allMatch = cashMatch && qrisMatch && onlineMatch;
 
@@ -190,8 +197,8 @@ class _FinancialReportBottomSheetState
     final prevClosingQris = (prevData['closingQris'] ?? 0) as int;
     final prevClosingOnline = (prevData['closingOnline'] ?? 0) as int;
 
-    final discrepancyCash = (grossCash - expensesCash) - inputCash;
-    final discrepancyQris = (grossQris - expensesQris) - inputQris;
+    final discrepancyCash = inputCash - (totalCash - expensesCash);
+    final discrepancyQris = inputQris - (totalQris - expensesQris);
 
     final closingCash = prevClosingCash + inputCash - expensesCash;
     final closingQris = prevClosingQris + inputQris - expensesQris;
@@ -207,7 +214,8 @@ class _FinancialReportBottomSheetState
         inputOnline: inputOnline,
         systemCash: netExpectedCash,
         systemQris: netExpectedQris,
-        grossOnline: grossOnline,
+        totalOnline: totalOnline,
+        totalVoucher: _totalVoucher,
         platformCommission: platformCommission,
         allMatch: allMatch,
         cashMatch: cashMatch,
@@ -221,9 +229,10 @@ class _FinancialReportBottomSheetState
           fs.collection(Col.name('DailyTransaction')).doc(today);
 
       await reportRef.update({
-        'grossCash': grossCash,
-        'grossQris': grossQris,
-        'grossOnline': grossOnline,
+        'totalCash': totalCash,
+        'totalQris': totalQris,
+        'totalOnline': totalOnline,
+        'totalVoucher': _totalVoucher,
         'expensesCash': expensesCash,
         'expensesQris': expensesQris,
         'expensesOnline': expensesOnline,
@@ -322,6 +331,8 @@ class _FinancialReportBottomSheetState
                   _buildSection1SystemRevenue(),
                   const SizedBox(height: 24),
                   _buildSection2IncomeInput(),
+                  const SizedBox(height: 24),
+                  _buildVoucherPiutangInfo(),
                   const SizedBox(height: 24),
                   _buildSection3ExpensesSummary(),
                   const SizedBox(height: 32),
@@ -444,6 +455,56 @@ class _FinancialReportBottomSheetState
         ),
       ),
       style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w500),
+    );
+  }
+
+  Widget _buildVoucherPiutangInfo() {
+    if (_isLoadingTotal) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.purple.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.purple.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.receipt_long_outlined,
+              color: Colors.purple.shade700, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Piutang Voucher B2B (hari ini)',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.purple.shade800,
+                  ),
+                ),
+                Text(
+                  'Transaksi ini belum masuk kas — menunggu pembayaran dari institusi.',
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    color: Colors.purple.shade400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Rp ${_fmt(_totalVoucher)}',
+            style: GoogleFonts.poppins(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: Colors.purple.shade800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -677,7 +738,8 @@ class _ValidationDialog extends StatelessWidget {
   final int inputOnline;
   final int systemCash;
   final int systemQris;
-  final int grossOnline;
+  final int totalOnline;
+  final int totalVoucher;
   final int platformCommission;
   final bool allMatch;
   final bool cashMatch;
@@ -690,7 +752,8 @@ class _ValidationDialog extends StatelessWidget {
     required this.inputOnline,
     required this.systemCash,
     required this.systemQris,
-    required this.grossOnline,
+    required this.totalOnline,
+    required this.totalVoucher,
     required this.platformCommission,
     required this.allMatch,
     required this.cashMatch,
@@ -744,6 +807,10 @@ class _ValidationDialog extends StatelessWidget {
             _buildComparisonRow('QRIS', inputQris, systemQris, qrisMatch),
             const SizedBox(height: 10),
             _buildOnlineRow(),
+            if (totalVoucher > 0) ...[
+              const SizedBox(height: 10),
+              _buildVoucherRow(),
+            ],
           ],
         ),
       ),
@@ -866,6 +933,41 @@ class _ValidationDialog extends StatelessWidget {
                       color: Colors.blue.shade600,
                     ),
                   ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVoucherRow() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.purple.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.purple.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.receipt_long_outlined,
+              color: Colors.purple.shade700, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Piutang Voucher B2B',
+                  style: GoogleFonts.poppins(
+                      fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  'Belum masuk kas — menunggu pembayaran institusi: Rp ${_fmt(totalVoucher)}',
+                  style: GoogleFonts.poppins(
+                      fontSize: 12, color: Colors.purple.shade700),
+                ),
               ],
             ),
           ),

@@ -9,6 +9,9 @@ class MemberService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
+  /// Prevents overlapping background syncs when checkout opens repeatedly.
+  bool _backgroundRefreshRunning = false;
+
   MemberService._init();
 
   // Initialization: Fetch and cache all members
@@ -72,5 +75,36 @@ class MemberService {
   // Force sync (manually triggered)
   Future<void> forceSync() async {
     await fetchAndCacheMembers();
+  }
+
+  /// Refreshes the local member cache from Firestore **without blocking** the caller.
+  /// Runs only if [members_last_sync] is missing or older than [minInterval].
+  /// Safe to call when opening order confirmation; overlaps with user filling the form.
+  void scheduleMembersCacheRefreshIfStale({
+    Duration minInterval = const Duration(minutes: 3),
+  }) {
+    _scheduleMembersCacheRefreshIfStaleImpl(minInterval);
+  }
+
+  Future<void> _scheduleMembersCacheRefreshIfStaleImpl(
+    Duration minInterval,
+  ) async {
+    if (_backgroundRefreshRunning) return;
+    _backgroundRefreshRunning = true;
+    try {
+      final lastStr = await _dbHelper.getMetadata('members_last_sync');
+      if (lastStr != null) {
+        final last = DateTime.tryParse(lastStr);
+        if (last != null &&
+            DateTime.now().difference(last) < minInterval) {
+          return;
+        }
+      }
+      await fetchAndCacheMembers();
+    } catch (e) {
+      print('⚠️ Background members refresh failed: $e');
+    } finally {
+      _backgroundRefreshRunning = false;
+    }
   }
 }

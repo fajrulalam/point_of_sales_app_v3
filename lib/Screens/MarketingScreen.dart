@@ -7,6 +7,7 @@ import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Services/MemberService.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class MarketingScreen extends StatefulWidget {
   const MarketingScreen({Key? key}) : super(key: key);
@@ -64,7 +65,7 @@ class _MarketingScreenState extends State<MarketingScreen>
       final now = DateTime.now();
       final monthDocId = DateFormat('yyyy-MM').format(now);
       final competitionDoc = await FirebaseFirestore.instance
-          .collection('competitionRecords')
+          .collection(Col.name('competitionRecords'))
           .doc(monthDocId)
           .get();
 
@@ -162,7 +163,7 @@ class _MarketingScreenState extends State<MarketingScreen>
     setState(() => _isLoadingCampaigns = true);
     try {
       final query = FirebaseFirestore.instance
-          .collection('voucherGroup')
+          .collection(Col.name('voucherGroup'))
           .where('type', isEqualTo: 'cashbackCampaign');
       
       final snapshot = forceRefresh 
@@ -175,13 +176,13 @@ class _MarketingScreenState extends State<MarketingScreen>
       if (forceRefresh) {
         for (var doc in docs) {
           final participants = await FirebaseFirestore.instance
-              .collection('vouchers')
+              .collection(Col.name('vouchers'))
               .where('voucherGroupId', isEqualTo: doc.id)
               .count()
               .get();
               
           final claimed = await FirebaseFirestore.instance
-              .collection('vouchers')
+              .collection(Col.name('vouchers'))
               .where('voucherGroupId', isEqualTo: doc.id)
               .where('status', isEqualTo: 'CLAIMED')
               .count()
@@ -391,7 +392,7 @@ class _MarketingScreenState extends State<MarketingScreen>
                     'campaign_${DateFormat('yyyy-MM-dd').format(DateTime.now())}_${safeName}_${DateTime.now().millisecondsSinceEpoch}';
 
                 await FirebaseFirestore.instance
-                    .collection('voucherGroup')
+                    .collection(Col.name('voucherGroup'))
                     .doc(voucherGroupId)
                     .set({
                   'activeDate': Timestamp.fromDate(startDate!),
@@ -1233,7 +1234,7 @@ class _MarketingScreenState extends State<MarketingScreen>
               Expanded(
                 child: FutureBuilder<QuerySnapshot>(
                   future: FirebaseFirestore.instance
-                      .collection('vouchers')
+                      .collection(Col.name('vouchers'))
                       .where('voucherGroupId', isEqualTo: campaignId)
                       .get(),
                   builder: (context, snapshot) {
@@ -1380,7 +1381,7 @@ class _MarketingScreenState extends State<MarketingScreen>
               Expanded(
                 child: FutureBuilder<QuerySnapshot>(
                   future: FirebaseFirestore.instance
-                      .collection('vouchers')
+                      .collection(Col.name('vouchers'))
                       .where('userId', isEqualTo: member.id)
                       .get(),
                   builder: (context, snapshot) {

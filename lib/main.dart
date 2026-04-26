@@ -15,6 +15,8 @@ const Color _kOffWhite = Color(0xFFF5F5F0);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Use fonts from pubspec (assets/fonts); avoids runtime HTTP to fonts.gstatic.com when offline.
+  GoogleFonts.config.allowRuntimeFetching = false;
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
@@ -59,11 +61,12 @@ class MyApp extends StatelessWidget {
               surface: surface,
             ),
             scaffoldBackgroundColor: surface,
-            textTheme: GoogleFonts.montserratTextTheme(),
+            textTheme: ThemeData.light().textTheme.apply(fontFamily: 'Montserrat'),
             appBarTheme: AppBarTheme(
               backgroundColor: primary,
               elevation: 0,
-              titleTextStyle: GoogleFonts.montserrat(
+              titleTextStyle: const TextStyle(
+                fontFamily: 'Montserrat',
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
                 fontSize: 18,

@@ -28,6 +28,7 @@ import 'package:point_of_sales_app_v3/Screens/ShoppingScreen.dart';
 import 'package:point_of_sales_app_v3/Screens/LiveTabsScreen.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/FinancialReportBottomSheet.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/QuickExpenseBottomSheet.dart';
+import 'package:point_of_sales_app_v3/Screens/VoucherProgramScreen.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class Home extends StatefulWidget {
@@ -197,6 +198,7 @@ class _HomeState extends State<Home> {
           onMembersPressed: () => _navigateToMembers(),
           onQuickExpensePressed: () => _showQuickExpense(),
           onFinancialReportPressed: () => _showFinancialReport(),
+          onVoucherProgramPressed: () => _navigateToVoucherProgram(),
           onTestingModeToggled: _handleTestingModeToggle,
           onLogoutPressed: _handleLogout,
         ),
@@ -309,6 +311,8 @@ Widget _buildMainContent() {
     );
   } else if (_activeRoute == 'members') {
     return const MarketingScreen();
+  } else if (_activeRoute == 'voucher_program') {
+    return const VoucherProgramScreen();
   }
   return const SizedBox.shrink();
 }
@@ -329,7 +333,7 @@ Widget _buildMainContent() {
       ),
       // Order List and Summary
       Expanded(
-        flex: 4,
+        flex: 3,
         child: Container(
           decoration: BoxDecoration(
             color: Colors.grey.shade100,
@@ -396,6 +400,11 @@ Widget _buildMainContent() {
                         controller.incrementTakeAway(index),
                     onDecrementTakeAway: (index) =>
                         controller.decrementTakeAway(index),
+                    onNoteChanged: (index, note) {
+                      setState(() {
+                        controller.pesananList[index].customerNote = note;
+                      });
+                    },
                   ),
                 ),
               ),
@@ -436,17 +445,18 @@ Widget _buildMainContent() {
       return;
     }
 
-    final selectedOptions = await OptionSelectionBottomSheet.show(
+    final result = await OptionSelectionBottomSheet.show(
       context,
       menu: menu,
       linkedGroups: linkedGroups,
     );
 
-    if (selectedOptions != null) {
+    if (result != null) {
       await controller.addToOrder(
         menu,
         controller.isTakeAway,
-        options: selectedOptions,
+        options: result.options,
+        quantity: result.quantity,
       );
     }
   }
@@ -523,6 +533,10 @@ Widget _buildMainContent() {
 
   void _navigateToSelfOrders() {
     setState(() => _activeRoute = 'selforders');
+  }
+
+  void _navigateToVoucherProgram() {
+    setState(() => _activeRoute = 'voucher_program');
   }
 
   void _handleAcceptSelfOrder(SelfOrder order) {

@@ -35,6 +35,8 @@ class Col {
     'voucher',
     'vouchers',
     'voucherGroup',
+    'voucherProgram',
+    'voucherPrograms',
     'YearlyTransaction',
   };
 

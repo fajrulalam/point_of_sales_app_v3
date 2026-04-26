@@ -27,13 +27,14 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
   bool _isReprinting = false;
   String? _reprintingOrderId;
   DateTime _selectedDate = DateTime.now();
+  bool _isLoadingPrinters = true;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    getPrinters();
     _syncPrinterState();
+    getPrinters();
   }
 
   @override
@@ -132,24 +133,48 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
                 child: Row(
                   children: [
                     Expanded(
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<BluetoothDevice>(
-                          hint: const Text('Pilih printer'),
-                          value: selectedDevice,
-                          isExpanded: true,
-                          items: devices
-                              .map((e) => DropdownMenuItem(
-                                  child: Text(e.name ?? 'Unknown Device'),
-                                  value: e))
-                              .toList(),
-                          onChanged: (device) async {
-                            if (device != null) {
-                              setState(() => selectedDevice = device);
-                              await _handleNewConnection(device);
-                            }
-                          },
-                        ),
-                      ),
+                      child: _isLoadingPrinters
+                          ? Row(
+                              children: [
+                                const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Mencari printer...',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 14,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : DropdownButtonHideUnderline(
+                              child: DropdownButton<BluetoothDevice>(
+                                hint: Text(
+                                  devices.isEmpty
+                                      ? 'Tidak ada printer ditemukan'
+                                      : 'Pilih printer',
+                                ),
+                                value: selectedDevice,
+                                isExpanded: true,
+                                items: devices
+                                    .map((e) => DropdownMenuItem(
+                                        child: Text(e.name ?? 'Unknown Device'),
+                                        value: e))
+                                    .toList(),
+                                onChanged: devices.isEmpty
+                                    ? null
+                                    : (device) async {
+                                        if (device != null) {
+                                          setState(() => selectedDevice = device);
+                                          await _handleNewConnection(device);
+                                        }
+                                      },
+                              ),
+                            ),
                     ),
                     const SizedBox(width: 8),
                     Container(
@@ -389,13 +414,15 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
     final int customerNumber = data['customerNumber'] ?? 0;
     final String namaCustomer = data['namaCustomer'] ?? '-';
     final int total = data['total'] ?? 0;
-    final Timestamp? timestampServe = data['timestampServe'];
+    final rawTimestamp = data['timestampServe'];
     final String transactionMethod = data['transactionMethod'] ?? '';
     final bool isReprinting = _isReprinting && _reprintingOrderId == docId;
 
     String formattedTime = '-';
-    if (timestampServe != null) {
-      formattedTime = DateFormat('HH:mm').format(timestampServe.toDate());
+    if (rawTimestamp is Timestamp) {
+      formattedTime = DateFormat('HH:mm').format(rawTimestamp.toDate());
+    } else if (rawTimestamp is DateTime) {
+      formattedTime = DateFormat('HH:mm').format(rawTimestamp);
     }
 
     return Container(
@@ -724,11 +751,16 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
 
   Future<void> _handleNewConnection(BluetoothDevice device) async {
     try {
+      // If already connected to this device, just verify and skip reconnect
+      final alreadyConnected = (await printer.isConnected) ?? false;
+      if (alreadyConnected && widget.controller.selectedDevice?.address == device.address) {
+        await checkIfPrinterIsConnected();
+        return;
+      }
+
       try {
         await printer.disconnect();
-      } catch (_) {
-        // Ignore "not connected" exception
-      }
+      } catch (_) {}
       await Future.delayed(const Duration(milliseconds: 500));
       
       await printer.connect(device);
@@ -814,7 +846,26 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
   }
 
   Future<void> getPrinters() async {
-    devices = await printer.getBondedDevices();
-    setState(() {});
+    setState(() => _isLoadingPrinters = true);
+    try {
+      devices = await printer.getBondedDevices();
+      // Match the previously selected device to the new list by address,
+      // since getPrinters() returns new BluetoothDevice object instances.
+      if (selectedDevice != null && devices.isNotEmpty) {
+        final match = devices.cast<BluetoothDevice?>().firstWhere(
+          (d) => d?.address == selectedDevice!.address,
+          orElse: () => null,
+        );
+        if (match != null) {
+          selectedDevice = match;
+        }
+      }
+    } catch (e) {
+      print('Error fetching printers: $e');
+      devices = [];
+    }
+    if (mounted) {
+      setState(() => _isLoadingPrinters = false);
+    }
   }
 }

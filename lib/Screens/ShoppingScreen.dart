@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
+import 'package:point_of_sales_app_v3/Screens/InventoryScreen.dart';
 import 'package:point_of_sales_app_v3/Services/ShoppingService.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:intl/intl.dart';
@@ -19,6 +21,11 @@ class _ShoppingScreenState extends State<ShoppingScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    // Warm the inventory cache so displayName() resolves linked names everywhere
+    // (supplier rows, order rows, correction dialogs, shared PDFs).
+    InventoryService().refreshInventoryCache().then((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -85,6 +92,20 @@ class _SuppliersViewState extends State<SuppliersView> {
   String? _selectedSupplierId;
   final _searchController = TextEditingController();
   String _searchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInventory();
+  }
+
+  Future<void> _loadInventory() async {
+    final inventoryService = InventoryService();
+    if (inventoryService.allInventoryItems.isEmpty) {
+      await inventoryService.refreshInventoryCache();
+      if (mounted) setState(() {});
+    }
+  }
 
   @override
   void dispose() {
@@ -426,6 +447,11 @@ class _SuppliersViewState extends State<SuppliersView> {
 
   Widget _buildItemCard(Supplier supplier, SupplierItem item) {
     final originalIndex = supplier.items.indexOf(item);
+    final inventoryService = InventoryService();
+    int currentStock = 0;
+    if (item.inventoryItemId != null && item.inventoryItemId!.isNotEmpty) {
+      currentStock = inventoryService.allInventoryItems[item.inventoryItemId]?.stock ?? 0;
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -452,7 +478,7 @@ class _SuppliersViewState extends State<SuppliersView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  item.name,
+                  ShoppingService.displayName(item.inventoryItemId, item.name),
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -460,17 +486,19 @@ class _SuppliersViewState extends State<SuppliersView> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
-                      'Unit: ${item.unit}',
+                      'Unit: ${item.unit} • Stok: $currentStock',
                       style: GoogleFonts.poppins(
                         fontSize: 14,
                         color: Colors.grey.shade600,
                       ),
                     ),
-                    if (item.isPerishable) ...[
-                      const SizedBox(width: 8),
+                    if (item.isPerishable)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
@@ -481,8 +509,27 @@ class _SuppliersViewState extends State<SuppliersView> {
                           'Perishable',
                           style: GoogleFonts.poppins(fontSize: 10, color: Colors.deepOrange),
                         ),
-                      )
-                    ]
+                      ),
+                    if (item.inventoryItemId != null && item.inventoryItemId!.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.green.shade300),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.link, size: 12, color: Colors.green.shade700),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Linked to Inventory',
+                              style: GoogleFonts.poppins(fontSize: 10, color: Colors.green.shade700, fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ],
@@ -593,98 +640,207 @@ class _SuppliersViewState extends State<SuppliersView> {
     );
   }
 
-  void _showAddOrEditItemDialog(BuildContext context, Supplier supplier, {SupplierItem? editItem, int? itemIndex}) {
-    final nameController = TextEditingController(text: editItem?.name ?? '');
-    final unitController = TextEditingController(text: editItem?.unit ?? 'pcs');
-    bool isPerishable = editItem?.isPerishable ?? false;
-    String? linkedInventoryId = editItem?.inventoryItemId;
+  Future<void> _showAddOrEditItemDialog(BuildContext context, Supplier supplier, {SupplierItem? editItem, int? itemIndex}) async {
+    final service = InventoryService();
+    if (service.allInventoryItems.isEmpty) {
+      await service.refreshInventoryCache();
+    }
+    if (!context.mounted) return;
 
-    final inventoryItems = InventoryService().allInventoryItems.values.toList();
-    inventoryItems.sort((a, b) => a.name.compareTo(b.name));
+    final inventoryItems = service.allInventoryItems.values.toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+
+    if (inventoryItems.isEmpty) {
+      _showGoToInventoryDialog(
+        context,
+        'Belum ada bahan di Inventory. Silakan daftarkan bahan terlebih dahulu sebelum menambahkannya ke supplier.',
+      );
+      return;
+    }
+
+    // Exclude items already linked to this supplier (except the one being edited)
+    final existingLinkedIds = <String>{};
+    for (int i = 0; i < supplier.items.length; i++) {
+      if (i == itemIndex) continue;
+      final id = supplier.items[i].inventoryItemId;
+      if (id != null && id.isNotEmpty) existingLinkedIds.add(id);
+    }
+    final availableItems = inventoryItems
+        .where((inv) => !existingLinkedIds.contains(inv.id))
+        .toList();
+
+    InventoryItem? selected;
+    if (editItem?.inventoryItemId != null) {
+      for (final inv in inventoryItems) {
+        if (inv.id == editItem!.inventoryItemId) {
+          selected = inv;
+          break;
+        }
+      }
+    }
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
           return AlertDialog(
-            title: Text(editItem == null ? 'Tambah Barang' : 'Edit Barang', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  decoration: const InputDecoration(labelText: 'Tautan Inventory (Opsional)', border: OutlineInputBorder()),
-                  value: linkedInventoryId,
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('Tidak ditautkan')),
-                    ...inventoryItems.map((inv) => DropdownMenuItem(
-                      value: inv.id,
-                      child: Text(inv.name),
-                    )),
-                  ],
-                  onChanged: (val) {
-                    setDialogState(() {
-                      linkedInventoryId = val;
-                      if (val != null) {
-                        final inv = inventoryItems.firstWhere((i) => i.id == val);
-                        nameController.text = inv.name;
-                        unitController.text = inv.unit.isEmpty ? 'pcs' : inv.unit;
-                        isPerishable = inv.isPerishable;
-                      }
-                    });
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(labelText: 'Nama Barang', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: unitController,
-                        decoration: const InputDecoration(labelText: 'Unit', border: OutlineInputBorder()),
+            title: Text(
+              editItem == null ? 'Tambah Barang dari Inventory' : 'Ganti Barang dari Inventory',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Pilih bahan yang sudah terdaftar di Inventory.',
+                    style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 12),
+                  Autocomplete<InventoryItem>(
+                    initialValue: selected != null
+                        ? TextEditingValue(text: selected!.name)
+                        : const TextEditingValue(),
+                    optionsBuilder: (TextEditingValue value) {
+                      final q = value.text.toLowerCase().trim();
+                      if (q.isEmpty) return availableItems;
+                      return availableItems
+                          .where((inv) => inv.name.toLowerCase().contains(q));
+                    },
+                    displayStringForOption: (inv) => inv.name,
+                    onSelected: (inv) => setDialogState(() => selected = inv),
+                    fieldViewBuilder: (ctx, controller, focusNode, onSubmit) {
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        decoration: InputDecoration(
+                          labelText: 'Cari bahan...',
+                          prefixIcon: const Icon(Icons.search),
+                          border: const OutlineInputBorder(),
+                          suffixIcon: controller.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () {
+                                    controller.clear();
+                                    setDialogState(() => selected = null);
+                                  },
+                                )
+                              : null,
+                        ),
+                      );
+                    },
+                    optionsViewBuilder: (ctx, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 240, maxWidth: 400),
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              padding: EdgeInsets.zero,
+                              itemCount: options.length,
+                              itemBuilder: (c, i) {
+                                final inv = options.elementAt(i);
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(inv.name),
+                                  subtitle: Text('Unit: ${inv.unit}${inv.isPerishable ? " • Perishable" : ""}'),
+                                  onTap: () => onSelected(inv),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  if (selected != null)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            const Icon(Icons.check_circle, color: Color(0xFF2E7D32), size: 18),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                selected!.name,
+                                style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 4),
+                          Text('Unit: ${selected!.unit}', style: GoogleFonts.poppins(fontSize: 12)),
+                          if (selected!.isPerishable)
+                            Text('Perishable', style: GoogleFonts.poppins(fontSize: 12, color: Colors.deepOrange)),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    Row(
-                      children: [
-                        Checkbox(
-                          value: isPerishable,
-                          onChanged: (v) => setDialogState(() => isPerishable = v ?? false),
+                  const SizedBox(height: 12),
+                  const Divider(),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Bahan belum ada di Inventory?',
+                          style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700),
                         ),
-                        const Text('Perishable'),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          Navigator.pop(dialogContext);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const InventoryScreen()),
+                          );
+                        },
+                        icon: const Icon(Icons.add_circle_outline, size: 16),
+                        label: const Text('Daftarkan'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+              TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Batal')),
               ElevatedButton(
-                onPressed: () async {
-                  if (nameController.text.isNotEmpty) {
-                    List<SupplierItem> updatedItems = List.from(supplier.items);
-                    final newItem = SupplierItem(
-                      name: nameController.text,
-                      unit: unitController.text,
-                      isPerishable: isPerishable,
-                      inventoryItemId: linkedInventoryId,
-                    );
+                onPressed: selected == null
+                    ? null
+                    : () async {
+                        final inv = selected!;
+                        final updatedItems = List<SupplierItem>.from(supplier.items);
+                        final newItem = SupplierItem(
+                          name: inv.name,
+                          unit: inv.unit.isEmpty ? 'pcs' : inv.unit,
+                          isPerishable: inv.isPerishable,
+                          inventoryItemId: inv.id,
+                        );
 
-                    if (editItem == null) {
-                      updatedItems.add(newItem);
-                    } else if (itemIndex != null) {
-                      updatedItems[itemIndex] = newItem;
-                    }
+                        if (editItem == null) {
+                          updatedItems.add(newItem);
+                        } else if (itemIndex != null) {
+                          updatedItems[itemIndex] = newItem;
+                        }
 
-                    await ShoppingService.updateSupplier(supplier.id, supplier.name, updatedItems);
-                    if (context.mounted) Navigator.pop(context);
-                  }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+                        await ShoppingService.updateSupplier(
+                            supplier.id, supplier.name, updatedItems);
+                        if (dialogContext.mounted) Navigator.pop(dialogContext);
+                      },
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white),
                 child: const Text('Simpan'),
               ),
             ],
@@ -694,11 +850,46 @@ class _SuppliersViewState extends State<SuppliersView> {
     );
   }
 
-  void _showCreateOrderDialog(BuildContext context, Supplier supplier) {
+  void _showGoToInventoryDialog(BuildContext context, String message) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Inventory Kosong', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text(message, style: GoogleFonts.poppins(fontSize: 14)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const InventoryScreen()),
+              );
+            },
+            icon: const Icon(Icons.inventory_2),
+            label: const Text('Ke Inventory'),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showCreateOrderDialog(BuildContext context, Supplier supplier) async {
     if (supplier.items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier tidak mempunyai barang.')));
       return;
     }
+
+    final inventoryService = InventoryService();
+    if (inventoryService.allInventoryItems.isEmpty) {
+      await inventoryService.refreshInventoryCache();
+    }
+    if (!context.mounted) return;
 
     final Map<int, TextEditingController> controllers = {};
     for (int i = 0; i < supplier.items.length; i++) {
@@ -722,9 +913,13 @@ class _SuppliersViewState extends State<SuppliersView> {
                   itemCount: supplier.items.length,
                   itemBuilder: (context, index) {
                     final item = supplier.items[index];
+                    int currentStock = 0;
+                    if (item.inventoryItemId != null && item.inventoryItemId!.isNotEmpty) {
+                      currentStock = inventoryService.allInventoryItems[item.inventoryItemId]?.stock ?? 0;
+                    }
                     return ListTile(
-                      title: Text(item.name),
-                      subtitle: Text(item.unit),
+                      title: Text(ShoppingService.displayName(item.inventoryItemId, item.name)),
+                      subtitle: Text('${item.unit} • Stok: $currentStock'),
                       trailing: SizedBox(
                         width: 100,
                         child: TextField(
@@ -748,12 +943,13 @@ class _SuppliersViewState extends State<SuppliersView> {
               for (int i = 0; i < supplier.items.length; i++) {
                 int qty = int.tryParse(controllers[i]?.text ?? '0') ?? 0;
                 if (qty > 0) {
+                  final src = supplier.items[i];
                   borderItems.add(ShoppingOrderItem(
-                    name: supplier.items[i].name,
+                    name: ShoppingService.displayName(src.inventoryItemId, src.name),
                     quantity: qty,
-                    unit: supplier.items[i].unit,
-                    isPerishable: supplier.items[i].isPerishable,
-                    inventoryItemId: supplier.items[i].inventoryItemId,
+                    unit: src.unit,
+                    isPerishable: src.isPerishable,
+                    inventoryItemId: src.inventoryItemId,
                   ));
                 }
               }
@@ -799,7 +995,7 @@ class _SuppliersViewState extends State<SuppliersView> {
                           try {
                             final pdfPath = await ShoppingService.saveOrderAsImage(newOrder);
                             final orderMessage = newOrder.items
-                                .map((item) => '(${item.quantity}${item.unit}) ${item.name}')
+                                .map((item) => '(${item.quantity}${item.unit}) ${ShoppingService.displayName(item.inventoryItemId, item.name)}')
                                 .join('\n');
                             await Share.shareXFiles(
                               [XFile(pdfPath, mimeType: 'image/jpeg')],
@@ -932,7 +1128,7 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                       children: [
                         ...order.items.map((item) => ListTile(
                               dense: true,
-                              title: Text(item.name),
+                              title: Text(ShoppingService.displayName(item.inventoryItemId, item.name)),
                               trailing: Text('${item.quantity} ${item.unit}', style: const TextStyle(fontWeight: FontWeight.bold)),
                             )),
                         Padding(
@@ -1030,7 +1226,7 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
     try {
       final pdfPath = await ShoppingService.saveOrderAsImage(order);
       final orderMessage = order.items
-          .map((item) => '(${item.quantity}${item.unit}) ${item.name}')
+          .map((item) => '(${item.quantity}${item.unit}) ${ShoppingService.displayName(item.inventoryItemId, item.name)}')
           .join('\n');
       await Share.shareXFiles(
         [XFile(pdfPath, mimeType: 'image/jpeg')],
@@ -1071,7 +1267,7 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                   itemBuilder: (context, index) {
                     final item = order.items[index];
                     return ListTile(
-                      title: Text(item.name),
+                      title: Text(ShoppingService.displayName(item.inventoryItemId, item.name)),
                       subtitle: Text(item.unit),
                       trailing: SizedBox(
                         width: 100,
@@ -1096,7 +1292,7 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
               for (int i = 0; i < order.items.length; i++) {
                 int qty = int.tryParse(controllers[i]?.text ?? '0') ?? 0;
                 correctedItems.add(ShoppingOrderItem(
-                  name: order.items[i].name,
+                  name: ShoppingService.displayName(order.items[i].inventoryItemId, order.items[i].name),
                   quantity: qty,
                   unit: order.items[i].unit,
                   isPerishable: order.items[i].isPerishable,
@@ -1121,22 +1317,54 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
   void _showCompleteOrderDialog(BuildContext context, ShoppingOrder order) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Selesaikan Order?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: const Text('Pastikan barang yang datang sudah sesuai. Jika belum sesuai, Anda dapat melakukan Koreksi (Correction). Setelah diselesaikan, barang akan ditambahkan ke Inventory stok sesuai dengan jumlah yang tercatat.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
-          ElevatedButton(
-            onPressed: () async {
-              await ShoppingService.completeOrder(order);
-              if (context.mounted) {
-                Navigator.pop(context);
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-            child: const Text('Ya, Selesai'),
-          ),
-        ],
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          bool isSaving = false;
+          return AlertDialog(
+            title: Text('Selesaikan Order?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            content: const Text('Pastikan barang yang datang sudah sesuai. Jika belum sesuai, Anda dapat melakukan Koreksi (Correction). Setelah diselesaikan, barang akan ditambahkan ke Inventory stok sesuai dengan jumlah yang tercatat.'),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
+                child: const Text('Batal'),
+              ),
+              ElevatedButton(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        setDialogState(() => isSaving = true);
+                        try {
+                          await ShoppingService.completeOrder(order);
+                          if (dialogContext.mounted) {
+                            Navigator.pop(dialogContext);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Stok berhasil ditambahkan ke Inventory')),
+                            );
+                          }
+                        } catch (e) {
+                          if (dialogContext.mounted) {
+                            setDialogState(() => isSaving = false);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Gagal menyelesaikan pesanan: $e'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                child: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Ya, Selesai'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

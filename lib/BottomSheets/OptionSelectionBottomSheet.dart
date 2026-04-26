@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
+import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 
 class OptionSelectionBottomSheet extends StatefulWidget {
   final MenuObject menu;
@@ -15,13 +16,13 @@ class OptionSelectionBottomSheet extends StatefulWidget {
     required this.linkedGroups,
   }) : super(key: key);
 
-  /// Shows the bottom sheet and returns the selected options, or null if cancelled.
-  static Future<List<SelectedOption>?> show(
+  /// Shows the bottom sheet and returns the selected options + quantity, or null if cancelled.
+  static Future<({List<SelectedOption> options, int quantity})?> show(
     BuildContext context, {
     required MenuObject menu,
     required List<OptionGroup> linkedGroups,
   }) {
-    return showModalBottomSheet<List<SelectedOption>>(
+    return showModalBottomSheet<({List<SelectedOption> options, int quantity})>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -43,6 +44,7 @@ class _OptionSelectionBottomSheetState
   final Map<String, Set<String>> _selections = {};
   // Track validation errors per group
   final Map<String, String?> _errors = {};
+  int _quantity = 1;
 
   @override
   void initState() {
@@ -66,6 +68,7 @@ class _OptionSelectionBottomSheetState
   }
 
   int get _effectivePrice => widget.menu.harga + _optionsTotal;
+  int get _totalPrice => _effectivePrice * _quantity;
 
   bool _validate() {
     bool valid = true;
@@ -126,15 +129,13 @@ class _OptionSelectionBottomSheetState
         }
       }
     }
-    Navigator.pop(context, result);
+    Navigator.pop(context, (options: result, quantity: _quantity));
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.75,
-      ),
+      height: MediaQuery.of(context).size.height,
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
@@ -281,7 +282,8 @@ class _OptionSelectionBottomSheetState
             runSpacing: 8,
             children: group.options.map((option) {
               final isSelected = selected.contains(option.name);
-              return _buildOptionChip(option, isSelected, () {
+              final maxServings = InventoryService().getMaxServings(option.ingredients);
+              return _buildOptionChip(option, isSelected, maxServings, () {
                 _toggleOption(group, option);
               });
             }).toList(),
@@ -291,32 +293,39 @@ class _OptionSelectionBottomSheetState
     );
   }
 
-  Widget _buildOptionChip(OptionItem option, bool isSelected, VoidCallback onTap) {
+  Widget _buildOptionChip(OptionItem option, bool isSelected, int? maxServings, VoidCallback onTap) {
+    final bool hasStock = maxServings != null;
+    final bool outOfStock = hasStock && maxServings <= 0;
+
     return GestureDetector(
-      onTap: onTap,
+      onTap: outOfStock ? null : onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected
-              ? (option.priceAdjustment < 0
-                  ? const Color(0xFFFFF3E0)
-                  : const Color(0xFFE8F5E9))
-              : Colors.white,
+          color: outOfStock
+              ? Colors.grey.shade100
+              : isSelected
+                  ? (option.priceAdjustment < 0
+                      ? const Color(0xFFFFF3E0)
+                      : const Color(0xFFE8F5E9))
+                  : Colors.white,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isSelected
-                ? (option.priceAdjustment < 0
-                    ? const Color(0xFFE65100)
-                    : const Color(0xFF2E7D32))
-                : Colors.grey.shade300,
-            width: isSelected ? 2 : 1,
+            color: outOfStock
+                ? Colors.grey.shade300
+                : isSelected
+                    ? (option.priceAdjustment < 0
+                        ? const Color(0xFFE65100)
+                        : const Color(0xFF2E7D32))
+                    : Colors.grey.shade300,
+            width: isSelected && !outOfStock ? 2 : 1,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (isSelected)
+            if (isSelected && !outOfStock)
               Padding(
                 padding: const EdgeInsets.only(right: 6),
                 child: Icon(
@@ -332,11 +341,13 @@ class _OptionSelectionBottomSheetState
               style: GoogleFonts.poppins(
                 fontSize: 13,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                color: isSelected
-                    ? (option.priceAdjustment < 0
-                        ? const Color(0xFFE65100)
-                        : const Color(0xFF2E7D32))
-                    : Colors.black87,
+                color: outOfStock
+                    ? Colors.grey.shade400
+                    : isSelected
+                        ? (option.priceAdjustment < 0
+                            ? const Color(0xFFE65100)
+                            : const Color(0xFF2E7D32))
+                        : Colors.black87,
               ),
             ),
             if (option.priceAdjustment != 0) ...[
@@ -345,9 +356,37 @@ class _OptionSelectionBottomSheetState
                 option.formattedPrice,
                 style: GoogleFonts.poppins(
                   fontSize: 11,
-                  color: option.priceAdjustment < 0
-                      ? const Color(0xFFE65100)
-                      : Colors.grey.shade600,
+                  color: outOfStock
+                      ? Colors.grey.shade400
+                      : option.priceAdjustment < 0
+                          ? const Color(0xFFE65100)
+                          : Colors.grey.shade600,
+                ),
+              ),
+            ],
+            if (hasStock) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: outOfStock
+                      ? Colors.red.shade50
+                      : maxServings <= 5
+                          ? Colors.orange.shade50
+                          : Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  outOfStock ? 'Habis' : '$maxServings',
+                  style: GoogleFonts.poppins(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: outOfStock
+                        ? Colors.red
+                        : maxServings <= 5
+                            ? Colors.orange.shade800
+                            : Colors.green.shade800,
+                  ),
                 ),
               ),
             ],
@@ -360,9 +399,10 @@ class _OptionSelectionBottomSheetState
   Widget _buildFooter() {
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           children: [
+            // Left: Total
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -375,16 +415,58 @@ class _OptionSelectionBottomSheetState
                   ),
                 ),
                 Text(
-                  'Rp ${NumberFormat.decimalPattern().format(_effectivePrice).replaceAll(',', '.')}',
+                  'Rp ${NumberFormat.decimalPattern().format(_totalPrice).replaceAll(',', '.')}',
                   style: GoogleFonts.poppins(
-                    fontSize: 18,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: const Color(0xFF2E7D32),
                   ),
                 ),
+                if (_quantity > 1)
+                  Text(
+                    '$_quantity × Rp ${NumberFormat.decimalPattern().format(_effectivePrice).replaceAll(',', '.')}',
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      color: Colors.grey.shade500,
+                    ),
+                  ),
               ],
             ),
             const Spacer(),
+            // Middle: Quantity controls
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade300),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildQtyButton(
+                    icon: Icons.remove,
+                    onTap: _quantity > 1
+                        ? () => setState(() => _quantity--)
+                        : null,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      '$_quantity',
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  _buildQtyButton(
+                    icon: Icons.add,
+                    onTap: () => setState(() => _quantity++),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Right: Batal + Tambahkan
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: Text(
@@ -395,13 +477,13 @@ class _OptionSelectionBottomSheetState
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
             ElevatedButton(
               onPressed: _handleConfirm,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2E7D32),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -415,6 +497,21 @@ class _OptionSelectionBottomSheetState
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQtyButton({required IconData icon, VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Icon(
+          icon,
+          size: 18,
+          color: onTap == null ? Colors.grey.shade300 : const Color(0xFF2E7D32),
         ),
       ),
     );
