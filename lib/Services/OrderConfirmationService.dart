@@ -532,7 +532,12 @@ class OrderConfirmationService {
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: getTotal,
         setJumlahItem: setJumlahItem,
-        splitCashAmount: isSplitPayment ? splitCashAmount : 0,
+        splitCashAmount: isSplitPayment 
+            ? splitCashAmount 
+            : (voucherProgramId != null && programExtraPaymentMethod == 'Cash + QRIS' 
+                ? (totalHarga - programNominal) - programExtraSplitQrisAmount 
+                : 0),
+        programNominal: programNominal,
       );
 
       onOrderCompleted?.call();
@@ -568,6 +573,7 @@ class OrderConfirmationService {
     required Function() getTotal,
     required Function(int) setJumlahItem,
     int splitCashAmount = 0,
+    int programNominal = 0,
   }) async {
     await showDialog(
       context: context,
@@ -652,7 +658,7 @@ class OrderConfirmationService {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Rp ${NumberFormat.decimalPattern().format(uangYangDiterima - (splitCashAmount > 0 ? splitCashAmount : totalHarga)).replaceAll(',', '.')}',
+                        'Rp ${NumberFormat.decimalPattern().format(uangYangDiterima - (splitCashAmount > 0 ? splitCashAmount : (programNominal > 0 ? totalHarga - programNominal : totalHarga))).replaceAll(',', '.')}',
                         style: GoogleFonts.montserrat(
                             fontWeight: FontWeight.w600,
                             fontSize: 22,
@@ -971,7 +977,12 @@ class OrderConfirmationService {
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: getTotal,
         setJumlahItem: setJumlahItem,
-        splitCashAmount: isSplitPayment ? splitCashAmount : 0,
+        splitCashAmount: isSplitPayment 
+            ? splitCashAmount 
+            : (voucherProgramId != null && programExtraPaymentMethod == 'Cash + QRIS' 
+                ? (totalHarga - programNominal) - programExtraSplitQrisAmount 
+                : 0),
+        programNominal: programNominal,
       );
     } catch (error) {
       Navigator.pop(context);
@@ -1192,6 +1203,7 @@ class OrderConfirmationService {
     required Function() getTotal,
     required Function(int) setJumlahItem,
     int splitCashAmount = 0,
+    int programNominal = 0,
   }) async {
     await showDialog(
       context: context,
@@ -1244,7 +1256,7 @@ class OrderConfirmationService {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Rp ${NumberFormat.decimalPattern().format(uangYangDiterima - (splitCashAmount > 0 ? splitCashAmount : totalHarga))}',
+                        'Rp ${NumberFormat.decimalPattern().format(uangYangDiterima - (splitCashAmount > 0 ? splitCashAmount : (programNominal > 0 ? totalHarga - programNominal : totalHarga)))}',
                         style: GoogleFonts.montserrat(
                             fontWeight: FontWeight.w600,
                             fontSize: 24,
@@ -1907,7 +1919,12 @@ class OrderConfirmationService {
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: () {},
         setJumlahItem: setJumlahItem,
-        splitCashAmount: isSplitPayment ? splitCashAmount : 0,
+        splitCashAmount: isSplitPayment 
+            ? splitCashAmount 
+            : (voucherProgramId != null && programExtraPaymentMethod == 'Cash + QRIS' 
+                ? (totalHarga - programNominal) - programExtraSplitQrisAmount 
+                : 0),
+        programNominal: programNominal,
       );
     } catch (e) {
       Navigator.pop(context);
@@ -2729,7 +2746,9 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
                           onPressed: () {
                             if (isMember && _selectedMember == null) {
-                              setState(() { _memberError = widget.customerNameController.text.trim().isEmpty ? 'Nama member wajib diisi' : 'Nama tidak ditemukan, pilih dari daftar'; });
+                              final error = widget.customerNameController.text.trim().isEmpty ? 'Nama member wajib diisi' : 'Nama tidak ditemukan, pilih dari daftar';
+                              setState(() { _memberError = error; });
+                              _showTopError(context, error);
                               return;
                             }
                             if (_programNominal <= 0) { _showTopError(context, 'Masukkan nominal voucher'); return; }
@@ -2795,7 +2814,9 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
                               onPressed: () {
                                 if (isMember && _selectedMember == null) {
-                                  setState(() { _memberError = widget.customerNameController.text.trim().isEmpty ? 'Nama member wajib diisi' : 'Nama tidak ditemukan, pilih dari daftar'; });
+                                  final error = widget.customerNameController.text.trim().isEmpty ? 'Nama member wajib diisi' : 'Nama tidak ditemukan, pilih dari daftar';
+                                  setState(() { _memberError = error; });
+                                  _showTopError(context, error);
                                   return;
                                 }
                                 if (_selectedPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran'); return; }
