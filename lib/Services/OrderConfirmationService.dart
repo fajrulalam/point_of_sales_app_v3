@@ -355,7 +355,12 @@ class OrderConfirmationService {
       }
     }
 
-    LoaderWidget.showLoaderDialog(context, message: "Memproses pesanan...");
+
+    bool loaderPopped = false;
+    if (context.mounted) {
+      LoaderWidget.showLoaderDialog(context, message: "Memproses pesanan...");
+    }
+
 
     Map<String, dynamic> map = {};
     Map<String, dynamic> mapStatus = {};
@@ -512,12 +517,23 @@ class OrderConfirmationService {
       // Mark the self-order as paid
       await SelfOrderService.instance.markAsPaid(selfOrder.id);
 
+      // 🖨️ Print receipt after successful finalization
       await printReceipt(
-          discountAmount: discountAmount, originalTotal: originalTotal);
-      Navigator.pop(context);
+        customPesananList: pesananList,
+        overrideNomorBerikutnya: nomorBerikutnya,
+        overrideTotalHarga: totalHarga,
+        overrideIsTakeAway: isTakeAway,
+        discountAmount: discountAmount,
+        originalTotal: originalTotal,
+      );
 
-      int uangYangDiterima =
-          int.parse(uangYangDiterimaController.text.replaceAll('.', ''));
+      if (context.mounted) {
+        loaderPopped = true;
+        Navigator.pop(context);
+      }
+
+      String inputText = uangYangDiterimaController.text.replaceAll('.', '');
+      int uangYangDiterima = int.tryParse(inputText) ?? 0;
 
       await _showSelfOrderSuccessDialog(
         context: context,
@@ -542,7 +558,9 @@ class OrderConfirmationService {
 
       onOrderCompleted?.call();
     } catch (error) {
-      Navigator.pop(context);
+      if (context.mounted && !loaderPopped) {
+        Navigator.pop(context);
+      }
       // Revert status on error
       await SelfOrderService.instance.updateStatus(
           selfOrder.id, SelfOrderStatus.unpaid);
@@ -807,7 +825,10 @@ class OrderConfirmationService {
       }
     }
     
-    LoaderWidget.showLoaderDialog(context, message: "Mohon tunggu...");
+    bool loaderPopped = false;
+    if (context.mounted) {
+      LoaderWidget.showLoaderDialog(context, message: "Mohon tunggu...");
+    }
 
     Map<String, dynamic> map = {};
     Map<String, dynamic> mapStatus = {};
@@ -958,12 +979,23 @@ class OrderConfirmationService {
         _processPeriodicCashbackCampaign(memberId, totalHarga, customerNameController.text);
       }
 
+      // 🖨️ Print receipt after successful finalization
       await printReceipt(
-          discountAmount: discountAmount, originalTotal: originalTotal);
-      Navigator.pop(context);
+        customPesananList: pesananList,
+        overrideNomorBerikutnya: nomorBerikutnya,
+        overrideTotalHarga: totalHarga,
+        overrideIsTakeAway: isTakeAway,
+        discountAmount: discountAmount,
+        originalTotal: originalTotal,
+      );
 
-      int uangYangDiterima =
-          int.parse(uangYangDiterimaController.text.replaceAll('.', ''));
+      if (context.mounted) {
+        loaderPopped = true;
+        Navigator.pop(context);
+      }
+
+      String inputText = uangYangDiterimaController.text.replaceAll('.', '');
+      int uangYangDiterima = int.tryParse(inputText) ?? 0;
 
       await _showSuccessDialog(
         context: context,
@@ -985,7 +1017,9 @@ class OrderConfirmationService {
         programNominal: programNominal,
       );
     } catch (error) {
-      Navigator.pop(context);
+      if (context.mounted && !loaderPopped) {
+        Navigator.pop(context);
+      }
     }
   }
 
@@ -1994,6 +2028,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   bool _isProgramExtraSplit = false;
   TextEditingController _programExtraQrisController = TextEditingController();
   int _programExtraQrisAmount = 0;
+  int _programMultiplier = 1;
+  int _baseProgramNominal = 0;
   String _lastSearchQuery = '';
   Iterable<Member> _lastOptionsFound = const Iterable<Member>.empty();
 
@@ -2056,46 +2092,48 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
     int displayTotal = currentTotal - voucherValue;
 
     return AlertDialog(
-      title: Center(
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text(
-              'Konfirmasi Pesanan',
-              style: GoogleFonts.poppins(
-                color: Colors.black87,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.1,
-                fontSize: 18,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                color: widget.printerIsConnected ? Colors.green : Colors.grey,
-                shape: BoxShape.circle,
-              ),
-            ),
-          ],
-        ),
-      ),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: null,
       content: SizedBox(
-        height: applyPromo
-            ? (voucherApplied ? 450 : 420)
-            : (widget.isTakeAway ? 350 : 320),
-        width: widget.recommendations.isNotEmpty ? 700 : 400,
+        width: MediaQuery.of(context).size.width,
+        height: 520,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Left side: Order confirmation form
+            // First Column: Title + Top half of form (L2059-L2465)
             Expanded(
-              flex: widget.recommendations.isNotEmpty ? 6 : 1,
               child: SingleChildScrollView(
                 child: Column(
                   children: [
+                    const SizedBox(height: 8),
+                    Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Konfirmasi Pesanan',
+                            style: GoogleFonts.poppins(
+                              color: Colors.black87,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.1,
+                              fontSize: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: widget.printerIsConnected ? Colors.green : Colors.grey,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -2463,7 +2501,17 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           ),
                         ),
                       ),
-                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+            ),
+            const VerticalDivider(width: 48, thickness: 1, indent: 20, endIndent: 20),
+            // Second Column: Payment method until order confirmation
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    const SizedBox(height: 8),
                     Text(
                       'Metode Pembayaran',
                       style: GoogleFonts.poppins(
@@ -2583,6 +2631,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               final prog = _activePrograms.firstWhere((p) => p['id'] == val, orElse: () => {});
                               final defNominal = ((prog['defaultNominal'] ?? 0) as num).toInt();
                               _programNominal = defNominal;
+                              _baseProgramNominal = defNominal;
+                              _programMultiplier = 1;
                               _programNominalController.text = defNominal > 0 ? NumberFormat('#,###', 'id_ID').format(defNominal) : '';
                               _programExtraPaymentMethod = null;
                               _isProgramExtraSplit = false;
@@ -2601,34 +2651,85 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                     // ─── PROGRAM PAYMENT SECTION ───
                     if (_selectedPaymentMethod == 'Program' && _selectedProgramId != null) ...[ 
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: _programNominalController,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                          TextInputFormatter.withFunction((oldValue, newValue) {
-                            final plain = newValue.text.replaceAll('.', '');
-                            if (plain.isEmpty) return newValue;
-                            final fmt = NumberFormat('#,###', 'id_ID');
-                            final t = fmt.format(int.parse(plain));
-                            return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
-                          }),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _programNominalController,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction((oldValue, newValue) {
+                                  final plain = newValue.text.replaceAll('.', '');
+                                  if (plain.isEmpty) return newValue;
+                                  final fmt = NumberFormat('#,###', 'id_ID');
+                                  final t = fmt.format(int.parse(plain));
+                                  return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
+                                }),
+                              ],
+                              decoration: InputDecoration(
+                                labelText: 'Nominal Voucher (Rp)',
+                                helperText: 'Jumlah yang ditanggung program',
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                              ),
+                              onChanged: (val) {
+                                setState(() {
+                                  int newTotal = int.tryParse(val.replaceAll('.', '')) ?? 0;
+                                  _programNominal = newTotal;
+
+                                  // Only reset multiplier if the user manually edited the total
+                                  // to something other than base * multiplier
+                                  if (newTotal != _baseProgramNominal * _programMultiplier) {
+                                    _baseProgramNominal = newTotal;
+                                    _programMultiplier = 1;
+                                  }
+
+                                  _programExtraPaymentMethod = null;
+                                  _isProgramExtraSplit = false;
+                                  _programExtraQrisAmount = 0;
+                                  _programExtraQrisController.clear();
+                                  widget.uangYangDiterimaController.clear();
+                                });
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _programMultiplier++;
+                                _programNominal = _baseProgramNominal * _programMultiplier;
+                                _programNominalController.text = NumberFormat('#,###', 'id_ID').format(_programNominal);
+                              });
+                            },
+                            onLongPress: () {
+                              setState(() {
+                                _programMultiplier = 1;
+                                _programNominal = _baseProgramNominal * _programMultiplier;
+                                _programNominalController.text = NumberFormat('#,###', 'id_ID').format(_programNominal);
+                              });
+                            },
+                            child: Container(
+                              height: 56, // Fixed height to match TextField's input area
+                              width: 56,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFC8E6C9),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: const Color(0xFF2E7D32)),
+                              ),
+                              child: Text(
+                                'x$_programMultiplier',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF2E7D32),
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
-                        decoration: InputDecoration(
-                          labelText: 'Nominal Voucher (Rp)',
-                          helperText: 'Jumlah yang ditanggung program',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
-                        ),
-                        onChanged: (val) {
-                          setState(() {
-                            _programNominal = int.tryParse(val.replaceAll('.', '')) ?? 0;
-                            _programExtraPaymentMethod = null;
-                            _isProgramExtraSplit = false;
-                            _programExtraQrisAmount = 0;
-                            _programExtraQrisController.clear();
-                            widget.uangYangDiterimaController.clear();
-                          });
-                        },
                       ),
                       Builder(builder: (ctx) {
                         final remaining = displayTotal - _programNominal;
@@ -2751,6 +2852,10 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               _showTopError(context, error);
                               return;
                             }
+                            if (!isMember && widget.customerNameController.text.trim().isEmpty) {
+                              _showTopError(context, 'Nama customer wajib diisi');
+                              return;
+                            }
                             if (_programNominal <= 0) { _showTopError(context, 'Masukkan nominal voucher'); return; }
                             final remaining = displayTotal - _programNominal;
                             int extraQris = 0;
@@ -2809,14 +2914,18 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           ),
                           const SizedBox(width: 16),
                           Expanded(
-                            flex: 2,
+                            flex: 3,
                             child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
                               onPressed: () {
                                 if (isMember && _selectedMember == null) {
                                   final error = widget.customerNameController.text.trim().isEmpty ? 'Nama member wajib diisi' : 'Nama tidak ditemukan, pilih dari daftar';
                                   setState(() { _memberError = error; });
                                   _showTopError(context, error);
+                                  return;
+                                }
+                                if (!isMember && widget.customerNameController.text.trim().isEmpty) {
+                                  _showTopError(context, 'Nama customer wajib diisi');
                                   return;
                                 }
                                 if (_selectedPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran'); return; }
