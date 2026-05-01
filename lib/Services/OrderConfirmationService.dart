@@ -432,6 +432,10 @@ class OrderConfirmationService {
         'takeAwayQuantity': order.takeAwayQuantity,
         'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
         'isMakanan': menu?.isMakanan ?? false,
+        'customerNote': order.customerNote ?? '',
+        'status': '',
+        'dineInPreparedQuantity': 0,
+        'takeAwayPreparedQuantity': 0,
       };
     }).toList();
 
@@ -900,6 +904,10 @@ class OrderConfirmationService {
         'takeAwayQuantity': order.takeAwayQuantity,
         'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
         'isMakanan': menu?.isMakanan ?? false,
+        'customerNote': order.customerNote ?? '',
+        'status': '',
+        'dineInPreparedQuantity': 0,
+        'takeAwayPreparedQuantity': 0,
       };
     }).toList();
 
@@ -1128,6 +1136,10 @@ class OrderConfirmationService {
         'takeAwayQuantity': order.takeAwayQuantity,
         'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
         'isMakanan': menu?.isMakanan ?? false,
+        'customerNote': order.customerNote ?? '',
+        'status': '',
+        'dineInPreparedQuantity': 0,
+        'takeAwayPreparedQuantity': 0,
       };
     }).toList();
 

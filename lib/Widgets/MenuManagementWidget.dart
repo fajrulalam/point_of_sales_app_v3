@@ -1558,6 +1558,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                     maxSel = val;
                   }
 
+                  Navigator.pop(context);
                   await _optionGroupService.createOptionGroup(OptionGroup(
                     id: '',
                     name: nameController.text,
@@ -1565,8 +1566,9 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                     minSelection: minSel,
                     maxSelection: maxSel,
                   ));
+                } else {
+                  Navigator.pop(context);
                 }
-                Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
               child: const Text('Buat', style: TextStyle(color: Colors.white)),
@@ -1753,6 +1755,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                     maxSel = val;
                   }
 
+                  Navigator.pop(context);
                   await _optionGroupService.updateOptionGroup(OptionGroup(
                     id: group.id,
                     name: nameController.text,
@@ -1762,8 +1765,9 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                     options: group.options,
                     linkedMenuItems: group.linkedMenuItems,
                   ));
+                } else {
+                  Navigator.pop(context);
                 }
-                Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
               child: const Text('Simpan', style: TextStyle(color: Colors.white)),
@@ -1815,8 +1819,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             ),
             ElevatedButton(
               onPressed: () async {
-                await _optionGroupService.linkMenuItems(group.id, selectedIds.toList());
                 Navigator.pop(context);
+                await _optionGroupService.linkMenuItems(group.id, selectedIds.toList());
               },
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
               child: const Text('Simpan', style: TextStyle(color: Colors.white)),
@@ -1918,6 +1922,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
           stream: InventoryService().getInventoryStream(),
           builder: (context, snapshot) {
             final items = snapshot.data ?? [];
+            items.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
             return OutlinedButton.icon(
               onPressed: items.isEmpty
                   ? null

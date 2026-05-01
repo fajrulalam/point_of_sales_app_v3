@@ -28,7 +28,6 @@ import 'package:point_of_sales_app_v3/Screens/ShoppingScreen.dart';
 import 'package:point_of_sales_app_v3/Screens/LiveTabsScreen.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/FinancialReportBottomSheet.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/QuickExpenseBottomSheet.dart';
-import 'package:point_of_sales_app_v3/Screens/VoucherProgramScreen.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class Home extends StatefulWidget {
@@ -98,6 +97,20 @@ class _HomeState extends State<Home> {
     // Initialize recommendation service and show snackbar
     _initializeRecommendationService();
     
+    _initBadgeSubscriptions();
+  }
+
+  void _initBadgeSubscriptions() {
+    // Cancel existing subscriptions if any
+    _selfOrdersCountSubscription?.cancel();
+    _openBillsSubscription?.cancel();
+
+    // Reset counts to avoid showing stale data from previous mode
+    setState(() {
+      _pendingSelfOrdersCount = 0;
+      _pendingOpenBillsCount = 0;
+    });
+
     // Subscribe to self-orders count stream for badge
     _selfOrdersCountSubscription = _selfOrderService.getUnpaidOrderCountStream().listen(
       (count) {
@@ -198,7 +211,6 @@ class _HomeState extends State<Home> {
           onMembersPressed: () => _navigateToMembers(),
           onQuickExpensePressed: () => _showQuickExpense(),
           onFinancialReportPressed: () => _showFinancialReport(),
-          onVoucherProgramPressed: () => _navigateToVoucherProgram(),
           onTestingModeToggled: _handleTestingModeToggle,
           onLogoutPressed: _handleLogout,
         ),
@@ -311,8 +323,7 @@ Widget _buildMainContent() {
     );
   } else if (_activeRoute == 'members') {
     return const MarketingScreen();
-  } else if (_activeRoute == 'voucher_program') {
-    return const VoucherProgramScreen();
+
   }
   return const SizedBox.shrink();
 }
@@ -535,9 +546,6 @@ Widget _buildMainContent() {
     setState(() => _activeRoute = 'selforders');
   }
 
-  void _navigateToVoucherProgram() {
-    setState(() => _activeRoute = 'voucher_program');
-  }
 
   void _handleAcceptSelfOrder(SelfOrder order) {
     // Convert self-order to pesanan list and process
@@ -663,6 +671,7 @@ Widget _buildMainContent() {
           );
         };
         controller.initialize();
+        _initBadgeSubscriptions();
         setState(() {});
       }
     }

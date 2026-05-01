@@ -89,10 +89,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   List<InventoryItem> _applySearch(List<InventoryItem> items) {
-    if (_searchQuery.isEmpty) return items;
-    return items
-        .where((item) => item.name.toLowerCase().contains(_searchQuery))
-        .toList();
+    List<InventoryItem> filtered = items;
+    if (_searchQuery.isNotEmpty) {
+      filtered = items
+          .where((item) => item.name.toLowerCase().contains(_searchQuery))
+          .toList();
+    }
+    
+    // Sort items alphabetically by name
+    filtered.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return filtered;
   }
 
   Widget _buildToolbar() {

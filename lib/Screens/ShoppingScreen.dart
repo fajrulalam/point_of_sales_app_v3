@@ -230,6 +230,7 @@ class _SuppliersViewState extends State<SuppliersView> {
           return const Center(child: CircularProgressIndicator());
         }
         final suppliers = snapshot.data ?? [];
+        suppliers.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
         if (suppliers.isEmpty) {
           return Center(
             child: Text('Belum ada supplier.', style: GoogleFonts.poppins(color: Colors.grey.shade500)),
@@ -348,10 +349,17 @@ class _SuppliersViewState extends State<SuppliersView> {
           return const SizedBox.shrink();
         }
 
-        List<SupplierItem> items = supplier.items;
+        List<SupplierItem> items = List.from(supplier.items);
         if (_searchQuery.isNotEmpty) {
           items = items.where((item) => item.name.toLowerCase().contains(_searchQuery)).toList();
         }
+        
+        // Sort items alphabetically by display name
+        items.sort((a, b) {
+          final nameA = ShoppingService.displayName(a.inventoryItemId, a.name).toLowerCase();
+          final nameB = ShoppingService.displayName(b.inventoryItemId, b.name).toLowerCase();
+          return nameA.compareTo(nameB);
+        });
 
         return Column(
           children: [
@@ -891,8 +899,15 @@ class _SuppliersViewState extends State<SuppliersView> {
     }
     if (!context.mounted) return;
 
+    final List<SupplierItem> sortedItems = List.from(supplier.items);
+    sortedItems.sort((a, b) {
+      final nameA = ShoppingService.displayName(a.inventoryItemId, a.name).toLowerCase();
+      final nameB = ShoppingService.displayName(b.inventoryItemId, b.name).toLowerCase();
+      return nameA.compareTo(nameB);
+    });
+
     final Map<int, TextEditingController> controllers = {};
-    for (int i = 0; i < supplier.items.length; i++) {
+    for (int i = 0; i < sortedItems.length; i++) {
       controllers[i] = TextEditingController(text: '0');
     }
 
@@ -910,9 +925,9 @@ class _SuppliersViewState extends State<SuppliersView> {
               Expanded(
                 child: ListView.builder(
                   shrinkWrap: true,
-                  itemCount: supplier.items.length,
+                  itemCount: sortedItems.length,
                   itemBuilder: (context, index) {
-                    final item = supplier.items[index];
+                    final item = sortedItems[index];
                     int currentStock = 0;
                     if (item.inventoryItemId != null && item.inventoryItemId!.isNotEmpty) {
                       currentStock = inventoryService.allInventoryItems[item.inventoryItemId]?.stock ?? 0;
@@ -940,10 +955,10 @@ class _SuppliersViewState extends State<SuppliersView> {
           ElevatedButton(
             onPressed: () async {
               List<ShoppingOrderItem> borderItems = [];
-              for (int i = 0; i < supplier.items.length; i++) {
+              for (int i = 0; i < sortedItems.length; i++) {
                 int qty = int.tryParse(controllers[i]?.text ?? '0') ?? 0;
                 if (qty > 0) {
-                  final src = supplier.items[i];
+                  final src = sortedItems[i];
                   borderItems.add(ShoppingOrderItem(
                     name: ShoppingService.displayName(src.inventoryItemId, src.name),
                     quantity: qty,
@@ -1315,11 +1330,11 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
   }
 
   void _showCompleteOrderDialog(BuildContext context, ShoppingOrder order) {
+    bool isSaving = false;
     showDialog(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
-          bool isSaving = false;
           return AlertDialog(
             title: Text('Selesaikan Order?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
             content: const Text('Pastikan barang yang datang sudah sesuai. Jika belum sesuai, Anda dapat melakukan Koreksi (Correction). Setelah diselesaikan, barang akan ditambahkan ke Inventory stok sesuai dengan jumlah yang tercatat.'),

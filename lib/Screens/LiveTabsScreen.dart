@@ -7,6 +7,7 @@ import 'package:point_of_sales_app_v3/Models/OpenBill.dart';
 import 'package:point_of_sales_app_v3/Services/OpenBillService.dart';
 import 'package:point_of_sales_app_v3/Controllers/HomeController.dart';
 import 'package:point_of_sales_app_v3/Services/OrderConfirmationService.dart';
+import 'package:point_of_sales_app_v3/Screens/VoucherProgramScreen.dart';
 
 class LiveTabsScreen extends StatefulWidget {
   final Function(SelfOrder order)? onAcceptOrder;
@@ -33,7 +34,7 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -77,6 +78,7 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
               labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
               unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
               tabs: const [
+                Tab(text: 'Voucher B2B'),
                 Tab(text: 'Pesanan Mandiri (Menunggu)'),
                 Tab(text: 'Tagihan Terbuka'),
               ],
@@ -87,6 +89,7 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
+          const VoucherProgramScreen(),
           _buildSelfOrderList(SelfOrderStatus.unpaid),
           _buildOpenBillList(),
         ],

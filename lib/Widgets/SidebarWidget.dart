@@ -27,7 +27,6 @@ class SidebarWidget extends StatefulWidget {
   final VoidCallback? onLogoutPressed;
   final VoidCallback? onFinancialReportPressed;
   final VoidCallback? onQuickExpensePressed;
-  final VoidCallback? onVoucherProgramPressed;
   final VoidCallback? onTestingModeToggled;
 
   // New controlled state props
@@ -58,7 +57,6 @@ class SidebarWidget extends StatefulWidget {
     this.onLogoutPressed,
     this.onFinancialReportPressed,
     this.onQuickExpensePressed,
-    this.onVoucherProgramPressed,
     this.onTestingModeToggled,
   }) : super(key: key);
 
@@ -191,14 +189,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                               onTap: widget.onFinancialReportPressed!,
                               showLabels: showLabels,
                             ),
-                          if (widget.onVoucherProgramPressed != null)
-                            _navItem(
-                              icon: Icons.card_giftcard_rounded,
-                              label: 'Voucher B2B',
-                              routeKey: 'voucher_program',
-                              onTap: widget.onVoucherProgramPressed!,
-                              showLabels: showLabels,
-                            ),
+
                         ],
                       ),
                     ),

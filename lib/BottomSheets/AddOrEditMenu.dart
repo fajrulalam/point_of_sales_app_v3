@@ -549,6 +549,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                 }
 
                 final allInventory = snapshot.data!;
+                allInventory.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
                 return Column(
                   children: [

@@ -291,6 +291,13 @@ class ShoppingService {
       return;
     }
 
+    // Decode the latest items from the database snapshot to avoid race conditions
+    // where the UI passes an outdated ShoppingOrder object right after a correction.
+    final latestData = orderSnap.data() as Map<String, dynamic>;
+    final List<ShoppingOrderItem> latestItems = (latestData['items'] as List<dynamic>? ?? [])
+        .map((i) => ShoppingOrderItem.fromMap(i))
+        .toList();
+
     final inventoryCol = _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
@@ -307,7 +314,7 @@ class ShoppingService {
     // reused so duplicate names within one order coalesce into one new inventory doc.
     final Map<String, String> pendingDocIdsByName = {};
 
-    for (final item in order.items) {
+    for (final item in latestItems) {
       if (item.quantity <= 0) continue;
 
       String? docId = item.inventoryItemId;
