@@ -23,6 +23,7 @@ class SidebarWidget extends StatefulWidget {
   final VoidCallback? onInventoryPressed;
   final VoidCallback? onMembersPressed;
   final VoidCallback? onShoppingPressed;
+  final VoidCallback? onEditOrderPressed;
   final VoidCallback? onSelfOrdersPressed;
   final VoidCallback? onLogoutPressed;
   final VoidCallback? onFinancialReportPressed;
@@ -53,6 +54,7 @@ class SidebarWidget extends StatefulWidget {
     this.onInventoryPressed,
     this.onMembersPressed,
     this.onShoppingPressed,
+    this.onEditOrderPressed,
     this.onSelfOrdersPressed,
     this.onLogoutPressed,
     this.onFinancialReportPressed,
@@ -144,6 +146,14 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                               badge: widget.liveTabsCount,
                               showLabels: showLabels,
                             ),
+                          if (widget.onEditOrderPressed != null)
+                            _navItem(
+                              icon: Icons.edit_document,
+                              label: 'Edit Pesanan',
+                              routeKey: 'edit_order',
+                              onTap: widget.onEditOrderPressed!,
+                              showLabels: showLabels,
+                            ),
 
                           const SizedBox(height: 8),
                           _divider(),
@@ -194,6 +204,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                       ),
                     ),
                   ),
+
 
                   _navItem(
                     icon: Icons.restart_alt_rounded,

@@ -13,7 +13,11 @@ service cloud.firestore {
       return isAuthenticated() && (
         request.auth.token.admin == true ||
         request.auth.token.email == "gnavsih1@gmail.com" ||
-        request.auth.token.email == "admin@canteen375.com"
+        request.auth.token.email == "admin@canteen375.com" ||
+        request.auth.token.email == "irene@canteen375.com" ||
+        request.auth.token.email == "amalia@canteen375.com" ||
+        request.auth.token.email == "eka@canteen375.com" ||
+        request.auth.token.email == "dina@canteen375.com"
       );
     }
 

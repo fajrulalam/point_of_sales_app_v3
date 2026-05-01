@@ -208,7 +208,7 @@ class InventoryService {
           .collection('Inventory')
           .doc(inventoryId);
 
-      batch.update(docRef, {'stock': FieldValue.increment(-totalRequired)});
+      batch.set(docRef, {'stock': FieldValue.increment(-totalRequired)}, SetOptions(merge: true));
 
       // 2. Queue daily stock usage log safely
       final logId = '${today}_$inventoryId';
@@ -254,7 +254,7 @@ class InventoryService {
           .collection('Inventory')
           .doc(inventoryId);
 
-      transaction.update(docRef, {'stock': FieldValue.increment(-totalRequired)});
+      transaction.set(docRef, {'stock': FieldValue.increment(-totalRequired)}, SetOptions(merge: true));
 
       // 2. Queue daily stock usage log safely
       final logId = '${today}_$inventoryId';

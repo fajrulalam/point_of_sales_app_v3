@@ -20,6 +20,11 @@ class HomeController extends ChangeNotifier {
   // State variables
 
   int nomorBerikutnya = 0;
+  
+  // Edit mode state
+  bool isEditMode = false;
+  String? editDocumentId;
+  Map<String, dynamic>? editOriginalData;
   List<MenuObject> menuObjectList = [];
   List<MenuObject> menuObjectList_makanan = [];
   List<MenuObject> menuObjectList_minuman = [];
@@ -182,6 +187,41 @@ class HomeController extends ChangeNotifier {
     }
     return ingredients;
   }
+
+  // --- Edit Order Mode ---
+  void loadOrderForEdit(Map<String, dynamic> statusData, String documentId) {
+    isEditMode = true;
+    editDocumentId = documentId;
+    editOriginalData = statusData;
+
+    pesananList.clear();
+    final List<dynamic> orderItems = statusData['orderItems'] ?? [];
+    for (var item in orderItems) {
+      final selectedOptsRaw = item['selectedOptions'] as List<dynamic>? ?? [];
+      final selectedOpts = selectedOptsRaw.map((e) => SelectedOption.fromMap(e as Map<String, dynamic>)).toList();
+      
+      pesananList.add(PesananObject(
+        namaPesanan: item['namaPesanan'] ?? '',
+        harga: item['harga'] ?? 0,
+        dineInQuantity: item['dineInQuantity'] ?? 0,
+        takeAwayQuantity: item['takeAwayQuantity'] ?? 0,
+        selectedOptions: selectedOpts,
+      )..customerNote = item['customerNote']);
+    }
+
+    getTotal();
+    notifyListeners();
+  }
+
+  void clearEditMode() {
+    isEditMode = false;
+    editDocumentId = null;
+    editOriginalData = null;
+    pesananList.clear();
+    getTotal();
+    notifyListeners();
+  }
+  // -----------------------
 
   // Order Management
   bool _addToOrderLock = false;

@@ -21,9 +21,13 @@ import 'package:point_of_sales_app_v3/Widgets/OrderSummaryWidget.dart';
 import 'package:point_of_sales_app_v3/Widgets/OrderingViewWidget.dart';
 import 'package:point_of_sales_app_v3/Widgets/RulesTableDialog.dart';
 import 'package:point_of_sales_app_v3/Widgets/SidebarWidget.dart';
+import 'package:point_of_sales_app_v3/Classes/Menu.dart';
+import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 import 'package:point_of_sales_app_v3/Screens/InventoryScreen.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
 import 'package:point_of_sales_app_v3/Screens/MarketingScreen.dart';
+import 'package:point_of_sales_app_v3/Screens/EditOrderScreen.dart';
+import 'package:point_of_sales_app_v3/Services/EditOrderService.dart';
 import 'package:point_of_sales_app_v3/Screens/ShoppingScreen.dart';
 import 'package:point_of_sales_app_v3/Screens/LiveTabsScreen.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/FinancialReportBottomSheet.dart';
@@ -209,6 +213,7 @@ class _HomeState extends State<Home> {
           onShoppingPressed: () => _navigateToShopping(),
           onSelfOrdersPressed: () => _navigateToSelfOrders(),
           onMembersPressed: () => _navigateToMembers(),
+          onEditOrderPressed: () => setState(() => _activeRoute = 'edit_order'),
           onQuickExpensePressed: () => _showQuickExpense(),
           onFinancialReportPressed: () => _showFinancialReport(),
           onTestingModeToggled: _handleTestingModeToggle,
@@ -324,6 +329,14 @@ Widget _buildMainContent() {
   } else if (_activeRoute == 'members') {
     return const MarketingScreen();
 
+  } else if (_activeRoute == 'edit_order') {
+    return EditOrderScreen(
+      isEmbedded: true,
+      onOrderSelected: (result) {
+        controller.loadOrderForEdit(result['data'], result['id']);
+        setState(() => _activeRoute = 'pos_order');
+      },
+    );
   }
   return const SizedBox.shrink();
 }
@@ -364,10 +377,10 @@ Widget _buildMainContent() {
                 flex: 1,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F0),
+                    color: controller.isEditMode ? Colors.orange.shade50 : const Color(0xFFF5F5F0),
                     border: Border(
                       bottom: BorderSide(
-                        color: Colors.grey.shade300,
+                        color: controller.isEditMode ? Colors.orange.shade300 : Colors.grey.shade300,
                         width: 1,
                       ),
                     ),
@@ -375,14 +388,52 @@ Widget _buildMainContent() {
                   child: Center(
                     child: Container(
                       margin: const EdgeInsets.only(top: 12.0),
-                      child: Text(
-                        'Nomor Berikutnya: ${controller.nomorBerikutnya}',
-                        style: GoogleFonts.poppins(
-                          color: Colors.black54,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.1,
-                          fontSize: 16,
-                        ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (controller.isEditMode) ...[
+                            Text(
+                              'EDITING ORDER #${controller.editOriginalData?['customerNumber'] ?? ''}',
+                              style: GoogleFonts.poppins(
+                                color: Colors.orange.shade800,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            TextButton.icon(
+                              onPressed: () {
+                                controller.clearEditMode();
+                              },
+                              icon: const Icon(Icons.close, size: 16),
+                              label: const Text('Batal'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.orange.shade900,
+                                backgroundColor: Colors.orange.shade100,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                minimumSize: Size.zero,
+                              ),
+                            ),
+                          ] else ...[
+                            Text(
+                              'Nomor Berikutnya: ${controller.nomorBerikutnya}',
+                              style: GoogleFonts.poppins(
+                                color: Colors.black54,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.1,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            IconButton(
+                              onPressed: () => setState(() => _activeRoute = 'edit_order'),
+                              icon: const Icon(Icons.edit_document),
+                              color: Colors.blue.shade700,
+                              tooltip: 'Edit Pesanan Hari Ini',
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ),
@@ -504,6 +555,11 @@ Widget _buildMainContent() {
   }
 
   void _handleBuyPressed() {
+    if (controller.isEditMode) {
+      _showEditConfirmationDialog();
+      return;
+    }
+
     // Get all available menu item names for filtering recommendations
     final menuItemNames = controller.menuObjectList
         .map((menu) => menu.namaMenu)
@@ -527,6 +583,88 @@ Widget _buildMainContent() {
       addRecommendedItem: controller.addRecommendedItem,
       menuItems: menuItemNames,
       printerIsConnected: controller.printerIsConnected,
+    );
+  }
+
+  Future<void> _openEditOrderScreen() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const EditOrderScreen()),
+    );
+    if (result != null && result is Map<String, dynamic>) {
+      controller.loadOrderForEdit(result['data'], result['id']);
+    }
+  }
+
+  void _showEditConfirmationDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          'Simpan Perubahan Pesanan?',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'Aksi ini akan menimpa pesanan sebelumnya dan menyesuaikan stok serta laporan keuangan. Apakah Anda yakin?',
+          style: GoogleFonts.poppins(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey.shade700)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade700, 
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+               Navigator.pop(dialogContext); // close dialog
+               
+               // build lookups
+               final optionGroupLookup = <String, Map<String, OptionItem>>{};
+               for (var g in controller.optionGroups) {
+                 final m = <String, OptionItem>{};
+                 for (var o in g.options) { m[o.id] = o; }
+                 optionGroupLookup[g.id] = m;
+               }
+
+               final menuMap = <String, MenuObject>{};
+               for (var m in controller.menuObjectList) { menuMap[m.namaMenu] = m; }
+
+               if (!context.mounted) return;
+
+               await EditOrderService.processEditOrder(
+                 context: context, // Use the outer Home.dart context!
+                 statusDocId: controller.editDocumentId!,
+                 originalStatusData: controller.editOriginalData!,
+                 newPesananList: controller.pesananList,
+                 newTotalHarga: controller.totalHarga,
+                 newBiayaBungkus: controller.biayaBungkus,
+                 menuMap: menuMap,
+                 optionGroupLookup: optionGroupLookup,
+                 getYear: controller.getYear,
+                 getMonth: controller.getMonth,
+                 getDate: controller.getDate,
+                 printReceipt: () async {
+                   await controller.printReceipt(
+                     overrideNomorBerikutnya: controller.editOriginalData?['customerNumber'],
+                     customPesananList: controller.pesananList,
+                     overrideTotalHarga: controller.totalHarga,
+                   );
+                   controller.clearEditMode();
+                   if (mounted) {
+                     ScaffoldMessenger.of(context).showSnackBar(
+                       const SnackBar(content: Text('Pesanan berhasil diubah')),
+                     );
+                   }
+                 },
+               );
+            },
+            child: Text('Simpan Perubahan', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          ),
+        ]
+      )
     );
   }
 
