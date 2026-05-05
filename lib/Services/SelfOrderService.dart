@@ -1,5 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 
@@ -13,17 +12,15 @@ class SelfOrderService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static const String canteenId = 'canteen375';
 
-  /// Get the collection reference for self-orders
+  /// Get the collection reference for self-orders (root-level collection)
   static CollectionReference<Map<String, dynamic>> get _selfOrdersCollection =>
-      _firestore
-          .collection(Col.name('Canteens'))
-          .doc(canteenId)
-          .collection('SelfOrders');
+      _firestore.collection('SelfOrders');
 
   /// Get a real-time stream of self-orders
   /// Optionally filter by status (e.g., 'Unpaid', 'Paid', 'Declined')
   Stream<List<SelfOrder>> getSelfOrdersStream({String? statusFilter}) {
-    Query<Map<String, dynamic>> query = _selfOrdersCollection;
+    Query<Map<String, dynamic>> query = _selfOrdersCollection
+        .where('canteenId', isEqualTo: 'canteen375_plazaUnipdu');
 
     if (statusFilter != null && statusFilter.isNotEmpty) {
       query = query.where('status', isEqualTo: statusFilter);
@@ -47,6 +44,7 @@ class SelfOrderService {
   Stream<int> getUnpaidOrderCountStream() {
     return _selfOrdersCollection
         .where('status', isEqualTo: SelfOrderStatus.unpaid)
+        .where('canteenId', isEqualTo: 'canteen375_plazaUnipdu')
         .snapshots()
         .map((snapshot) => snapshot.docs.length);
   }
@@ -89,9 +87,10 @@ class SelfOrderService {
     await updateStatus(orderId, SelfOrderStatus.processing);
   }
 
-  /// Mark an order as paid
+  /// Mark an order as paid by deleting it from SelfOrders
+  /// (the order data is already saved to Status collection by OrderConfirmationService)
   Future<void> markAsPaid(String orderId) async {
-    await updateStatus(orderId, SelfOrderStatus.paid);
+    await deleteSelfOrder(orderId);
   }
 
   /// Decline an order with a reason

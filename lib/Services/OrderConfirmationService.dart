@@ -176,9 +176,6 @@ class OrderConfirmationService {
       return;
     }
 
-    // Mark order as processing
-    await SelfOrderService.instance.markAsProcessing(selfOrder.id);
-
     // Generate recommendations (may be empty for self-orders)
     final recommendations = await _generateRecommendations(pesananList);
 
@@ -243,9 +240,6 @@ class OrderConfirmationService {
         programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
       );
     } else {
-      // User cancelled - revert status back to Unpaid
-      await SelfOrderService.instance.updateStatus(
-          selfOrder.id, SelfOrderStatus.unpaid);
       uangYangDiterimaController.clear();
     }
   }
@@ -361,6 +355,7 @@ class OrderConfirmationService {
       LoaderWidget.showLoaderDialog(context, message: "Memproses pesanan...");
     }
 
+    nomorBerikutnya = await _assignCustomerNumber();
 
     Map<String, dynamic> map = {};
     Map<String, dynamic> mapStatus = {};
@@ -489,9 +484,7 @@ class OrderConfirmationService {
         fs.collection(Col.name('Status')).doc('${nomorBerikutnya}_plazaUnipdu');
     batch.set(statusRef, mapStatus);
 
-    DocumentReference customerNumber = fs.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
-    batch.update(customerNumber, {'customerNumber': FieldValue.increment(1)});
-
+    // Removed customerNumber increment here, handled by _assignCustomerNumber
     // Deduct ingredients entirely within the same atomic batch
     await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
 
@@ -834,6 +827,8 @@ class OrderConfirmationService {
       LoaderWidget.showLoaderDialog(context, message: "Mohon tunggu...");
     }
 
+    nomorBerikutnya = await _assignCustomerNumber();
+
     Map<String, dynamic> map = {};
     Map<String, dynamic> mapStatus = {};
 
@@ -959,9 +954,7 @@ class OrderConfirmationService {
         fs.collection(Col.name('Status')).doc('${nomorBerikutnya}_plazaUnipdu');
     batch.set(statusRef, mapStatus);
 
-    DocumentReference customerNumber = fs.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
-    batch.update(customerNumber, {'customerNumber': FieldValue.increment(1)});
-
+    // Removed customerNumber increment here, handled by _assignCustomerNumber
     // Deduct ingredients entirely within the same atomic batch
     await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
     
@@ -1095,6 +1088,8 @@ class OrderConfirmationService {
     
     LoaderWidget.showLoaderDialog(context, message: "Menyimpan tagihan...");
 
+    nomorBerikutnya = await _assignCustomerNumber();
+
     // ── Query root Status collection for existing open bill ──
     DocumentSnapshot? existingStatusDoc;
     try {
@@ -1187,8 +1182,7 @@ class OrderConfirmationService {
         DocumentReference statusRef = firestore.collection(Col.name('Status')).doc(statusDocId);
         batch.set(statusRef, mapStatus);
 
-        DocumentReference customerNumber = firestore.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
-        batch.update(customerNumber, {'customerNumber': FieldValue.increment(1)});
+        // Removed customerNumber increment here, handled by _assignCustomerNumber
       }
 
       // Deduct ingredients within the batch
@@ -1323,6 +1317,23 @@ class OrderConfirmationService {
     customerNameController.clear();
     setJumlahItem(0);
     getTotal();
+  }
+
+  static Future<int> _assignCustomerNumber() async {
+    int assignedNumber = 0;
+    final fs = FirebaseFirestore.instance;
+    final docRef = fs.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
+    await fs.runTransaction((transaction) async {
+      final snapshot = await transaction.get(docRef);
+      if (!snapshot.exists) {
+        transaction.set(docRef, {'customerNumber': 1});
+        assignedNumber = 1;
+      } else {
+        assignedNumber = ((snapshot.data() as Map<String, dynamic>)['customerNumber'] as int) + 1;
+        transaction.update(docRef, {'customerNumber': assignedNumber});
+      }
+    });
+    return assignedNumber;
   }
 
   /// Build a nested lookup: {groupId: {optionId: OptionItem}}

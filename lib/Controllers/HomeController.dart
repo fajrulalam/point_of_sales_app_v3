@@ -13,6 +13,7 @@ import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 
 class HomeController extends ChangeNotifier {
   // Callback for showing error messages (e.g., snackbars)
@@ -25,6 +26,11 @@ class HomeController extends ChangeNotifier {
   bool isEditMode = false;
   String? editDocumentId;
   Map<String, dynamic>? editOriginalData;
+  
+  // Self Order mode state
+  bool isSelfOrderMode = false;
+  SelfOrder? currentSelfOrder;
+  
   List<MenuObject> menuObjectList = [];
   List<MenuObject> menuObjectList_makanan = [];
   List<MenuObject> menuObjectList_minuman = [];
@@ -221,6 +227,42 @@ class HomeController extends ChangeNotifier {
     getTotal();
     notifyListeners();
   }
+
+  // --- Self Order Mode ---
+  void loadSelfOrder(SelfOrder order) {
+    // If there's an existing order, clear it first
+    if (isEditMode) clearEditMode();
+    
+    isSelfOrderMode = true;
+    currentSelfOrder = order;
+
+    pesananList.clear();
+    for (var item in order.orderItems) {
+      pesananList.add(PesananObject(
+        namaPesanan: item.namaPesanan,
+        harga: item.harga,
+        dineInQuantity: item.dineInQuantity,
+        takeAwayQuantity: item.takeAwayQuantity,
+        selectedOptions: item.selectedOptions,
+      ));
+    }
+
+    // Set takeaway global flag if any item is takeaway
+    isTakeAway = order.directTakeAwayFee > 0 ||
+        order.orderItems.any((it) => it.takeAwayQuantity > 0);
+
+    getTotal();
+    notifyListeners();
+  }
+
+  void clearSelfOrderMode() {
+    isSelfOrderMode = false;
+    currentSelfOrder = null;
+    pesananList.clear();
+    getTotal();
+    notifyListeners();
+  }
+  // -----------------------
   // -----------------------
 
   // Order Management

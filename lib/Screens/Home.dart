@@ -377,10 +377,14 @@ Widget _buildMainContent() {
                 flex: 1,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: controller.isEditMode ? Colors.orange.shade50 : const Color(0xFFF5F5F0),
+                    color: controller.isEditMode 
+                        ? Colors.orange.shade50 
+                        : (controller.isSelfOrderMode ? Colors.green.shade50 : const Color(0xFFF5F5F0)),
                     border: Border(
                       bottom: BorderSide(
-                        color: controller.isEditMode ? Colors.orange.shade300 : Colors.grey.shade300,
+                        color: controller.isEditMode 
+                            ? Colors.orange.shade300 
+                            : (controller.isSelfOrderMode ? Colors.green.shade300 : Colors.grey.shade300),
                         width: 1,
                       ),
                     ),
@@ -411,6 +415,36 @@ Widget _buildMainContent() {
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.orange.shade900,
                                 backgroundColor: Colors.orange.shade100,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                minimumSize: Size.zero,
+                              ),
+                            ),
+                          ] else if (controller.isSelfOrderMode) ...[
+                            Text(
+                              'SELF ORDER: ${controller.currentSelfOrder?.displayShortCode ?? ''}',
+                              style: GoogleFonts.poppins(
+                                color: Colors.green.shade800,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            TextButton.icon(
+                              onPressed: () {
+                                if (controller.currentSelfOrder != null) {
+                                  _selfOrderService.updateStatus(
+                                      controller.currentSelfOrder!.id, 
+                                      SelfOrderStatus.unpaid);
+                                }
+                                controller.clearSelfOrderMode();
+                                customerNameController.clear();
+                              },
+                              icon: const Icon(Icons.close, size: 16),
+                              label: const Text('Batal'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.green.shade900,
+                                backgroundColor: Colors.green.shade100,
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                                 minimumSize: Size.zero,
                               ),
@@ -565,25 +599,68 @@ Widget _buildMainContent() {
         .map((menu) => menu.namaMenu)
         .toList();
 
-    OrderConfirmationService.showOrderConfirmationDialog(
-      context: context,
-      pesananList: controller.pesananList,
-      totalHarga: controller.totalHarga,
-      isTakeAway: controller.isTakeAway,
-      biayaBungkus: controller.biayaBungkus,
-      customerNameController: customerNameController,
-      uangYangDiterimaController: uangYangDiterimaController,
-      nomorBerikutnya: controller.nomorBerikutnya,
-      getTotal: controller.getTotal,
-      printReceipt: controller.printReceipt,
-      getYear: controller.getYear,
-      getMonth: controller.getMonth,
-      getDate: controller.getDate,
-      setJumlahItem: (value) => controller.jumlahItem = value,
-      addRecommendedItem: controller.addRecommendedItem,
-      menuItems: menuItemNames,
-      printerIsConnected: controller.printerIsConnected,
-    );
+    if (controller.isSelfOrderMode && controller.currentSelfOrder != null) {
+      OrderConfirmationService.showSelfOrderConfirmationDialog(
+        context: context,
+        selfOrder: controller.currentSelfOrder!,
+        pesananList: controller.pesananList,
+        totalHarga: controller.totalHarga,
+        isTakeAway: controller.isTakeAway,
+        biayaBungkus: controller.biayaBungkus,
+        customerNameController: customerNameController,
+        uangYangDiterimaController: uangYangDiterimaController,
+        nomorBerikutnya: controller.nomorBerikutnya,
+        getTotal: controller.getTotal,
+        printReceipt: ({
+          List<PesananObject>? customPesananList,
+          int? overrideNomorBerikutnya,
+          int? overrideTotalHarga,
+          bool? overrideIsTakeAway,
+          int discountAmount = 0,
+          int originalTotal = 0,
+        }) async =>
+            await controller.printReceipt(
+          customPesananList: customPesananList ?? controller.pesananList,
+          overrideNomorBerikutnya:
+              overrideNomorBerikutnya ?? controller.nomorBerikutnya,
+          overrideTotalHarga: overrideTotalHarga ?? controller.totalHarga,
+          overrideIsTakeAway: overrideIsTakeAway ?? controller.isTakeAway,
+          discountAmount: discountAmount,
+          originalTotal: originalTotal,
+        ),
+        getYear: controller.getYear,
+        getMonth: controller.getMonth,
+        getDate: controller.getDate,
+        setJumlahItem: (value) => controller.jumlahItem = value,
+        addRecommendedItem: controller.addRecommendedItem,
+        menuItems: menuItemNames,
+        onOrderCompleted: () {
+          customerNameController.clear();
+          uangYangDiterimaController.clear();
+          controller.clearSelfOrderMode();
+        },
+      );
+    } else {
+      OrderConfirmationService.showOrderConfirmationDialog(
+        context: context,
+        pesananList: controller.pesananList,
+        totalHarga: controller.totalHarga,
+        isTakeAway: controller.isTakeAway,
+        biayaBungkus: controller.biayaBungkus,
+        customerNameController: customerNameController,
+        uangYangDiterimaController: uangYangDiterimaController,
+        nomorBerikutnya: controller.nomorBerikutnya,
+        getTotal: controller.getTotal,
+        printReceipt: controller.printReceipt,
+        getYear: controller.getYear,
+        getMonth: controller.getMonth,
+        getDate: controller.getDate,
+        setJumlahItem: (value) => controller.jumlahItem = value,
+        addRecommendedItem: controller.addRecommendedItem,
+        menuItems: menuItemNames,
+        printerIsConnected: controller.printerIsConnected,
+      );
+    }
   }
 
   Future<void> _openEditOrderScreen() async {
@@ -686,56 +763,24 @@ Widget _buildMainContent() {
 
 
   void _handleAcceptSelfOrder(SelfOrder order) {
-    // Convert self-order to pesanan list and process
-    final pesananList = _selfOrderService.convertToPesananList(order);
-    final isTakeAway = _selfOrderService.isTakeAwayOrder(order);
+    // Mark order as serving in Firestore so other cashiers know it's being handled
+    _selfOrderService.markAsProcessing(order.id);
+    
+    // Load self-order into the main ordering view
+    controller.loadSelfOrder(order);
     
     // Pre-fill customer name
     customerNameController.text = order.memberName;
     
-    // Get all available menu item names for filtering recommendations
-    final menuItemNames = controller.menuObjectList
-        .map((menu) => menu.namaMenu)
-        .toList();
-
-    OrderConfirmationService.showSelfOrderConfirmationDialog(
-      context: context,
-      selfOrder: order,
-      pesananList: pesananList,
-      totalHarga: order.total,
-      isTakeAway: isTakeAway,
-      biayaBungkus: order.takeAwayFee,
-      customerNameController: customerNameController,
-      uangYangDiterimaController: uangYangDiterimaController,
-      nomorBerikutnya: controller.nomorBerikutnya,
-      getTotal: controller.getTotal,
-      printReceipt: ({
-        List<PesananObject>? customPesananList,
-        int? overrideNomorBerikutnya,
-        int? overrideTotalHarga,
-        bool? overrideIsTakeAway,
-        int discountAmount = 0,
-        int originalTotal = 0,
-      }) async =>
-          await controller.printReceipt(
-        customPesananList: customPesananList ?? pesananList,
-        overrideNomorBerikutnya: overrideNomorBerikutnya ?? controller.nomorBerikutnya,
-        overrideTotalHarga: overrideTotalHarga ?? order.total,
-        overrideIsTakeAway: overrideIsTakeAway ?? isTakeAway,
-        discountAmount: discountAmount,
-        originalTotal: originalTotal,
+    // Switch to POS view
+    setState(() => _activeRoute = 'pos_order');
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Pesanan ${order.displayShortCode} dimuat ke daftar pesanan'),
+        backgroundColor: Colors.green.shade700,
+        behavior: SnackBarBehavior.floating,
       ),
-      getYear: controller.getYear,
-      getMonth: controller.getMonth,
-      getDate: controller.getDate,
-      setJumlahItem: (value) => controller.jumlahItem = value,
-      addRecommendedItem: controller.addRecommendedItem,
-      menuItems: menuItemNames,
-      onOrderCompleted: () {
-        // Clear the customer name after order is completed
-        customerNameController.clear();
-        uangYangDiterimaController.clear();
-      },
     );
   }
 

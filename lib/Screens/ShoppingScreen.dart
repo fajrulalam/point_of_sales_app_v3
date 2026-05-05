@@ -6,6 +6,7 @@ import 'package:point_of_sales_app_v3/Services/ShoppingService.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ShoppingScreen extends StatefulWidget {
   const ShoppingScreen({Key? key}) : super(key: key);
@@ -76,6 +77,24 @@ class _ShoppingScreenState extends State<ShoppingScreen> with SingleTickerProvid
           SuppliersView(),
           ShoppingOrdersView(),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () async {
+          final url = Uri.parse('https://sentra-distribusi-rejoso-gemilang.vercel.app/pos');
+          if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Could not launch Sentra Distribusi')),
+              );
+            }
+          }
+        },
+        backgroundColor: const Color(0xFF2E7D32),
+        icon: const Icon(Icons.shopping_cart, color: Colors.white),
+        label: const Text(
+          'Sentra Distribusi',
+          style: TextStyle(color: Colors.white),
+        ),
       ),
     );
   }

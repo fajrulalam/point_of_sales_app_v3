@@ -701,7 +701,7 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                     child: ElevatedButton.icon(
                       onPressed: () => _handleAcceptOrder(order),
                       icon: const Icon(Icons.check, size: 18),
-                      label: const Text('Terima & Bayar'),
+                      label: const Text('Terima'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF2E7D32),
                         foregroundColor: Colors.white,
@@ -854,7 +854,7 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
       case SelfOrderStatus.unpaid:
         return 'Menunggu';
       case SelfOrderStatus.processing:
-        return 'Diproses';
+        return 'Serving';
       case SelfOrderStatus.paid:
         return 'Selesai';
       case SelfOrderStatus.declined:
@@ -993,7 +993,7 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                 const Icon(Icons.check_circle, color: Colors.white),
                 const SizedBox(width: 12),
                 Text(
-                  'Pesanan ${order.shortCode} berhasil ditolak',
+                  'Pesanan ${order.orderCode} berhasil ditolak',
                   style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
                 ),
               ],
