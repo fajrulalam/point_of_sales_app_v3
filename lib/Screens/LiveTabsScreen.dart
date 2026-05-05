@@ -431,7 +431,6 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                                 style: GoogleFonts.poppins(
                                   fontSize: 11,
                                   color: const Color(0xFF2E7D32).withOpacity(0.8),
-                                  fontStyle: FontStyle.italic,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -762,7 +761,6 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                       style: GoogleFonts.poppins(
                         fontSize: 12,
                         color: const Color(0xFF2E7D32).withOpacity(0.8),
-                        fontStyle: FontStyle.italic,
                         fontWeight: FontWeight.w500,
                       ),
                     ),

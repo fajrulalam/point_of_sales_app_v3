@@ -19,6 +19,7 @@ class SelfOrderService {
   /// Get a real-time stream of self-orders
   /// Optionally filter by status (e.g., 'Unpaid', 'Paid', 'Declined')
   Stream<List<SelfOrder>> getSelfOrdersStream({String? statusFilter}) {
+    print('DEBUG: Fetching SelfOrders for canteenId: canteen375_plazaUnipdu, status: $statusFilter');
     Query<Map<String, dynamic>> query = _selfOrdersCollection
         .where('canteenId', isEqualTo: 'canteen375_plazaUnipdu');
 
@@ -27,6 +28,7 @@ class SelfOrderService {
     }
 
     return query.snapshots().map((snapshot) {
+      print('DEBUG: Received ${snapshot.docs.length} documents from Firestore for SelfOrders');
       final list = snapshot.docs
           .map((doc) => SelfOrder.fromFirestore(doc))
           .toList();

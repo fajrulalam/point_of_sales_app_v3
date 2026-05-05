@@ -420,16 +420,19 @@ Widget _buildMainContent() {
                               ),
                             ),
                           ] else if (controller.isSelfOrderMode) ...[
-                            Text(
-                              'SELF ORDER: ${controller.currentSelfOrder?.displayShortCode ?? ''}',
-                              style: GoogleFonts.poppins(
-                                color: Colors.green.shade800,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                                fontSize: 16,
+                            Expanded(
+                              child: Text(
+                                'SELF ORDER: ${controller.currentSelfOrder?.displayShortCode ?? ''}',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.green.shade800,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                  fontSize: 14,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            const SizedBox(width: 16),
+                            const SizedBox(width: 8),
                             TextButton.icon(
                               onPressed: () {
                                 if (controller.currentSelfOrder != null) {
@@ -440,13 +443,14 @@ Widget _buildMainContent() {
                                 controller.clearSelfOrderMode();
                                 customerNameController.clear();
                               },
-                              icon: const Icon(Icons.close, size: 16),
+                              icon: const Icon(Icons.close, size: 14),
                               label: const Text('Batal'),
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.green.shade900,
                                 backgroundColor: Colors.green.shade100,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 minimumSize: Size.zero,
+                                textStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600),
                               ),
                             ),
                           ] else ...[

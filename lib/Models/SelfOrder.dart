@@ -20,16 +20,30 @@ class SelfOrderItem {
   });
 
   factory SelfOrderItem.fromMap(Map<String, dynamic> map) {
+    List<SelectedOption> parsedOptions = [];
+    try {
+      if (map['selectedOptions'] != null && map['selectedOptions'] is List) {
+        parsedOptions = (map['selectedOptions'] as List)
+            .map((o) {
+              if (o is Map) {
+                return SelectedOption.fromMap(Map<String, dynamic>.from(o));
+              }
+              return null;
+            })
+            .whereType<SelectedOption>()
+            .toList();
+      }
+    } catch (e) {
+      print('Error parsing selectedOptions: $e');
+    }
+
     return SelfOrderItem(
-      namaPesanan: map['namaPesanan'] ?? '',
-      harga: (map['harga'] ?? 0).toInt(),
-      dineInQuantity: (map['dineInQuantity'] ?? 0).toInt(),
-      takeAwayQuantity: (map['takeAwayQuantity'] ?? 0).toInt(),
-      isMakanan: map['isMakanan'] ?? true,
-      selectedOptions: (map['selectedOptions'] as List<dynamic>?)
-              ?.map((o) => SelectedOption.fromMap(o as Map<String, dynamic>))
-              .toList() ??
-          [],
+      namaPesanan: map['namaPesanan']?.toString() ?? '',
+      harga: int.tryParse(map['harga']?.toString() ?? '0') ?? 0,
+      dineInQuantity: int.tryParse(map['dineInQuantity']?.toString() ?? '0') ?? 0,
+      takeAwayQuantity: int.tryParse(map['takeAwayQuantity']?.toString() ?? '0') ?? 0,
+      isMakanan: map['isMakanan'] == true,
+      selectedOptions: parsedOptions,
     );
   }
 
@@ -93,42 +107,71 @@ class SelfOrder {
   });
 
   factory SelfOrder.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+    try {
+      final data = doc.data() as Map<String, dynamic>? ?? {};
 
-    // Parse timestamp
-    DateTime parsedWaktuPesan;
-    if (data['waktuPesan'] is Timestamp) {
-      parsedWaktuPesan = (data['waktuPesan'] as Timestamp).toDate();
-    } else {
-      parsedWaktuPesan = DateTime.now();
+      // Parse timestamp
+      DateTime parsedWaktuPesan;
+      if (data['waktuPesan'] is Timestamp) {
+        parsedWaktuPesan = (data['waktuPesan'] as Timestamp).toDate();
+      } else {
+        parsedWaktuPesan = DateTime.now();
+      }
+
+      // Parse order items
+      List<SelfOrderItem> items = [];
+      if (data['orderItems'] != null && data['orderItems'] is List) {
+        items = (data['orderItems'] as List)
+            .map((item) {
+              if (item is Map) {
+                return SelfOrderItem.fromMap(Map<String, dynamic>.from(item));
+              }
+              return null;
+            })
+            .whereType<SelfOrderItem>()
+            .toList();
+      }
+
+      return SelfOrder(
+        id: doc.id,
+        canteenId: data['canteenId']?.toString() ?? '',
+        orderCode: data['orderCode']?.toString() ?? '',
+        customerPhone: data['customerPhone']?.toString() ?? '',
+        isMember: data['isMember'] == true,
+        memberId: (data['memberId'] ?? data['userId'])?.toString() ?? '',
+        namaCustomer: (data['namaCustomer'] ?? data['memberName'])?.toString() ?? '',
+        status: data['status']?.toString() ?? 'Pending',
+        orderItems: items,
+        total: int.tryParse(data['total']?.toString() ?? '0') ?? 0,
+        directSubTotal: int.tryParse(data['subTotal']?.toString() ?? '0') ?? 0,
+        directTakeAwayFee: int.tryParse(data['takeAwayFee']?.toString() ?? '0') ?? 0,
+        transactionMethod: data['transactionMethod']?.toString() ?? 'SelfOrder',
+        waktuPengambilan: data['waktuPengambilan']?.toString() ?? 'Tidak Memesan',
+        waktuPesan: parsedWaktuPesan,
+        declineReason: data['declineReason']?.toString(),
+      );
+    } catch (e, stacktrace) {
+      print('Error parsing SelfOrder from doc ${doc.id}: $e');
+      print(stacktrace);
+      // Return a fallback empty order to prevent stream from completely failing
+      return SelfOrder(
+        id: doc.id,
+        canteenId: 'error',
+        orderCode: 'ERROR',
+        customerPhone: '',
+        isMember: false,
+        memberId: '',
+        namaCustomer: 'Error Loading',
+        status: 'Error',
+        orderItems: [],
+        total: 0,
+        directSubTotal: 0,
+        directTakeAwayFee: 0,
+        transactionMethod: 'Error',
+        waktuPengambilan: '',
+        waktuPesan: DateTime.now(),
+      );
     }
-
-    // Parse order items
-    List<SelfOrderItem> items = [];
-    if (data['orderItems'] != null && data['orderItems'] is List) {
-      items = (data['orderItems'] as List)
-          .map((item) => SelfOrderItem.fromMap(item as Map<String, dynamic>))
-          .toList();
-    }
-
-    return SelfOrder(
-      id: doc.id,
-      canteenId: data['canteenId'] ?? '',
-      orderCode: data['orderCode'] ?? '',
-      customerPhone: data['customerPhone'] ?? '',
-      isMember: data['isMember'] ?? false,
-      memberId: data['memberId'] ?? data['userId'] ?? '',
-      namaCustomer: data['namaCustomer'] ?? data['memberName'] ?? '',
-      status: data['status'] ?? 'Pending',
-      orderItems: items,
-      total: (data['total'] ?? 0).toInt(),
-      directSubTotal: (data['subTotal'] ?? 0).toInt(),
-      directTakeAwayFee: (data['takeAwayFee'] ?? 0).toInt(),
-      transactionMethod: data['transactionMethod'] ?? 'SelfOrder',
-      waktuPengambilan: data['waktuPengambilan'] ?? 'Tidak Memesan',
-      waktuPesan: parsedWaktuPesan,
-      declineReason: data['declineReason'],
-    );
   }
 
   Map<String, dynamic> toMap() {

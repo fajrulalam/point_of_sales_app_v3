@@ -217,7 +217,6 @@ class OrderListWidget extends StatelessWidget {
                                 order.customerNote!,
                                 style: GoogleFonts.poppins(
                                   fontSize: 11,
-                                  fontStyle: FontStyle.italic,
                                   color: Colors.orange.shade800,
                                 ),
                               ),

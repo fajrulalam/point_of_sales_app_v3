@@ -1466,18 +1466,34 @@ class OrderConfirmationService {
 
       Map<String, dynamic>? data;
       bool isPosVoucher = false;
+      String actualDocId = voucherCode;
 
       if (doc.exists) {
         data = doc.data() as Map<String, dynamic>;
         isPosVoucher = true;
       } else {
-        // Fallback to e-santren instance
-        FirebaseFirestore eSantrenFs =
-            FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
-        DocumentSnapshot eSantrenDoc =
-            await eSantrenFs.collection(Col.name("vouchers")).doc(voucherCode).get();
-        if (eSantrenDoc.exists) {
-          data = eSantrenDoc.data() as Map<String, dynamic>;
+        // Fallback 1: Search by voucherId field in the same collection
+        final querySnap = await fs
+            .collection(Col.name("vouchers"))
+            .where('voucherId', isEqualTo: voucherCode)
+            .limit(1)
+            .get();
+        
+        if (querySnap.docs.isNotEmpty) {
+          doc = querySnap.docs.first;
+          data = doc.data() as Map<String, dynamic>;
+          actualDocId = doc.id;
+          isPosVoucher = true;
+        } else {
+          // Fallback 2: e-santren instance
+          FirebaseFirestore eSantrenFs =
+              FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
+          DocumentSnapshot eSantrenDoc =
+              await eSantrenFs.collection(Col.name("vouchers")).doc(voucherCode).get();
+          if (eSantrenDoc.exists) {
+            data = eSantrenDoc.data() as Map<String, dynamic>;
+            actualDocId = eSantrenDoc.id;
+          }
         }
       }
 
@@ -1489,17 +1505,18 @@ class OrderConfirmationService {
       DateTime activeDate = (data['activeDate'] as Timestamp).toDate();
       DateTime expireDate = (data['expireDate'] as Timestamp).toDate();
       bool isClaimed = data['isClaimed'] ?? false;
-      bool isActive = data['isActive'] ?? false;
+      bool isActive = data['isActive'] ?? true; // Default to true if missing
+      String status = data['status'] ?? '';
 
       if (now.isBefore(activeDate) || now.isAfter(expireDate)) {
         return {'error': 'Voucher sudah tidak berlaku'};
       }
 
-      if (isClaimed || (isPosVoucher && data['status'] == 'CLAIMED')) {
+      if (isClaimed || (isPosVoucher && status == 'CLAIMED')) {
         return {'error': 'Voucher sudah digunakan'};
       }
 
-      if (!isActive) {
+      if (!isActive && status != 'READY_TO_CLAIM') {
         return {'error': 'Voucher tidak aktif'};
       }
 
@@ -1542,6 +1559,7 @@ class OrderConfirmationService {
         'value': data['value'],
         'isPosVoucher': isPosVoucher,
         'userId': data['userId'],
+        'docId': actualDocId,
       };
     } catch (e) {
       print('❌ Error validating voucher: $e');
@@ -2033,12 +2051,44 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   String? voucherError;
   bool isValidatingVoucher = false;
   bool isPosVoucher = false;
+  String? voucherDocId;
   late int
       currentTotal; // Track current total that updates when items are added
   List<Member> _members = [];
-  Member? _selectedMember;
   bool isMember = true;
+  Member? _selectedMember;
   String? _memberError;
+  List<Map<String, dynamic>> _redeemableVouchers = [];
+  bool _isLoadingVouchers = false;
+
+  Future<void> _fetchRedeemableVouchers(String memberId) async {
+    setState(() {
+      _isLoadingVouchers = true;
+      _redeemableVouchers = [];
+    });
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('vouchers')
+          .where('userId', isEqualTo: memberId)
+          .where('status', isEqualTo: 'READY_TO_CLAIM')
+          .get();
+
+      if (mounted) {
+        setState(() {
+          _redeemableVouchers = snapshot.docs
+              .map((doc) => {...doc.data(), 'id': doc.id})
+              .toList();
+          _isLoadingVouchers = false;
+        });
+      }
+    } catch (e) {
+      print('Error fetching vouchers: $e');
+      if (mounted) {
+        setState(() => _isLoadingVouchers = false);
+      }
+    }
+  }
   String? _selectedPaymentMethod;
   bool _isSplitPayment = false;
   int _splitQrisAmount = 0;
@@ -2055,6 +2105,38 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   int _baseProgramNominal = 0;
   String _lastSearchQuery = '';
   Iterable<Member> _lastOptionsFound = const Iterable<Member>.empty();
+
+  Future<void> _applyVoucherCode(String code) async {
+    setState(() {
+      applyPromo = true;
+      voucherController.text = code;
+      isValidatingVoucher = true;
+      voucherError = null;
+    });
+
+    final result = await OrderConfirmationService._validateVoucher(code, currentTotal);
+
+    if (mounted) {
+      setState(() {
+        isValidatingVoucher = false;
+        if (result != null && result['error'] != null) {
+          voucherError = result['error'];
+          voucherApplied = false;
+          voucherName = null;
+          voucherValue = 0;
+          isPosVoucher = false;
+          voucherDocId = null;
+        } else if (result != null) {
+          voucherName = result['name'];
+          voucherValue = result['value'];
+          voucherApplied = true;
+          voucherError = null;
+          isPosVoucher = result['isPosVoucher'] ?? false;
+          voucherDocId = result['docId'];
+        }
+      });
+    }
+  }
 
   late FocusNode customerNameFocusNode;
   late FocusNode uangFocusNode;
@@ -2112,7 +2194,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
 
   @override
   Widget build(BuildContext context) {
-    int displayTotal = currentTotal - voucherValue;
+    int displayTotal = (currentTotal - voucherValue).clamp(0, 99999999);
 
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -2366,12 +2448,14 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                           voucherName = null;
                                           voucherValue = 0;
                                           isPosVoucher = false;
+                                          voucherDocId = null;
                                         } else if (result != null) {
                                           voucherError = null;
                                           voucherApplied = true;
                                           voucherName = result['voucherName'];
                                           voucherValue = result['value'];
                                           isPosVoucher = result['isPosVoucher'] ?? false;
+                                          voucherDocId = result['docId'];
 
                                           // Automatically put customer name and handle member link
                                           String? returnedName = result['nama'];
@@ -2428,7 +2512,10 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                     ],
                     const SizedBox(height: 16),
                     if (isMember)
-                      Autocomplete<Member>(
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Autocomplete<Member>(
                         focusNode: customerNameFocusNode,
                         textEditingController: widget.customerNameController,
                         displayStringForOption: (Member option) => option.name,
@@ -2455,6 +2542,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                             _memberError = null;
                             widget.customerNameController.text = selection.name;
                           });
+                          _fetchRedeemableVouchers(selection.id);
                         },
                         fieldViewBuilder: (context, controller, focusNode,
                             onFieldSubmitted) {
@@ -2476,10 +2564,40 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                             },
                             decoration: InputDecoration(
                               labelText: 'Cari Nama/HP Member',
+                              filled: _selectedMember != null,
+                              fillColor: _selectedMember != null ? Colors.green.shade50 : null,
+                              prefixIcon: _selectedMember != null ? const Icon(Icons.check_circle, color: Colors.green) : null,
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(4.0),
+                                borderSide: BorderSide(
+                                  color: _selectedMember != null ? Colors.green : Colors.grey.shade400,
+                                  width: _selectedMember != null ? 2.0 : 1.0,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(4.0),
+                                borderSide: BorderSide(
+                                  color: _selectedMember != null ? Colors.green : Theme.of(context).primaryColor,
+                                  width: 2.0,
+                                ),
+                              ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(4.0),
                               ),
                               errorText: _memberError,
+                              suffixIcon: _selectedMember != null 
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear, size: 20), 
+                                    onPressed: () {
+                                      controller.clear();
+                                      setState(() {
+                                        _selectedMember = null;
+                                        widget.customerNameController.text = "";
+                                        _redeemableVouchers = [];
+                                      });
+                                    }
+                                  ) 
+                                : null,
                             ),
                           );
                         },
@@ -2511,6 +2629,92 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                             ),
                           );
                         },
+                      ),
+                      if (_isLoadingVouchers)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 8.0),
+                          child: LinearProgressIndicator(),
+                        ),
+                      if (_redeemableVouchers.isNotEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(top: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.card_giftcard, size: 18, color: Colors.blue.shade700),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Voucher Tersedia',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blue.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              ..._redeemableVouchers.map((v) {
+                                String nominalText = "";
+                                if (v['value'] != null) {
+                                  nominalText = NumberFormat.currency(
+                                    locale: 'id_ID',
+                                    symbol: 'Rp ',
+                                    decimalDigits: 0,
+                                  ).format(v['value']);
+                                }
+                                return InkWell(
+                                  onTap: () {
+                                    if (v['voucherId'] != null) {
+                                      _applyVoucherCode(v['voucherId']);
+                                    }
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(bottom: 8, top: 4),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.check_circle, size: 16, color: Colors.green),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                '${v['voucherName'] ?? 'Voucher'} - $nominalText',
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.blue.shade900,
+                                                ),
+                                              ),
+                                              Text(
+                                                'Klik untuk gunakan: ${v['voucherId'] ?? ''}',
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 10,
+                                                  color: Colors.blue.shade700,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Icon(Icons.arrow_forward_ios, size: 12, color: Colors.blue.shade300),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ],
+                          ),
+                        ),
+                        ],
                       )
                     else
                       TextField(
@@ -2901,8 +3105,9 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               'programExtraPaymentMethod': remaining > 0 ? _programExtraPaymentMethod : null,
                               'programExtraSplitQrisAmount': extraQris,
                               'isMember': isMember, 'memberId': _selectedMember?.id, 'memberPhone': _selectedMember?.phoneNumber,
-                              'voucherCode': voucherApplied ? voucherController.text : null,
+                              'voucherCode': voucherApplied ? voucherDocId : null,
                               'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                              'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
                             });
                           },
                           child: Text('OK', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
@@ -2965,8 +3170,9 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                     'isSplitPayment': _isSplitPayment, 'splitCashAmount': displayTotal - _splitQrisAmount, 'splitQrisAmount': _splitQrisAmount,
                                     'voucherProgramId': null,
                                     'isMember': isMember, 'memberId': _selectedMember?.id, 'memberPhone': _selectedMember?.phoneNumber,
-                                    'voucherCode': voucherApplied ? voucherController.text : null,
+                                    'voucherCode': voucherApplied ? voucherDocId : null,
                                     'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                                    'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
                                   });
                                 } else {
                                   _showTopError(context, 'Uang yang diterima masih kurang');
@@ -3098,6 +3304,9 @@ class _SelfOrderConfirmationDialogState
   bool _isProgramExtraSplit = false;
   TextEditingController _programExtraQrisController = TextEditingController();
   int _programExtraQrisAmount = 0;
+  List<Map<String, dynamic>> _redeemableVouchers = [];
+  bool _isLoadingVouchers = false;
+  String? voucherDocId;
 
   late FocusNode uangFocusNode;
   late FocusNode voucherFocusNode;
@@ -3124,6 +3333,38 @@ class _SelfOrderConfirmationDialogState
     }
   }
 
+  Future<void> _applyVoucherCode(String code) async {
+    setState(() {
+      applyPromo = true;
+      voucherController.text = code;
+      isValidatingVoucher = true;
+      voucherError = null;
+    });
+
+    final result = await OrderConfirmationService._validateVoucher(code, currentTotal);
+
+    if (mounted) {
+      setState(() {
+        isValidatingVoucher = false;
+        if (result != null && result['error'] != null) {
+          voucherError = result['error'];
+          voucherApplied = false;
+          voucherName = null;
+          voucherValue = 0;
+          isPosVoucher = false;
+          voucherDocId = null;
+        } else if (result != null) {
+          voucherName = result['name'];
+          voucherValue = result['value'];
+          voucherApplied = true;
+          voucherError = null;
+          isPosVoucher = result['isPosVoucher'] ?? false;
+          voucherDocId = result['docId'];
+        }
+      });
+    }
+  }
+
   @override
   void dispose() {
     uangFocusNode.dispose();
@@ -3145,8 +3386,38 @@ class _SelfOrderConfirmationDialogState
       );
       if (_selectedMember != null) {
         widget.customerNameController.text = _selectedMember!.name;
+        _fetchRedeemableVouchers(_selectedMember!.id);
       }
     });
+  }
+
+  Future<void> _fetchRedeemableVouchers(String memberId) async {
+    setState(() {
+      _isLoadingVouchers = true;
+      _redeemableVouchers = [];
+    });
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('vouchers')
+          .where('userId', isEqualTo: memberId)
+          .where('status', isEqualTo: 'READY_TO_CLAIM')
+          .get();
+
+      if (mounted) {
+        setState(() {
+          _redeemableVouchers = snapshot.docs
+              .map((doc) => {...doc.data(), 'id': doc.id})
+              .toList();
+          _isLoadingVouchers = false;
+        });
+      }
+    } catch (e) {
+      print('Error fetching vouchers: $e');
+      if (mounted) {
+        setState(() => _isLoadingVouchers = false);
+      }
+    }
   }
 
   void _updateTotal() {
@@ -3179,8 +3450,10 @@ class _SelfOrderConfirmationDialogState
         voucherName = result!['voucherName'];
         voucherValue = result['value'] ?? 0;
         isPosVoucher = result['isPosVoucher'] ?? false;
+        voucherDocId = result['docId'];
       } else {
         voucherError = result?['error'] ?? 'Voucher tidak valid';
+        voucherDocId = null;
         if (result?['isSnackbarError'] == true) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -3195,7 +3468,7 @@ class _SelfOrderConfirmationDialogState
 
   @override
   Widget build(BuildContext context) {
-    int displayTotal = currentTotal - voucherValue;
+    int displayTotal = (currentTotal - voucherValue).clamp(0, 99999999);
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -3353,7 +3626,90 @@ class _SelfOrderConfirmationDialogState
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    if (_isLoadingVouchers)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8.0),
+                        child: LinearProgressIndicator(),
+                      ),
+                    if (_redeemableVouchers.isNotEmpty)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.card_giftcard, size: 18, color: Colors.blue.shade700),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Voucher Tersedia',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade900,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            ..._redeemableVouchers.map((v) {
+                              String nominalText = "";
+                              if (v['value'] != null) {
+                                nominalText = NumberFormat.currency(
+                                  locale: 'id_ID',
+                                  symbol: 'Rp ',
+                                  decimalDigits: 0,
+                                ).format(v['value']);
+                              }
+                              return InkWell(
+                                onTap: () {
+                                  if (v['voucherId'] != null) {
+                                    _applyVoucherCode(v['voucherId']);
+                                  }
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.only(bottom: 8, top: 4),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.check_circle, size: 16, color: Colors.green),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              '${v['voucherName'] ?? 'Voucher'} - $nominalText',
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                                color: Colors.blue.shade900,
+                                              ),
+                                            ),
+                                            Text(
+                                              'Klik untuk gunakan: ${v['voucherId'] ?? ''}',
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 10,
+                                                color: Colors.blue.shade700,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Icon(Icons.arrow_forward_ios, size: 12, color: Colors.blue.shade300),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ],
+                        ),
+                      ),
 
                     // Promo toggle
                     Row(
@@ -3701,8 +4057,9 @@ class _SelfOrderConfirmationDialogState
                               'programExtraSplitQrisAmount': extraQris,
                               'isMember': _selectedMember != null, 'memberId': _selectedMember?.id ?? widget.selfOrder.userId,
                               'memberPhone': _selectedMember?.phoneNumber,
-                              'voucherCode': voucherApplied ? voucherController.text : null,
+                              'voucherCode': voucherApplied ? voucherDocId : null,
                               'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                              'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
                             });
                           },
                           child: Text('Konfirmasi Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
@@ -3747,8 +4104,9 @@ class _SelfOrderConfirmationDialogState
                                 'voucherProgramId': null,
                                 'isMember': _selectedMember != null, 'memberId': _selectedMember?.id ?? widget.selfOrder.userId,
                                 'memberPhone': _selectedMember?.phoneNumber,
-                                'voucherCode': voucherApplied ? voucherController.text : null,
+                                'voucherCode': voucherApplied ? voucherDocId : null,
                                 'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                                'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
                               });
                             } else {
                               _showTopError(context, 'Uang yang diterima masih kurang');
@@ -3824,6 +4182,7 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
   String? voucherError;
   bool isValidatingVoucher = false;
   bool isPosVoucher = false;
+  String? voucherDocId;
   String? _selectedPaymentMethod;
   List<Map<String, dynamic>> _activePrograms = [];
   String? _selectedProgramId;
@@ -3885,11 +4244,13 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
       if (result?['error'] != null) {
         voucherError = result!['error'];
         voucherApplied = false;
+        voucherDocId = null;
       } else if (result != null) {
         voucherApplied = true;
         voucherName = result['voucherName'];
         voucherValue = result['value'] ?? 0;
         isPosVoucher = result['isPosVoucher'] ?? false;
+        voucherDocId = result['docId'];
       }
     });
   }
@@ -3897,7 +4258,7 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
   @override
   Widget build(BuildContext context) {
     int baseTotal = widget.openBill.totalAmount + widget.totalTakeAwayFee;
-    int displayTotal = baseTotal - voucherValue;
+    int displayTotal = (baseTotal - voucherValue).clamp(0, 99999999);
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -4261,7 +4622,9 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                 'voucherProgramId': _selectedProgramId, 'programNominal': _programNominal,
                 'programExtraPaymentMethod': remaining > 0 ? _programExtraPaymentMethod : null,
                 'programExtraSplitQrisAmount': extraQris,
-                'voucherCode': voucherApplied ? voucherController.text : null, 'isPosVoucher': isPosVoucher,
+                'voucherCode': voucherApplied ? voucherDocId : null,
+                'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                'discountAmount': voucherApplied ? (baseTotal - displayTotal) : 0,
               });
               return;
             }
@@ -4273,7 +4636,9 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
               'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': _selectedPaymentMethod,
               'isSplitPayment': _isSplitPayment, 'splitCashAmount': displayTotal - _splitQrisAmount, 'splitQrisAmount': _splitQrisAmount,
               'voucherProgramId': null,
-              'voucherCode': voucherApplied ? voucherController.text : null, 'isPosVoucher': isPosVoucher,
+              'voucherCode': voucherApplied ? voucherDocId : null,
+              'isPosVoucher': voucherApplied ? isPosVoucher : false,
+              'discountAmount': voucherApplied ? (baseTotal - displayTotal) : 0,
             });
           },
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
