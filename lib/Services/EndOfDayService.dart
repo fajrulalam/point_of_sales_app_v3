@@ -13,84 +13,100 @@ class EndOfDayService {
 
   /// Check if we missed an end-of-day reset and trigger it if needed
   static Future<void> checkAndAutoResetPerishables() async {
-    try {
-      // Wait for authentication if not ready (important for anonymous logins)
-      int authAttempts = 0;
-      while (FirebaseAuth.instance.currentUser == null && authAttempts < 5) {
-        await Future.delayed(const Duration(milliseconds: 1000));
-        authAttempts++;
+    int retryCount = 0;
+    const int maxRetries = 3;
+
+    while (retryCount < maxRetries) {
+      try {
+        // Wait for authentication if not ready (important for anonymous logins)
+        int authAttempts = 0;
+        while (FirebaseAuth.instance.currentUser == null && authAttempts < 5) {
+          await Future.delayed(const Duration(milliseconds: 1000));
+          authAttempts++;
+        }
+
+        final metadataRef = _firestore
+            .collection(Col.name('Canteens'))
+            .doc(canteenId)
+            .collection('Metadata')
+            .doc('InventoryLogs');
+
+        final today = _getTodayDateString();
+
+        // Fetch perishables first because query cannot be done inside transaction
+        final perishablesSnapshot = await _firestore
+            .collection(Col.name('Canteens'))
+            .doc(canteenId)
+            .collection('Inventory')
+            .where('isPerishable', isEqualTo: true)
+            .get();
+
+        if (perishablesSnapshot.docs.isEmpty) return;
+
+        await _firestore.runTransaction((transaction) async {
+          final metadataDoc = await transaction.get(metadataRef);
+
+          // Ensure data() is not null before checking field
+          if (metadataDoc.exists && metadataDoc.data() != null) {
+            final lastResetDate = metadataDoc.data()!['last_reset_date'] as String?;
+            if (lastResetDate == today) {
+              print('✅ Perishables already reset for today ($today)');
+              return; // Abort silently if already reset by another device
+            }
+          }
+
+          print('🔄 Triggering automated perishable reset for $today via Transaction');
+
+          for (var doc in perishablesSnapshot.docs) {
+            final data = doc.data();
+            final int currentStock = (data['stock'] ?? 0) as int;
+            final itemName = data['name'] ?? '';
+
+            if (currentStock > 0) {
+              final logId = '${today}_${doc.id}';
+              final logRef = _firestore
+                  .collection(Col.name('Canteens'))
+                  .doc(canteenId)
+                  .collection('DailyStockLogs')
+                  .doc(logId);
+
+              transaction.set(logRef, {
+                'date': today,
+                'inventoryItemId': doc.id,
+                'inventoryItemName': itemName,
+                'isPerishable': true,
+                'stockWasted': currentStock,
+                'endingStock': 0,
+                'lastUpdated': FieldValue.serverTimestamp(),
+                'autoReset': true,
+              }, SetOptions(merge: true));
+
+              transaction.update(doc.reference, {'stock': 0});
+            }
+          }
+
+          transaction.set(metadataRef, {
+            'last_reset_date': today,
+            'last_updated': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        });
+
+        print('✅ Auto-reset perishables completed safely for $today');
+        return; // Success, exit the loop
+      } catch (e) {
+        final errorStr = e.toString();
+        if (errorStr.contains('unavailable') || errorStr.contains('network-error')) {
+          retryCount++;
+          if (retryCount < maxRetries) {
+            final delay = Duration(seconds: retryCount * 3);
+            print('⚠️ Firestore unavailable in checkAndAutoResetPerishables, retrying in ${delay.inSeconds}s (Attempt $retryCount/$maxRetries)...');
+            await Future.delayed(delay);
+            continue;
+          }
+        }
+        print('❌ Error in checkAndAutoResetPerishables: $e');
+        break; // Exit loop on non-retryable error or max retries reached
       }
-
-      final metadataRef = _firestore
-          .collection(Col.name('Canteens'))
-          .doc(canteenId)
-          .collection('Metadata')
-          .doc('InventoryLogs');
-
-      final today = _getTodayDateString();
-
-      // Fetch perishables first because query cannot be done inside transaction
-      final perishablesSnapshot = await _firestore
-          .collection(Col.name('Canteens'))
-          .doc(canteenId)
-          .collection('Inventory')
-          .where('isPerishable', isEqualTo: true)
-          .get();
-
-      if (perishablesSnapshot.docs.isEmpty) return;
-
-      await _firestore.runTransaction((transaction) async {
-        final metadataDoc = await transaction.get(metadataRef);
-        
-        // Ensure data() is not null before checking field
-        if (metadataDoc.exists && metadataDoc.data() != null) {
-          final lastResetDate = metadataDoc.data()!['last_reset_date'] as String?;
-          if (lastResetDate == today) {
-            print('✅ Perishables already reset for today ($today)');
-            return; // Abort silently if already reset by another device
-          }
-        }
-
-        print('🔄 Triggering automated perishable reset for $today via Transaction');
-
-        for (var doc in perishablesSnapshot.docs) {
-          final data = doc.data();
-          final int currentStock = (data['stock'] ?? 0) as int;
-          final itemName = data['name'] ?? '';
-
-          if (currentStock > 0) {
-            // Fix Fragile logId Generation: use doc.id instead of itemName
-            final logId = '${today}_${doc.id}';
-            final logRef = _firestore
-                .collection(Col.name('Canteens'))
-                .doc(canteenId)
-                .collection('DailyStockLogs')
-                .doc(logId);
-
-            transaction.set(logRef, {
-              'date': today,
-              'inventoryItemId': doc.id,
-              'inventoryItemName': itemName,
-              'isPerishable': true,
-              'stockWasted': currentStock,
-              'endingStock': 0,
-              'lastUpdated': FieldValue.serverTimestamp(),
-              'autoReset': true,
-            }, SetOptions(merge: true));
-
-            transaction.update(doc.reference, {'stock': 0});
-          }
-        }
-
-        transaction.set(metadataRef, {
-          'last_reset_date': today,
-          'last_updated': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      });
-      
-      print('✅ Auto-reset perishables completed safely for $today');
-    } catch (e) {
-      print('❌ Error in checkAndAutoResetPerishables: $e');
     }
   }
 

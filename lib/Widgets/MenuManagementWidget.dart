@@ -415,9 +415,17 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             icon: Icon(Icons.more_vert, color: Colors.grey.shade600, size: 20),
             onSelected: (value) {
               if (value == 'add_makanan') {
-                _addOrEditMenu(context, query: 'add', makananOrMinuman: 'Makanan');
+                _addOrEditMenu(context,
+                    query: 'add',
+                    makananOrMinuman: 'Makanan',
+                    initialCategory: _selectedCategory,
+                    existingCategories: _sortedCategories);
               } else if (value == 'add_minuman') {
-                _addOrEditMenu(context, query: 'add', makananOrMinuman: 'Minuman');
+                _addOrEditMenu(context,
+                    query: 'add',
+                    makananOrMinuman: 'Minuman',
+                    initialCategory: _selectedCategory,
+                    existingCategories: _sortedCategories);
               } else if (value == 'reorder_items') {
                 _showItemReorderDialog();
               }
@@ -606,6 +614,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
         query: 'edit',
         makananOrMinuman: item.isMakanan ? 'Makanan' : 'Minuman',
         menuObject: item,
+        existingCategories: _sortedCategories,
       ),
       style: OutlinedButton.styleFrom(
         foregroundColor: const Color(0xFF2E7D32),
@@ -1148,7 +1157,9 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
   void _addOrEditMenu(BuildContext context,
       {required String query,
       required String makananOrMinuman,
-      MenuObject? menuObject}) {
+      MenuObject? menuObject,
+      String? initialCategory,
+      required List<String> existingCategories}) {
     showModalBottomSheet(
       isScrollControlled: true,
       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
@@ -1165,6 +1176,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
         menuObject: menuObject,
         listGambar: widget.listGambar,
         onDeleteCatalogImage: widget.onDeleteCatalogImage,
+        initialCategory: initialCategory,
+        existingCategories: existingCategories,
       ),
     );
   }

@@ -421,6 +421,7 @@ class OrderConfirmationService {
     List<Map<String, dynamic>> orderItems = pesananList.map((order) {
       final menu = menuMap[order.namaPesanan];
       return {
+        'menuItemId': order.menuItemId,
         'namaPesanan': order.namaPesanan,
         'harga': order.harga,
         'dineInQuantity': order.dineInQuantity,
@@ -893,6 +894,7 @@ class OrderConfirmationService {
     List<Map<String, dynamic>> orderItems = pesananList.map((order) {
       final menu = menuMap[order.namaPesanan];
       return {
+        'menuItemId': order.menuItemId,
         'namaPesanan': order.namaPesanan,
         'harga': order.harga,
         'dineInQuantity': order.dineInQuantity,
@@ -1125,6 +1127,7 @@ class OrderConfirmationService {
     List<Map<String, dynamic>> orderItems = pesananList.map((order) {
       final menu = menuMap[order.namaPesanan];
       return {
+        'menuItemId': order.menuItemId,
         'namaPesanan': order.namaPesanan,
         'harga': order.harga,
         'dineInQuantity': order.dineInQuantity,

@@ -23,6 +23,7 @@ class Col {
     'DailyTransaction',
     'Expenses',
     'Members',
+    'MonthlyFinancialReport',
     'MonthlyTransaction',
     'OrderHistory',
     'RecentlyServed',
@@ -37,6 +38,7 @@ class Col {
     'voucherGroup',
     'voucherProgram',
     'voucherPrograms',
+    'YearlyFinancialReport',
     'YearlyTransaction',
   };
 

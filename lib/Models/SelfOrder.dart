@@ -3,6 +3,7 @@ import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 
 /// Represents an individual item in a self-order
 class SelfOrderItem {
+  final String menuItemId;
   final String namaPesanan;
   final int harga;
   final int dineInQuantity;
@@ -11,6 +12,7 @@ class SelfOrderItem {
   final List<SelectedOption> selectedOptions;
 
   SelfOrderItem({
+    this.menuItemId = '',
     required this.namaPesanan,
     required this.harga,
     required this.dineInQuantity,
@@ -38,6 +40,7 @@ class SelfOrderItem {
     }
 
     return SelfOrderItem(
+      menuItemId: map['menuItemId']?.toString() ?? '',
       namaPesanan: map['namaPesanan']?.toString() ?? '',
       harga: int.tryParse(map['harga']?.toString() ?? '0') ?? 0,
       dineInQuantity: int.tryParse(map['dineInQuantity']?.toString() ?? '0') ?? 0,
@@ -49,6 +52,7 @@ class SelfOrderItem {
 
   Map<String, dynamic> toMap() {
     return {
+      'menuItemId': menuItemId,
       'namaPesanan': namaPesanan,
       'harga': harga,
       'dineInQuantity': dineInQuantity,

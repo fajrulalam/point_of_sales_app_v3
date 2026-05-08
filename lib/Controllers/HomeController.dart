@@ -207,6 +207,7 @@ class HomeController extends ChangeNotifier {
       final selectedOpts = selectedOptsRaw.map((e) => SelectedOption.fromMap(e as Map<String, dynamic>)).toList();
       
       pesananList.add(PesananObject(
+        menuItemId: item['menuItemId'] ?? '',
         namaPesanan: item['namaPesanan'] ?? '',
         harga: item['harga'] ?? 0,
         dineInQuantity: item['dineInQuantity'] ?? 0,
@@ -239,6 +240,7 @@ class HomeController extends ChangeNotifier {
     pesananList.clear();
     for (var item in order.orderItems) {
       pesananList.add(PesananObject(
+        menuItemId: item.menuItemId,
         namaPesanan: item.namaPesanan,
         harga: item.harga,
         dineInQuantity: item.dineInQuantity,
@@ -276,6 +278,7 @@ class HomeController extends ChangeNotifier {
       final selectedOpts = options ?? const [];
 
       final matchKey = PesananObject(
+        menuItemId: menu.id,
         namaPesanan: menu.namaMenu,
         harga: menu.harga,
         selectedOptions: selectedOpts,
@@ -318,6 +321,7 @@ class HomeController extends ChangeNotifier {
 
       if (orderIndex == -1) {
         pesananList.add(PesananObject(
+          menuItemId: menu.id,
           namaPesanan: menu.namaMenu,
           harga: menu.harga,
           dineInQuantity: isTakeAway ? 0 : quantity,
@@ -466,6 +470,7 @@ class HomeController extends ChangeNotifier {
     if (orderIndex == -1) {
       if (isTakeAway) {
         pesananList.add(PesananObject(
+          menuItemId: menuItem.id,
           namaPesanan: menuItem.namaMenu,
           harga: menuItem.harga,
           dineInQuantity: 0,
@@ -473,6 +478,7 @@ class HomeController extends ChangeNotifier {
         ));
       } else {
         pesananList.add(PesananObject(
+          menuItemId: menuItem.id,
           namaPesanan: menuItem.namaMenu,
           harga: menuItem.harga,
           dineInQuantity: quantity,

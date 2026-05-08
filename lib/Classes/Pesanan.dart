@@ -53,6 +53,7 @@ class SelectedOption {
 }
 
 class PesananObject {
+  final String menuItemId;
   final String namaPesanan;
   final int harga;
   int dineInQuantity;
@@ -61,6 +62,7 @@ class PesananObject {
   String? customerNote;
 
   PesananObject({
+    this.menuItemId = '',
     required this.namaPesanan,
     required this.harga,
     this.dineInQuantity = 0,
@@ -78,11 +80,12 @@ class PesananObject {
   /// Unique key combining item name + sorted selected options for deduplication.
   /// Two PesananObjects with the same name but different options are distinct.
   String get orderKey {
-    if (selectedOptions.isEmpty) return namaPesanan;
+    final base = menuItemId.isNotEmpty ? menuItemId : namaPesanan;
+    if (selectedOptions.isEmpty) return base;
     final optionKeys = selectedOptions
         .map((o) => '${o.groupName}:${o.optionName}')
         .toList()
       ..sort();
-    return '$namaPesanan|${optionKeys.join(',')}';
+    return '$base|${optionKeys.join(',')}';
   }
 }

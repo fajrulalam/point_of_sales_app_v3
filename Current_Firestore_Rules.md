@@ -66,6 +66,12 @@ service cloud.firestore {
         allow read, write, update, delete: if true;
       }
     }
+    match /MonthlyFinancialReport/{id} {
+      allow read, write, update, delete: if true;
+    }
+    match /YearlyFinancialReport/{id} {
+      allow read, write, update, delete: if true;
+    }
     match /Status/{id} { allow read, write, delete, update: if true; }
     match /Expenses/{id} { allow read, write: if isAuthenticated(); }
     match /CashflowSettings/{id} {
@@ -137,7 +143,12 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
 
+    match /SelfOrders/{orderId} {
+      allow read, write: if true;
+    }
+    
     // ── FEEDBACKS ─────────────────────────────────────────────────────────────
+
     match /feedbacks/{feedbackId} {
       allow create: if isAuthenticated()
                     && memberIdRefersToAuthUser(request.resource.data.memberId);
@@ -257,6 +268,14 @@ service cloud.firestore {
       match /Expenses/{expenseId} {
         allow read, write, update, delete: if true;
       }
+    }
+    
+    match /zTesting_MonthlyFinancialReport/{id} {
+      allow read, write, update, delete: if true;
+    }
+    
+    match /zTesting_YearlyFinancialReport/{id} {
+      allow read, write, update, delete: if true;
     }
 
     match /zTesting_Expenses/{id} {

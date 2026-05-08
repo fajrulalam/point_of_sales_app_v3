@@ -185,7 +185,7 @@ class _FinancialReportBottomSheetState
 
     // Fetch previous day's closing balance for running saldo
     final prevSnap = await fs
-        .collection(Col.name('DailyTransaction'))
+        .collection(Col.name('DailyFinancialReport'))
         .where(FieldPath.documentId, isLessThan: today)
         .orderBy(FieldPath.documentId, descending: true)
         .limit(1)
@@ -226,12 +226,41 @@ class _FinancialReportBottomSheetState
 
     if (result == 'save' && mounted) {
       final reportRef =
-          fs.collection(Col.name('DailyTransaction')).doc(today);
+          fs.collection(Col.name('DailyFinancialReport')).doc(today);
 
-      await reportRef.update({
-        'totalCash': totalCash,
-        'totalQris': totalQris,
-        'totalOnline': totalOnline,
+      final parts = today.split('-');
+      final month = '${parts[0]}-${parts[1]}';
+      final year = parts[0];
+
+      final currentReportSnap = await reportRef.get();
+      final currentData = currentReportSnap.data() ?? {};
+
+      // Calculate deltas to prevent double-counting if submitted multiple times
+      final deltaSysCash = totalCash - ((currentData['systemSalesCash'] ?? 0) as int);
+      final deltaSysQris = totalQris - ((currentData['systemSalesQris'] ?? 0) as int);
+      final deltaSysOnline = totalOnline - ((currentData['systemSalesOnline'] ?? 0) as int);
+      final deltaVoucher = _totalVoucher - ((currentData['totalVoucher'] ?? 0) as int);
+
+      final deltaExpCash = expensesCash - ((currentData['expensesCash'] ?? 0) as int);
+      final deltaExpQris = expensesQris - ((currentData['expensesQris'] ?? 0) as int);
+      final deltaExpOnline = expensesOnline - ((currentData['expensesOnline'] ?? 0) as int);
+
+      final deltaActCash = inputCash - ((currentData['actualCash'] ?? 0) as int);
+      final deltaActQris = inputQris - ((currentData['actualQris'] ?? 0) as int);
+      final deltaActOnline = inputOnline - ((currentData['actualOnline'] ?? 0) as int);
+
+      final deltaDiscCash = discrepancyCash - ((currentData['discrepancyCash'] ?? 0) as int);
+      final deltaDiscQris = discrepancyQris - ((currentData['discrepancyQris'] ?? 0) as int);
+      final deltaDiscOnline = platformCommission - ((currentData['discrepancyOnline'] ?? 0) as int);
+
+      final batch = fs.batch();
+
+      batch.set(reportRef, {
+        'date': today,
+        'month': month,
+        'systemSalesCash': totalCash,
+        'systemSalesQris': totalQris,
+        'systemSalesOnline': totalOnline,
         'totalVoucher': _totalVoucher,
         'expensesCash': expensesCash,
         'expensesQris': expensesQris,
@@ -246,7 +275,54 @@ class _FinancialReportBottomSheetState
         'closingQris': closingQris,
         'closingOnline': closingOnline,
         'timestamp': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
+
+      final monthRef = fs.collection(Col.name('MonthlyFinancialReport')).doc(month);
+      batch.set(monthRef, {
+        'month': month,
+        'systemSalesCash': FieldValue.increment(deltaSysCash),
+        'systemSalesQris': FieldValue.increment(deltaSysQris),
+        'systemSalesOnline': FieldValue.increment(deltaSysOnline),
+        'totalVoucher': FieldValue.increment(deltaVoucher),
+        'expensesCash': FieldValue.increment(deltaExpCash),
+        'expensesQris': FieldValue.increment(deltaExpQris),
+        'expensesOnline': FieldValue.increment(deltaExpOnline),
+        'actualCash': FieldValue.increment(deltaActCash),
+        'actualQris': FieldValue.increment(deltaActQris),
+        'actualOnline': FieldValue.increment(deltaActOnline),
+        'discrepancyCash': FieldValue.increment(deltaDiscCash),
+        'discrepancyQris': FieldValue.increment(deltaDiscQris),
+        'discrepancyOnline': FieldValue.increment(deltaDiscOnline),
+        // Closing balances for the month can simply be overwritten by the latest day's values
+        'closingCash': closingCash,
+        'closingQris': closingQris,
+        'closingOnline': closingOnline,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      final yearRef = fs.collection(Col.name('YearlyFinancialReport')).doc(year);
+      batch.set(yearRef, {
+        'year': year,
+        'systemSalesCash': FieldValue.increment(deltaSysCash),
+        'systemSalesQris': FieldValue.increment(deltaSysQris),
+        'systemSalesOnline': FieldValue.increment(deltaSysOnline),
+        'totalVoucher': FieldValue.increment(deltaVoucher),
+        'expensesCash': FieldValue.increment(deltaExpCash),
+        'expensesQris': FieldValue.increment(deltaExpQris),
+        'expensesOnline': FieldValue.increment(deltaExpOnline),
+        'actualCash': FieldValue.increment(deltaActCash),
+        'actualQris': FieldValue.increment(deltaActQris),
+        'actualOnline': FieldValue.increment(deltaActOnline),
+        'discrepancyCash': FieldValue.increment(deltaDiscCash),
+        'discrepancyQris': FieldValue.increment(deltaDiscQris),
+        'discrepancyOnline': FieldValue.increment(deltaDiscOnline),
+        'closingCash': closingCash,
+        'closingQris': closingQris,
+        'closingOnline': closingOnline,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await batch.commit();
 
       if (mounted) {
         Navigator.pop(context);

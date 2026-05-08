@@ -23,13 +23,17 @@ class AddMenuBottomSheet extends StatefulWidget {
   final MenuObject? menuObject;
   final List<AssetsObject> listGambar;
   final Function(AssetsObject)? onDeleteCatalogImage;
+  final String? initialCategory;
+  final List<String> existingCategories;
   const AddMenuBottomSheet(
       {Key? key,
       required this.query,
       this.menuObject,
       required this.makananOrMinuman,
       required this.listGambar,
-      this.onDeleteCatalogImage})
+      this.onDeleteCatalogImage,
+      this.initialCategory,
+      required this.existingCategories})
       : super(key: key);
 
   @override
@@ -94,7 +98,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
       _imageAspectRatio = widget.menuObject!.imageAspectRatio;
       _sortOrder = widget.menuObject!.sortOrder;
     } else {
-      categoryController.text = 'Umum';
+      categoryController.text = widget.initialCategory ?? 'Umum';
     }
   }
 
@@ -188,7 +192,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
             const SizedBox(width: 16),
             _buildPriceField(),
             const SizedBox(width: 16),
-            _buildTextField(categoryController, 'Kategori'),
+            _buildCategoryDropdown(),
             const SizedBox(width: 16),
             _buildTextField(unitsPerPackageController, 'Stok per Paket', isNumber: true),
             const SizedBox(width: 16),
@@ -264,6 +268,38 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
           border: const OutlineInputBorder(),
           labelText: label,
         ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryDropdown() {
+    // Ensure the current value is in the list
+    final List<String> categories = List.from(widget.existingCategories);
+    if (categoryController.text.isNotEmpty && !categories.contains(categoryController.text)) {
+      categories.add(categoryController.text);
+    }
+    if (categories.isEmpty) categories.add('Umum');
+
+    return Expanded(
+      child: DropdownButtonFormField<String>(
+        value: categoryController.text.isEmpty ? categories.first : categoryController.text,
+        decoration: const InputDecoration(
+          border: OutlineInputBorder(),
+          labelText: 'Kategori',
+        ),
+        items: categories.map((String category) {
+          return DropdownMenuItem<String>(
+            value: category,
+            child: Text(category, style: _labelStyle),
+          );
+        }).toList(),
+        onChanged: (String? newValue) {
+          if (newValue != null) {
+            setState(() {
+              categoryController.text = newValue;
+            });
+          }
+        },
       ),
     );
   }
@@ -460,7 +496,9 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
           .doc('canteen375')
           .collection('MenuCollection');
 
-      final newDocId = namaMakananController.text;
+      final newDocId = widget.query == 'add' 
+          ? menuCollectionRef.doc().id 
+          : widget.menuObject!.id;
 
       await menuCollectionRef.doc(newDocId).set({
         'namaMenu': namaMakananController.text,
@@ -476,10 +514,6 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
         'sortOrder': _sortOrder,
       });
 
-      // If editing and the name changed, delete the old document
-      if (widget.query == 'edit' && widget.menuObject!.id != newDocId) {
-        await menuCollectionRef.doc(widget.menuObject!.id).delete();
-      }
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
