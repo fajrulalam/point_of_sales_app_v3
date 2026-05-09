@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
-
 class VoucherProgramService {
   static final _fs = FirebaseFirestore.instance;
 
@@ -141,6 +142,133 @@ class VoucherProgramService {
         _fs.collection(Col.name('voucherPrograms')).doc(programId);
     batch.update(programRef, {
       'totalRedeemed': FieldValue.increment(amount),
+    });
+  }
+
+  /// Checks for active voucher programs from previous days and prompts the user
+  /// if they have been settled. If settled, records the payment to yesterday's account.
+  static Future<void> checkAndPromptPendingVouchers(BuildContext context) async {
+    final activePrograms = await getActivePrograms();
+    final now = DateTime.now();
+    final today = DateFormat('yyyy-MM-dd').format(now);
+    final yesterday = now.subtract(const Duration(days: 1));
+
+    for (var program in activePrograms) {
+      final redeemed = (program['totalRedeemed'] ?? 0) as int;
+      final settled = (program['totalSettled'] ?? 0) as int;
+      final outstanding = redeemed - settled;
+
+      if (outstanding <= 0) continue;
+
+      final lastPrompted = program['lastPromptedDate'] as String?;
+      if (lastPrompted == today) continue;
+
+      final createdAt = program['createdAt'];
+      DateTime? createdDate;
+      if (createdAt is Timestamp) createdDate = createdAt.toDate();
+      if (createdDate != null) {
+        final createdDay = DateFormat('yyyy-MM-dd').format(createdDate);
+        if (createdDay == today) continue;
+      }
+
+      if (!context.mounted) return;
+
+      await _showSettlementPrompt(context, program, outstanding, today, yesterday);
+    }
+  }
+
+  static Future<void> _showSettlementPrompt(
+      BuildContext context, Map<String, dynamic> program, int outstanding, String today, DateTime yesterday) async {
+    final name = program['programName'] ?? 'Program Voucher';
+    final formatter = NumberFormat.decimalPattern('id_ID');
+    
+    final bool? isSettled = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text('Voucher Belum Lunas', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text(
+          'Program "$name" masih memiliki piutang sebesar Rp ${formatter.format(outstanding)} dari hari sebelumnya.\n\nApakah tagihan ini sudah dilunasi?',
+          style: GoogleFonts.poppins(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Belum', style: GoogleFonts.poppins(color: Colors.red)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Sudah Lunas', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (isSettled == null) return;
+
+    if (isSettled) {
+      if (!context.mounted) return;
+      String selectedMethod = 'Cash';
+      final bool? methodConfirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setStateDialog) => AlertDialog(
+            title: Text('Metode Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Pilih metode pembayaran untuk pelunasan Rp ${formatter.format(outstanding)}:', style: GoogleFonts.poppins()),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  children: ['Cash', 'QRIS', 'Online'].map((m) {
+                    return ChoiceChip(
+                      label: Text(m),
+                      selected: selectedMethod == m,
+                      selectedColor: const Color(0xFFC8E6C9),
+                      labelStyle: GoogleFonts.poppins(
+                        fontWeight: selectedMethod == m ? FontWeight.w600 : FontWeight.w400,
+                        color: selectedMethod == m ? const Color(0xFF2E7D32) : Colors.black87,
+                      ),
+                      onSelected: (_) => setStateDialog(() => selectedMethod = m),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text('Batal', style: GoogleFonts.poppins()),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF069494), foregroundColor: Colors.white),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text('Simpan', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (methodConfirmed == true) {
+        await settleProgram(
+          programId: program['id'],
+          settledAmount: outstanding,
+          paymentMethod: selectedMethod,
+          settlementDate: yesterday,
+        );
+        await closeProgram(program['id']);
+      } else {
+        return; // Cancelled payment method, ask again next time
+      }
+    }
+
+    await _fs.collection(Col.name('voucherPrograms')).doc(program['id']).update({
+      'lastPromptedDate': today,
     });
   }
 }

@@ -33,6 +33,7 @@ import 'package:point_of_sales_app_v3/Screens/LiveTabsScreen.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/FinancialReportBottomSheet.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/QuickExpenseBottomSheet.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/VoucherProgramService.dart';
 
 class Home extends StatefulWidget {
   const Home({Key? key}) : super(key: key);
@@ -102,6 +103,12 @@ class _HomeState extends State<Home> {
     _initializeRecommendationService();
     
     _initBadgeSubscriptions();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        VoucherProgramService.checkAndPromptPendingVouchers(context);
+      }
+    });
   }
 
   void _initBadgeSubscriptions() {

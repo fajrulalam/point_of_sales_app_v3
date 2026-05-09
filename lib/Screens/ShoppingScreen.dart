@@ -1160,11 +1160,49 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                       ),
                       subtitle: Text('Tanggal: $dateStr | Status: ${order.status.toUpperCase()}'),
                       children: [
-                        ...order.items.map((item) => ListTile(
-                              dense: true,
-                              title: Text(ShoppingService.displayName(item.inventoryItemId, item.name)),
-                              trailing: Text('${item.quantity} ${item.unit}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            )),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey.shade300),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Table(
+                                columnWidths: const {
+                                  0: FlexColumnWidth(3),
+                                  1: FlexColumnWidth(1),
+                                  2: FlexColumnWidth(1.2),
+                                },
+                                children: [
+                                  TableRow(
+                                    decoration: const BoxDecoration(color: Color(0xFF2E7D32)),
+                                    children: [
+                                      _buildTableCell('Nama Item', isHeader: true),
+                                      _buildTableCell('Unit', isHeader: true),
+                                      _buildTableCell('Jumlah', isHeader: true),
+                                    ],
+                                  ),
+                                  ...order.items.asMap().entries.map((entry) {
+                                    int i = entry.key;
+                                    var item = entry.value;
+                                    return TableRow(
+                                      decoration: BoxDecoration(
+                                        color: i % 2 == 0 ? Colors.white : Colors.grey.shade50,
+                                      ),
+                                      children: [
+                                        _buildTableCell(ShoppingService.displayName(item.inventoryItemId, item.name)),
+                                        _buildTableCell(item.unit),
+                                        _buildTableCell(item.quantity.toString(), isBold: true),
+                                      ],
+                                    );
+                                  }).toList(),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                         Padding(
                           padding: const EdgeInsets.all(8.0),
                           child: Row(
@@ -1209,6 +1247,20 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildTableCell(String text, {bool isHeader = false, bool isBold = false}) {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Text(
+        text,
+        style: GoogleFonts.poppins(
+          fontSize: 12,
+          fontWeight: isHeader || isBold ? FontWeight.bold : FontWeight.normal,
+          color: isHeader ? Colors.white : Colors.black87,
+        ),
+      ),
     );
   }
 

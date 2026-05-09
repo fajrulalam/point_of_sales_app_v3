@@ -427,8 +427,19 @@ class ShoppingService {
             pw.SizedBox(height: 30),
             pw.Table.fromTextArray(
               context: context,
-              border: pw.TableBorder.all(),
+              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
               headerAlignment: pw.Alignment.centerLeft,
+              headerStyle: pw.TextStyle(
+                color: PdfColors.white,
+                fontWeight: pw.FontWeight.bold,
+              ),
+              headerDecoration: const pw.BoxDecoration(
+                color: PdfColors.green700,
+              ),
+              oddRowDecoration: const pw.BoxDecoration(
+                color: PdfColors.grey100,
+              ),
+              cellHeight: 30,
               data: <List<String>>[
                 <String>['Nama Item', 'Unit', 'Jumlah'],
                 ...order.items.map((item) => [
@@ -474,8 +485,19 @@ class ShoppingService {
               pw.SizedBox(height: 30),
               pw.Table.fromTextArray(
                 context: context,
-                border: pw.TableBorder.all(),
+                border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
                 headerAlignment: pw.Alignment.centerLeft,
+                headerStyle: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.green700,
+                ),
+                oddRowDecoration: const pw.BoxDecoration(
+                  color: PdfColors.grey100,
+                ),
+                cellHeight: 30,
                 data: <List<String>>[
                   <String>['Nama Item', 'Unit', 'Jumlah'],
                   ...order.items.map((item) => [

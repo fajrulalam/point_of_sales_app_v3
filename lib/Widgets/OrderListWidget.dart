@@ -24,7 +24,7 @@ class OrderListWidget extends StatelessWidget {
   Future<void> _showNoteDialog(
       BuildContext context, int index, String? currentNote) async {
     final controller = TextEditingController(text: currentNote ?? '');
-    final result = await showDialog<String?>(
+    final result = await showDialog<dynamic>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
@@ -71,7 +71,7 @@ class OrderListWidget extends StatelessWidget {
                     style: GoogleFonts.poppins(color: Colors.redAccent)),
               ),
             TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
+              onPressed: () => Navigator.pop(ctx, 'CANCEL'),
               child: Text('Batal',
                   style: GoogleFonts.poppins(color: Colors.grey.shade600)),
             ),
@@ -91,12 +91,14 @@ class OrderListWidget extends StatelessWidget {
       },
     );
 
-    if (result == null) return;
+    if (result == 'CANCEL') return;
+
     if (result == '\x00') {
       onNoteChanged(index, null);
     } else {
-      final trimmed = result.trim();
-      onNoteChanged(index, trimmed.isEmpty ? null : trimmed);
+      // If result is null (barrier dismissal), use the controller text
+      final textToSave = (result is String ? result : controller.text).trim();
+      onNoteChanged(index, textToSave.isEmpty ? null : textToSave);
     }
   }
 
