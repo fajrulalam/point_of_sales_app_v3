@@ -11,8 +11,22 @@ class MemberService {
 
   /// Prevents overlapping background syncs when checkout opens repeatedly.
   bool _backgroundRefreshRunning = false;
+  Future<void>? _syncFuture;
 
-  MemberService._init();
+  MemberService._init() {
+    // Listen for testing mode changes to clear local cache and re-fetch
+    Col.testingMode.addListener(_handleModeChange);
+  }
+
+  void _handleModeChange() {
+    print('🔄 Testing mode changed, clearing and refreshing members cache...');
+    _clearLocalCacheAndRefresh();
+  }
+
+  Future<void> _clearLocalCacheAndRefresh() async {
+    await _dbHelper.clearMembers();
+    await fetchAndCacheMembers();
+  }
 
   // Initialization: Fetch and cache all members
   Future<void> initializeCache() async {
@@ -34,6 +48,17 @@ class MemberService {
 
   // Fetch all members from Firestore and update local cache
   Future<void> fetchAndCacheMembers() async {
+    if (_syncFuture != null) return _syncFuture!;
+    
+    _syncFuture = _fetchAndCacheMembersImpl();
+    try {
+      await _syncFuture;
+    } finally {
+      _syncFuture = null;
+    }
+  }
+
+  Future<void> _fetchAndCacheMembersImpl() async {
     try {
       final snapshot = await _firestore.collection(Col.name('Members')).get();
       final members = snapshot.docs

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
+import 'package:point_of_sales_app_v3/Classes/Menu.dart';
+import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
+import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 
 class OrderListWidget extends StatelessWidget {
   final List<PesananObject> pesananList;
@@ -10,6 +13,8 @@ class OrderListWidget extends StatelessWidget {
   final Function(int) onIncrementTakeAway;
   final Function(int) onDecrementTakeAway;
   final Function(int, String?) onNoteChanged;
+  final List<MenuObject> allMenus;
+  final List<OptionGroup> allOptionGroups;
 
   const OrderListWidget({
     Key? key,
@@ -19,6 +24,8 @@ class OrderListWidget extends StatelessWidget {
     required this.onIncrementTakeAway,
     required this.onDecrementTakeAway,
     required this.onNoteChanged,
+    this.allMenus = const [],
+    this.allOptionGroups = const [],
   }) : super(key: key);
 
   Future<void> _showNoteDialog(
@@ -152,6 +159,25 @@ class OrderListWidget extends StatelessWidget {
                         color: hasNote
                             ? Colors.orange.shade700
                             : Colors.grey.shade400,
+                      ),
+                      const SizedBox(width: 8),
+                      FutureBuilder<MenuAvailability>(
+                        future: InventoryService().checkPesananAvailability(
+                            order, allMenus, allOptionGroups),
+                        builder: (context, snapshot) {
+                          if (snapshot.hasData &&
+                              (snapshot.data?.hasWarning ?? false)) {
+                            return Tooltip(
+                              message: snapshot.data?.message ?? 'Stok kurang',
+                              child: const Icon(
+                                Icons.warning_amber_rounded,
+                                color: Colors.orange,
+                                size: 20,
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
                       ),
                     ],
                   ),

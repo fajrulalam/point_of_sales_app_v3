@@ -44,12 +44,37 @@ class _MarketingScreenState extends State<MarketingScreen>
     _tabController.addListener(() {
       setState(() {}); // Rebuild FAB on tab change
     });
-    _loadMembers();
-    _loadCampaigns();
+    
+    // Listen for testing mode changes to refresh data
+    Col.testingMode.addListener(_onTestingModeChanged);
+    
+    _initializeData();
+  }
+
+  Future<void> _initializeData() async {
+    if (mounted) setState(() => _isLoadingMembers = true);
+    await _memberService.fetchAndCacheMembers();
+    if (mounted) {
+      _loadMembers();
+      _loadCampaigns();
+    }
+  }
+
+  void _onTestingModeChanged() async {
+    if (mounted) {
+      setState(() => _isLoadingMembers = true);
+      // Wait for the service to finish clearing and re-fetching
+      await _memberService.fetchAndCacheMembers();
+      if (mounted) {
+        await _loadMembers();
+        _loadCampaigns();
+      }
+    }
   }
 
   @override
   void dispose() {
+    Col.testingMode.removeListener(_onTestingModeChanged);
     _tabController.dispose();
     _searchController.dispose();
     _searchDebounce?.cancel();

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class SelfOrderService {
   static final SelfOrderService _instance = SelfOrderService._internal();
@@ -14,7 +15,7 @@ class SelfOrderService {
 
   /// Get the collection reference for self-orders (root-level collection)
   static CollectionReference<Map<String, dynamic>> get _selfOrdersCollection =>
-      _firestore.collection('SelfOrders');
+      _firestore.collection(Col.name('SelfOrders'));
 
   /// Get a real-time stream of self-orders
   /// Optionally filter by status (e.g., 'Unpaid', 'Paid', 'Declined')

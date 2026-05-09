@@ -27,6 +27,7 @@ class Col {
     'MonthlyTransaction',
     'OrderHistory',
     'RecentlyServed',
+    'SelfOrders',
     'Status',
     'Stock',
     'StockImageDaily',

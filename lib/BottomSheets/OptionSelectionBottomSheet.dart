@@ -88,6 +88,23 @@ class _OptionSelectionBottomSheetState
   }
 
   void _toggleOption(OptionGroup group, OptionItem option) {
+    final bool isSelected = (_selections[group.id] ?? {}).contains(option.name);
+    
+    // If selecting (not deselecting), check stock for a warning
+    if (!isSelected) {
+      final maxServings = InventoryService().getMaxServings(option.ingredients);
+      if (maxServings != null && maxServings <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Peringatan: Stok "${option.name}" habis, tapi tetap bisa ditambahkan.'),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+
     setState(() {
       final selected = _selections[group.id]!;
       if (selected.contains(option.name)) {
@@ -298,34 +315,34 @@ class _OptionSelectionBottomSheetState
     final bool outOfStock = hasStock && maxServings <= 0;
 
     return GestureDetector(
-      onTap: outOfStock ? null : onTap,
+      onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: outOfStock
-              ? Colors.grey.shade100
-              : isSelected
-                  ? (option.priceAdjustment < 0
-                      ? const Color(0xFFFFF3E0)
-                      : const Color(0xFFE8F5E9))
+          color: isSelected
+              ? (option.priceAdjustment < 0
+                  ? const Color(0xFFFFF3E0)
+                  : const Color(0xFFE8F5E9))
+              : outOfStock
+                  ? Colors.grey.shade100
                   : Colors.white,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: outOfStock
-                ? Colors.grey.shade300
-                : isSelected
-                    ? (option.priceAdjustment < 0
-                        ? const Color(0xFFE65100)
-                        : const Color(0xFF2E7D32))
+            color: isSelected
+                ? (option.priceAdjustment < 0
+                    ? const Color(0xFFE65100)
+                    : const Color(0xFF2E7D32))
+                : outOfStock
+                    ? Colors.grey.shade300
                     : Colors.grey.shade300,
-            width: isSelected && !outOfStock ? 2 : 1,
+            width: isSelected ? 2 : 1,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (isSelected && !outOfStock)
+            if (isSelected)
               Padding(
                 padding: const EdgeInsets.only(right: 6),
                 child: Icon(
@@ -341,12 +358,12 @@ class _OptionSelectionBottomSheetState
               style: GoogleFonts.poppins(
                 fontSize: 13,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                color: outOfStock
-                    ? Colors.grey.shade400
-                    : isSelected
-                        ? (option.priceAdjustment < 0
-                            ? const Color(0xFFE65100)
-                            : const Color(0xFF2E7D32))
+                color: isSelected
+                    ? (option.priceAdjustment < 0
+                        ? const Color(0xFFE65100)
+                        : const Color(0xFF2E7D32))
+                    : outOfStock
+                        ? Colors.grey.shade400
                         : Colors.black87,
               ),
             ),
@@ -356,10 +373,12 @@ class _OptionSelectionBottomSheetState
                 option.formattedPrice,
                 style: GoogleFonts.poppins(
                   fontSize: 11,
-                  color: outOfStock
-                      ? Colors.grey.shade400
-                      : option.priceAdjustment < 0
-                          ? const Color(0xFFE65100)
+                  color: isSelected
+                      ? (option.priceAdjustment < 0
+                          ? const Color(0xFFE65100).withOpacity(0.8)
+                          : const Color(0xFF2E7D32).withOpacity(0.8))
+                      : outOfStock
+                          ? Colors.grey.shade400
                           : Colors.grey.shade600,
                 ),
               ),
@@ -377,7 +396,7 @@ class _OptionSelectionBottomSheetState
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  outOfStock ? 'Habis' : '$maxServings',
+                  outOfStock ? 'Habis (0)' : '$maxServings',
                   style: GoogleFonts.poppins(
                     fontSize: 10,
                     fontWeight: FontWeight.w600,

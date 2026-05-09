@@ -180,83 +180,90 @@ class _HomeState extends State<Home> {
       ),
       child: Scaffold(
         resizeToAvoidBottomInset: false,
-    body: Stack(
-      children: [
-        // 1. Layout Base (Content + Space for Sidebar)
-        Row(
-          children: [
-            // Dummy space filler to push main content
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeInOut,
-              width: sidebarWidth,
-            ),
-            // Main Content Area
-            Expanded(
-              child: _buildMainContent(),
-            ),
-          ],
-        ),
-        // 2. Sidebar (on top)
-        SidebarWidget(
-          printerIsConnected: controller.printerIsConnected,
-          liveTabsCount: _pendingSelfOrdersCount + _pendingOpenBillsCount,
-          activeRoute: _activeRoute,
-          isExpanded: true, // Always true when not minimized
-          isMinimized: _sidebarMinimized,
-          onExpandToggled: () => setState(() {
-            _sidebarMinimized = !_sidebarMinimized;
-          }),
-          onMinimizeToggled: () => setState(() {
-            _sidebarMinimized = !_sidebarMinimized;
-          }),
-          onOrderPressed: () => setState(() => _activeRoute = 'pos_order'),
-          onMenuPressed: () => setState(() => _activeRoute = 'pos_menu'),
-          onPrintPressed: () => _handlePrintPressed(),
-          onPrintLongPress: () => _handlePrintLongPress(),
-          onResetPressed: () => controller.resetCustomerNumber(),
-          onRulesPressed: null,
-          onInventoryPressed: () => _navigateToInventory(),
-          onShoppingPressed: () => _navigateToShopping(),
-          onSelfOrdersPressed: () => _navigateToSelfOrders(),
-          onMembersPressed: () => _navigateToMembers(),
-          onEditOrderPressed: () => setState(() => _activeRoute = 'edit_order'),
-          onQuickExpensePressed: () => _showQuickExpense(),
-          onFinancialReportPressed: () => _showFinancialReport(),
-          onTestingModeToggled: _handleTestingModeToggle,
-          onLogoutPressed: _handleLogout,
-        ),
-        // 3. Floating Bubble (Direct child of Stack to fix hit-testing)
-        if (_sidebarMinimized)
-          Positioned(
-            left: 20,
-            bottom: 32,
-            child: _buildFloatingBubble(),
-          ),
-        // 4. Testing mode banner
-        if (Col.testingMode.value)
-          Positioned(
-            top: 0,
-            left: sidebarWidth,
-            right: 0,
-            child: Container(
-              color: Colors.orange.shade700,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: const Center(
-                child: Text(
-                  'TESTING MODE — data will not affect production',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
+        body: ValueListenableBuilder<bool>(
+          valueListenable: Col.testingMode,
+          builder: (context, isTesting, child) {
+            final sidebarWidth = _sidebarMinimized ? 0.0 : expandedWidth;
+            return Stack(
+              key: ValueKey('home_content_$isTesting'),
+              children: [
+                // 1. Layout Base (Content + Space for Sidebar)
+                Row(
+                  children: [
+                    // Dummy space filler to push main content
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeInOut,
+                      width: sidebarWidth,
+                    ),
+                    // Main Content Area
+                    Expanded(
+                      child: _buildMainContent(),
+                    ),
+                  ],
                 ),
-              ),
-            ),
-          ),
-      ],
-    ),
-  ),
+                // 2. Sidebar (on top)
+                SidebarWidget(
+                  printerIsConnected: controller.printerIsConnected,
+                  liveTabsCount: _pendingSelfOrdersCount + _pendingOpenBillsCount,
+                  activeRoute: _activeRoute,
+                  isExpanded: true,
+                  isMinimized: _sidebarMinimized,
+                  onExpandToggled: () => setState(() {
+                    _sidebarMinimized = !_sidebarMinimized;
+                  }),
+                  onMinimizeToggled: () => setState(() {
+                    _sidebarMinimized = !_sidebarMinimized;
+                  }),
+                  onOrderPressed: () => setState(() => _activeRoute = 'pos_order'),
+                  onMenuPressed: () => setState(() => _activeRoute = 'pos_menu'),
+                  onPrintPressed: () => _handlePrintPressed(),
+                  onPrintLongPress: () => _handlePrintLongPress(),
+                  onResetPressed: () => controller.resetCustomerNumber(),
+                  onRulesPressed: null,
+                  onInventoryPressed: () => _navigateToInventory(),
+                  onShoppingPressed: () => _navigateToShopping(),
+                  onSelfOrdersPressed: () => _navigateToSelfOrders(),
+                  onMembersPressed: () => _navigateToMembers(),
+                  onEditOrderPressed: () => setState(() => _activeRoute = 'edit_order'),
+                  onQuickExpensePressed: () => _showQuickExpense(),
+                  onFinancialReportPressed: () => _showFinancialReport(),
+                  onTestingModeToggled: _handleTestingModeToggle,
+                  onLogoutPressed: _handleLogout,
+                ),
+                // 3. Floating Bubble
+                if (_sidebarMinimized)
+                  Positioned(
+                    left: 20,
+                    bottom: 32,
+                    child: _buildFloatingBubble(),
+                  ),
+                // 4. Testing mode banner
+                if (isTesting)
+                  Positioned(
+                    top: 0,
+                    left: sidebarWidth,
+                    right: 0,
+                    child: Container(
+                      color: Colors.orange.shade700,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: const Center(
+                        child: Text(
+                          'TESTING MODE — data will not affect production',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
 );
 }
 
@@ -499,6 +506,8 @@ Widget _buildMainContent() {
                   ),
                   child: OrderListWidget(
                     pesananList: controller.pesananList,
+                    allMenus: controller.menuObjectList,
+                    allOptionGroups: controller.optionGroups,
                     onIncrementDineIn: (index) =>
                         controller.incrementDineIn(index),
                     onDecrementDineIn: (index) =>

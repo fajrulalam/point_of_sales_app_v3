@@ -2,11 +2,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
+import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
+import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 
 class InventoryService {
   static final InventoryService _instance = InventoryService._internal();
   factory InventoryService() => _instance;
-  InventoryService._internal();
+  InventoryService._internal() {
+    // Listen for testing mode changes to clear cache and refresh data
+    Col.testingMode.addListener(_handleModeChange);
+  }
+
+  void _handleModeChange() {
+    _inventoryCache.clear();
+    refreshInventoryCache();
+  }
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final String canteenId = 'canteen375';
@@ -181,6 +191,39 @@ class InventoryService {
     }
 
     return MenuAvailability(isAvailable: true, message: 'Available');
+  }
+
+  /// Helper to check availability for a PesananObject (combines menu + options)
+  Future<MenuAvailability> checkPesananAvailability(
+    PesananObject pesanan,
+    List<MenuObject> allMenus,
+    List<OptionGroup> allGroups,
+  ) async {
+    final menu = allMenus.firstWhere(
+      (m) => m.id == pesanan.menuItemId || m.namaMenu == pesanan.namaPesanan,
+      orElse: () => MenuObject(id: '', namaMenu: pesanan.namaPesanan, harga: pesanan.harga, isMakanan: true, imagePath: ''),
+    );
+
+    if (menu.id.isEmpty && menu.ingredients.isEmpty && pesanan.selectedOptions.isEmpty) {
+      return MenuAvailability(isAvailable: true, message: 'Available');
+    }
+
+    final optionIngredients = <MenuIngredient>[];
+    for (var selected in pesanan.selectedOptions) {
+      final group = allGroups.firstWhere(
+        (g) => g.id == selected.groupId,
+        orElse: () => OptionGroup(id: '', name: ''),
+      );
+      if (group.id.isEmpty) continue;
+      final optionItem = group.options.firstWhere(
+        (o) => o.id == selected.optionId || o.name == selected.optionName,
+        orElse: () => OptionItem(id: '', name: ''),
+      );
+      if (optionItem.id.isEmpty) continue;
+      optionIngredients.addAll(optionItem.ingredients);
+    }
+
+    return checkOrderAvailability(menu, optionIngredients, pesanan.totalQuantity);
   }
 
   /// Append deductions for a fully aggregated ingredient list into a WriteBatch using increment
