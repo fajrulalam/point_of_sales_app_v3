@@ -808,13 +808,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
     
     if (printerIsConnected) {
       try {
-        await Future.delayed(const Duration(milliseconds: 500));
-        printer.printCustom("Percobaan printer", 3, 1);
-        printer.printNewLine();
-        printer.printQRcode('Test printer', 200, 200, 1);
-        printer.printNewLine();
-        printer.printNewLine();
-        printer.paperCut();
+        await widget.controller.testPrinter(invoice);
       } catch (e) {
         print("❌ Printer error during test: $e");
         setState(() {

@@ -638,6 +638,7 @@ Widget _buildMainContent() {
           bool? overrideIsTakeAway,
           int discountAmount = 0,
           int originalTotal = 0,
+          String? customerName,
         }) async =>
             await controller.printReceipt(
           customPesananList: customPesananList ?? controller.pesananList,
@@ -647,6 +648,7 @@ Widget _buildMainContent() {
           overrideIsTakeAway: overrideIsTakeAway ?? controller.isTakeAway,
           discountAmount: discountAmount,
           originalTotal: originalTotal,
+          customerName: customerName,
         ),
         getYear: controller.getYear,
         getMonth: controller.getMonth,
@@ -743,11 +745,12 @@ Widget _buildMainContent() {
                  getYear: controller.getYear,
                  getMonth: controller.getMonth,
                  getDate: controller.getDate,
-                 printReceipt: () async {
+                 printReceipt: ({String? customerName}) async {
                    await controller.printReceipt(
                      overrideNomorBerikutnya: controller.editOriginalData?['customerNumber'],
                      customPesananList: controller.pesananList,
                      overrideTotalHarga: controller.totalHarga,
+                     customerName: customerName,
                    );
                    controller.clearEditMode();
                    if (mounted) {

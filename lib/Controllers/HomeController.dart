@@ -1,4 +1,9 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:google_fonts/google_fonts.dart';
+import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -552,6 +557,122 @@ class HomeController extends ChangeNotifier {
     }
   }
 
+  Future<ui.Image> _loadUiImage(String assetPath) async {
+    final data = await rootBundle.load(assetPath);
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromList(data.buffer.asUint8List(), completer.complete);
+    return completer.future;
+  }
+
+  Future<void> _printReceiptHeader({
+    bool isReprint = false,
+    bool isSettled = false,
+    bool isTest = false,
+  }) async {
+    bool imagePrinted = false;
+
+    try {
+      // 1. Setup Canvas Dimensions (384px is standard for 58mm)
+      const double paperWidth = 384.0;
+      const double canvasHeight = 140.0;
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      
+      // Fill background white
+      final paint = ui.Paint()..color = ui.Color(0xFFFFFFFF);
+      canvas.drawRect(ui.Rect.fromLTWH(0, 0, paperWidth, canvasHeight), paint);
+
+      // 2. Draw Logo
+      final ui.Image logoImage = await _loadUiImage('assets/Logo Canteen375 (PNG).png');
+      const double logoSize = 110.0;
+      canvas.drawImageRect(
+        logoImage,
+        ui.Rect.fromLTWH(0, 0, logoImage.width.toDouble(), logoImage.height.toDouble()),
+        ui.Rect.fromLTWH(0, 15, logoSize, logoSize),
+        ui.Paint(),
+      );
+
+      // 3. Draw Branding Text with Custom Fonts
+      final double textLeft = logoSize + 10;
+      
+      // Title: Canteen 375 (Playfair Display Bold)
+      final titlePainter = TextPainter(
+        text: TextSpan(
+          text: 'Canteen 375',
+          style: GoogleFonts.playfairDisplay(
+            color: Colors.black,
+            fontSize: 48,
+            fontWeight: FontWeight.bold,
+            letterSpacing: -1.5,
+          ),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+      titlePainter.paint(canvas, ui.Offset(textLeft, 25));
+
+      // Tagline: Sehat.Bersih.Nikmat (Montserrat Medium)
+      final taglinePainter = TextPainter(
+        text: TextSpan(
+          text: 'Sehat · Bersih · Nikmat',
+          style: TextStyle(
+            color: ui.Color(0xFF333333),
+            fontSize: 24,
+            fontWeight: FontWeight.w500,
+            fontFamily: 'Montserrat',
+            letterSpacing: -1.0,
+          ),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+      taglinePainter.paint(canvas, ui.Offset(textLeft, 85));
+
+      // 4. Convert Canvas to Printer-ready Image
+      final picture = recorder.endRecording();
+      final imgRes = await picture.toImage(paperWidth.toInt(), canvasHeight.toInt());
+      final byteData = await imgRes.toByteData(format: ui.ImageByteFormat.png);
+      
+      if (byteData != null) {
+        // Process with 'image' package to ensure it's grayscale/1-bit for best thermal results
+        final img.Image? decoded = img.decodeImage(byteData.buffer.asUint8List());
+        if (decoded != null) {
+          final Directory tempDir = await getTemporaryDirectory();
+          final File headerFile = File('${tempDir.path}/canteen_header_v2.png');
+          
+          // Grayscale conversion helps the thermal printer handle colors better
+          final img.Image gray = img.grayscale(decoded);
+          await headerFile.writeAsBytes(img.encodePng(gray));
+
+          await printer.printImage(headerFile.path);
+          printer.printNewLine();
+          imagePrinted = true;
+        }
+      }
+    } catch (e) {
+      print('❌ Advanced Header Error: $e');
+    }
+
+    // Fallback to text-only if image failed
+    if (!imagePrinted) {
+      printer.printCustom("================================", 0, 1);
+      printer.printCustom("Canteen 375", 3, 1);
+      printer.printCustom("Sehat.Bersih.Nikmat", 0, 1);
+      printer.printCustom("UNIPDU PLAZA AREA", 0, 1);
+      printer.printCustom("================================", 0, 1);
+    }
+
+    if (isTest) {
+      printer.printNewLine();
+      printer.printCustom("--- TES PRINTER ---", 1, 1);
+    }
+    if (isReprint) {
+      printer.printNewLine();
+      printer.printCustom("*** CETAK ULANG ***", 1, 1);
+    }
+    if (isSettled) {
+      printer.printCustom("*** TAGIHAN SELESAI ***", 1, 1);
+    }
+  }
+
   Future<void> printReceipt({
     List<PesananObject>? customPesananList,
     int? overrideNomorBerikutnya,
@@ -560,6 +681,7 @@ class HomeController extends ChangeNotifier {
     int discountAmount = 0,
     int originalTotal = 0,
     int? overrideBiayaBungkus,
+    String? customerName,
   }) async {
     // Check actual printer connection status dynamically
     await checkIfPrinterIsConnected();
@@ -575,14 +697,21 @@ class HomeController extends ChangeNotifier {
     final List<PesananObject> displayPesananList = customPesananList ?? pesananList;
 
     try {
-      printer.printCustom("Canteen 375", 3, 1);
+      await _printReceiptHeader();
       printer.printNewLine();
       DateTime now = DateTime.now();
       String formattedDate = DateFormat('dd-MM-yy HH:mm').format(now);
-      print2Column(formattedDate, "No. $displayNomor", 3);
-      // printer.print2Column();
+      
+      // Date and Queue Number - Small font
+      print2ColumnSmall(formattedDate, "No. $displayNomor");
+      
+      // Customer Name - Small font
+      if (customerName != null && customerName.isNotEmpty) {
+        printer.printCustom("$customerName", 1, 0);
+      }
+      
       printer.printNewLine();
-      print2Column('ITEM (QTY)', 'SUBTOTAL', 58);
+      print2ColumnSmall('ITEM (QTY)', 'SUBTOTAL');
       for (var element in displayPesananList) {
         String itemName = element.namaPesanan;
         if (itemName.length > 15) {
@@ -662,16 +791,23 @@ class HomeController extends ChangeNotifier {
           ? orderItems.any((item) => (item['orderType'] ?? '') == 'take-away')
           : orderItems.any((item) => (item['takeAwayQuantity'] ?? 0) > 0);
 
-      printer.printCustom("Canteen 375", 3, 1);
-      printer.printCustom("*** CETAK ULANG ***", 1, 1);
-      printer.printNewLine();
+      await _printReceiptHeader(isReprint: true);
 
       String formattedDate = waktuPesan != null
           ? DateFormat('dd-MM-yy HH:mm').format(waktuPesan)
           : DateFormat('dd-MM-yy HH:mm').format(DateTime.now());
-      print2Column(formattedDate, "No. $customerNumber", 3);
+      
+      // Date and Queue Number - Small font
+      print2ColumnSmall(formattedDate, "No. $customerNumber");
+      
+      // Customer Name - Medium font
+      final String? customerName = orderData["namaCustomer"];
+      if (customerName != null && customerName.isNotEmpty) {
+        printer.printCustom("$customerName", 1, 0);
+      }
+      
       printer.printNewLine();
-      print2Column('ITEM (QTY)', 'SUBTOTAL', 58);
+      print2ColumnSmall('ITEM (QTY)', 'SUBTOTAL');
 
       for (var item in orderItems) {
         String itemName = item['namaPesanan'] ?? '';
@@ -707,7 +843,7 @@ class HomeController extends ChangeNotifier {
         }
         final String? note = item['customerNote'];
         if (note != null && note.isNotEmpty) {
-          printer.printCustom('  * $note', 1, 0);
+          printer.printCustom('  * ${note}', 1, 0);
         }
       }
 
@@ -769,18 +905,20 @@ class HomeController extends ChangeNotifier {
           ? (data['settledAt'] as dynamic).toDate()
           : null;
 
-      printer.printCustom("Canteen 375", 3, 1);
-      printer.printCustom("*** TAGIHAN SELESAI ***", 1, 1);
-      printer.printCustom("*** CETAK ULANG ***", 1, 1);
-      printer.printNewLine();
+      await _printReceiptHeader(isSettled: true, isReprint: true);
 
       String formattedDate = settledAt != null
           ? DateFormat('dd-MM-yy HH:mm').format(settledAt)
           : DateFormat('dd-MM-yy HH:mm').format(DateTime.now());
-      print2Column(formattedDate, paymentMethod, 3);
-      printer.printCustom("Pelanggan: $memberName", 0, 0);
+      
+      // Date and Method - Small font
+      print2ColumnSmall(formattedDate, paymentMethod);
+      
+      // Customer Name - Medium font
+      printer.printCustom("$memberName", 1, 0);
+      
       printer.printNewLine();
-      print2Column('ITEM (QTY)', 'SUBTOTAL', 58);
+      print2ColumnSmall('ITEM (QTY)', 'SUBTOTAL');
 
       if (flatItems != null && flatItems.isNotEmpty) {
         // New Status doc format: flat orderItems array
@@ -812,7 +950,7 @@ class HomeController extends ChangeNotifier {
           }
           final String? note = item['customerNote'];
           if (note != null && note.isNotEmpty) {
-            printer.printCustom('  * $note', 1, 0);
+            printer.printCustom('  * ${note}', 1, 0);
           }
         }
       } else if (legacyOrders != null) {
@@ -885,8 +1023,9 @@ class HomeController extends ChangeNotifier {
     if (printerIsConnected) {
       try {
         await Future.delayed(const Duration(milliseconds: 500));
-        printer.printCustom("Pinter sudah terhubung.", 3, 1);
+        await _printReceiptHeader(isTest: true);
         printer.printNewLine();
+        printer.printQRcode('Canteen 375 - Test', 200, 200, 1);
         printer.printNewLine();
         printer.printNewLine();
         printer.paperCut();
@@ -979,9 +1118,9 @@ class HomeController extends ChangeNotifier {
   }
 
   void print2ColumnSmall(String left, String right) {
-    // Small font (size 0) allows for more characters per line.
-    // Standard 58mm = ~42 chars. Standard 80mm = ~56-64 chars.
-    int maxChars = 42;
+    // Medium font (size 1) - easier to read
+    // Standard 58mm = ~32 chars. 
+    int maxChars = 32;
 
     int spaces = maxChars - left.length - right.length;
 
@@ -990,9 +1129,8 @@ class HomeController extends ChangeNotifier {
 
     String fullLine = left + (" " * spaces) + right;
 
-    // Size '0' is the smallest font size in blue_thermal_printer
-    // Align '0' keeps it left-justified
-    printer.printCustom(fullLine, 0, 0);
+    // Use size 1 for slightly larger text
+    printer.printCustom(fullLine, 1, 0);
   }
 
   void printDynamicSize({

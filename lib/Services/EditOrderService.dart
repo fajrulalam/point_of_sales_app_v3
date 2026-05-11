@@ -22,7 +22,7 @@ class EditOrderService {
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
-    required Function() printReceipt,
+    required Function({String? customerName}) printReceipt,
   }) async {
     final fs = FirebaseFirestore.instance;
     final batch = fs.batch();
@@ -212,7 +212,7 @@ class EditOrderService {
 
       if (context.mounted) {
         Navigator.pop(context); // Close loader
-        printReceipt(); // Print new receipt
+        printReceipt(customerName: originalStatusData['namaCustomer']); // Print new receipt
       }
 
     } catch (e) {

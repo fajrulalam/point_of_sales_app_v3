@@ -42,7 +42,7 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal,
+      int originalTotal, String? customerName,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -162,7 +162,7 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal,
+      int originalTotal, String? customerName,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -250,7 +250,7 @@ class OrderConfirmationService {
     required SelfOrder selfOrder,
     required List<PesananObject> pesananList,
     required int totalHarga,
-    required int originalTotal,
+    required int originalTotal, String? customerName,
     required bool isTakeAway,
     required int biayaBungkus,
     required TextEditingController customerNameController,
@@ -263,7 +263,7 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal,
+      int originalTotal, String? customerName,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -522,7 +522,7 @@ class OrderConfirmationService {
         overrideTotalHarga: totalHarga,
         overrideIsTakeAway: isTakeAway,
         discountAmount: discountAmount,
-        originalTotal: originalTotal,
+        originalTotal: originalTotal, customerName: customerNameController.text,
       );
 
       if (context.mounted) {
@@ -581,7 +581,7 @@ class OrderConfirmationService {
     required int nomorBerikutnya,
     required int uangYangDiterima,
     required int totalHarga,
-    required int originalTotal,
+    required int originalTotal, String? customerName,
     required int discountAmount,
     required List<PesananObject> pesananList,
     required TextEditingController customerNameController,
@@ -726,7 +726,7 @@ class OrderConfirmationService {
     required BuildContext context,
     required List<PesananObject> pesananList,
     required int totalHarga,
-    required int originalTotal,
+    required int originalTotal, String? customerName,
     required bool isTakeAway,
     required int biayaBungkus,
     required TextEditingController customerNameController,
@@ -739,7 +739,7 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal,
+      int originalTotal, String? customerName,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -989,7 +989,7 @@ class OrderConfirmationService {
         overrideTotalHarga: totalHarga,
         overrideIsTakeAway: isTakeAway,
         discountAmount: discountAmount,
-        originalTotal: originalTotal,
+        originalTotal: originalTotal, customerName: customerNameController.text,
       );
 
       if (context.mounted) {
@@ -1030,7 +1030,7 @@ class OrderConfirmationService {
     required BuildContext context,
     required List<PesananObject> pesananList,
     required int totalHarga,
-    required int originalTotal,
+    required int originalTotal, String? customerName,
     required bool isTakeAway,
     required int biayaBungkus,
     required TextEditingController customerNameController,
@@ -1043,7 +1043,7 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal,
+      int originalTotal, String? customerName,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -1238,7 +1238,7 @@ class OrderConfirmationService {
     required int nomorBerikutnya,
     required int uangYangDiterima,
     required int totalHarga,
-    required int originalTotal,
+    required int originalTotal, String? customerName,
     required int discountAmount,
     required List<PesananObject> pesananList,
     required TextEditingController customerNameController,
@@ -1746,7 +1746,7 @@ class OrderConfirmationService {
     required bool printerIsConnected,
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
-    required Future<void> Function({int discountAmount, int originalTotal, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway})
+    required Future<void> Function({int discountAmount, int originalTotal, String? customerName, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway})
         printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -1862,11 +1862,11 @@ class OrderConfirmationService {
     required OpenBill openBill,
     required List<PesananObject> aggregatedItems,
     required int totalHarga,
-    required int originalTotal,
+    required int originalTotal, String? customerName,
     required int totalTakeAwayFee,
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
-    required Future<void> Function({int discountAmount, int originalTotal, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway}) printReceipt,
+    required Future<void> Function({int discountAmount, int originalTotal, String? customerName, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway}) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
@@ -1978,7 +1978,7 @@ class OrderConfirmationService {
         overrideNomorBerikutnya: openBill.customerNumber,
         overrideIsTakeAway: totalTakeAwayFee > 0,
         discountAmount: discountAmount,
-        originalTotal: originalTotal,
+        originalTotal: originalTotal, customerName: openBill.memberName,
       );
 
       Navigator.pop(context); // Close loader
@@ -2079,8 +2079,18 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
 
       if (mounted) {
         setState(() {
+          final now = DateTime.now();
           _redeemableVouchers = snapshot.docs
               .map((doc) => {...doc.data(), 'id': doc.id})
+              .where((v) {
+                final expireRaw = v['expireDate'];
+                if (expireRaw == null) return true; // no expiry = still valid
+                final expireDate = expireRaw is Timestamp
+                    ? expireRaw.toDate()
+                    : (expireRaw is DateTime ? expireRaw : null);
+                if (expireDate == null) return true;
+                return expireDate.isAfter(now);
+              })
               .toList();
           _isLoadingVouchers = false;
         });
@@ -3409,8 +3419,18 @@ class _SelfOrderConfirmationDialogState
 
       if (mounted) {
         setState(() {
+          final now = DateTime.now();
           _redeemableVouchers = snapshot.docs
               .map((doc) => {...doc.data(), 'id': doc.id})
+              .where((v) {
+                final expireRaw = v['expireDate'];
+                if (expireRaw == null) return true; // no expiry = still valid
+                final expireDate = expireRaw is Timestamp
+                    ? expireRaw.toDate()
+                    : (expireRaw is DateTime ? expireRaw : null);
+                if (expireDate == null) return true;
+                return expireDate.isAfter(now);
+              })
               .toList();
           _isLoadingVouchers = false;
         });
