@@ -132,9 +132,9 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.grey.shade100,
-      child: Column(
+    return Scaffold(
+      backgroundColor: Colors.grey.shade100,
+      body: Column(
         children: [
           _buildTabBar(),
           Expanded(
@@ -148,7 +148,108 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
           ),
         ],
       ),
+      floatingActionButton: ValueListenableBuilder<bool>(
+        valueListenable: Col.testingMode,
+        builder: (context, isTesting, child) {
+          if (!isTesting) return const SizedBox.shrink();
+          return FloatingActionButton.extended(
+            onPressed: () => _showMigrasiConfirmation(context),
+            backgroundColor: Colors.orange.shade800,
+            icon: const Icon(Icons.sync_alt, color: Colors.white),
+            label: Text(
+              'Migrasi Menu',
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          );
+        },
+      ),
     );
+  }
+
+  void _showMigrasiConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          'Konfirmasi Migrasi Menu',
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'Aksi ini akan MENGHAPUS SEMUA menu di mode testing dan menyalin semua menu dari production ke testing. Apakah Anda yakin?',
+          style: GoogleFonts.poppins(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Batal',
+              style: GoogleFonts.poppins(color: Colors.grey.shade600),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange.shade800,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.pop(context);
+              _performMigration();
+            },
+            child: Text(
+              'Ya, Migrasi',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _performMigration() async {
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: Colors.orange),
+      ),
+    );
+
+    try {
+      await Col.migrateMenuCollection();
+      
+      // Refresh inventory cache to ensure consistency
+      await InventoryService().refreshInventoryCache();
+
+      if (mounted) {
+        Navigator.pop(context); // Remove loading indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Migrasi menu berhasil diselesaikan',
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Remove loading indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Gagal melakukan migrasi: $e',
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildTabBar() {

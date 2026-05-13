@@ -530,6 +530,8 @@ Widget _buildMainContent() {
                 child: OrderSummaryWidget(
                   biayaBungkus: controller.biayaBungkus,
                   totalHarga: controller.totalHarga,
+                  pesananList: controller.pesananList,
+                  allMenus: controller.menuObjectList,
                   onBuyPressed: _handleBuyPressed,
                 ),
               ),

@@ -69,7 +69,58 @@ class Col {
     }
   }
 
-  // ── One-time data migration ────────────────────────────────────────
+  // ── Data migration ────────────────────────────────────────────────
+
+  /// Manually migrate MenuCollection from Production to Testing.
+  /// Deletes existing test items before copying from production.
+  static Future<void> migrateMenuCollection() async {
+    final fs = FirebaseFirestore.instance;
+    const docId = 'canteen375';
+    const sub = 'MenuCollection';
+
+    // 1. Delete existing test data
+    final testSnap = await fs
+        .collection('zTesting_Canteens')
+        .doc(docId)
+        .collection(sub)
+        .get();
+
+    if (testSnap.docs.isNotEmpty) {
+      final deleteChunks = _chunkList(testSnap.docs, 400);
+      for (final chunk in deleteChunks) {
+        final batch = fs.batch();
+        for (final doc in chunk) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+      }
+    }
+
+    // 2. Fetch production data
+    final prodSnap = await fs
+        .collection('Canteens')
+        .doc(docId)
+        .collection(sub)
+        .get();
+
+    // 3. Copy to test
+    if (prodSnap.docs.isNotEmpty) {
+      final copyChunks = _chunkList(prodSnap.docs, 400);
+      for (final chunk in copyChunks) {
+        final batch = fs.batch();
+        for (final doc in chunk) {
+          batch.set(
+            fs.collection('zTesting_Canteens')
+                .doc(docId)
+                .collection(sub)
+                .doc(doc.id),
+            doc.data(),
+          );
+        }
+        await batch.commit();
+      }
+    }
+  }
 
   static Future<void> _migrateIfNeeded() async {
     final fs = FirebaseFirestore.instance;

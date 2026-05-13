@@ -711,24 +711,52 @@ class HomeController extends ChangeNotifier {
       }
       
       printer.printNewLine();
-      print2ColumnSmall('ITEM (QTY)', 'SUBTOTAL');
-      for (var element in displayPesananList) {
-        String itemName = element.namaPesanan;
-        if (itemName.length > 15) {
-          itemName = itemName.substring(0, 15);
-          itemName += "..";
-        }
-        print2ColumnSmall(itemName + "(" + element.totalQuantity.toString() +")",
-             element.subtotal.toString());
+      print2ColumnSmall('(QTY) ITEM', 'SUBTOTAL');
+
+      // Sort items: Food (isMakanan: true) first, then Drinks
+      final List<PesananObject> sortedPesananList = List<PesananObject>.from(displayPesananList);
+      sortedPesananList.sort((a, b) {
+        final menuA = menuObjectList.firstWhere(
+          (m) => m.id == a.menuItemId,
+          orElse: () => MenuObject(id: '', namaMenu: '', harga: 0, isMakanan: true, imagePath: ''),
+        );
+        final menuB = menuObjectList.firstWhere(
+          (m) => m.id == b.menuItemId,
+          orElse: () => MenuObject(id: '', namaMenu: '', harga: 0, isMakanan: true, imagePath: ''),
+        );
+        if (menuA.isMakanan && !menuB.isMakanan) return -1;
+        if (!menuA.isMakanan && menuB.isMakanan) return 1;
+        return 0;
+      });
+
+      for (var element in sortedPesananList) {
+        int optionsAdj = 0;
         for (var opt in element.selectedOptions) {
-          String optLine = '  + ${opt.optionName}';
-          String optPrice = opt.priceAdjustment > 0
-              ? '+${opt.priceAdjustment}'
-              : '';
-          print2ColumnSmall(optLine, optPrice);
+          optionsAdj += opt.priceAdjustment;
         }
-        if (element.customerNote != null && element.customerNote!.isNotEmpty) {
-          printer.printCustom('  * ${element.customerNote}', 1, 0);
+        int effectivePrice = element.harga + optionsAdj;
+
+        void printItemLine(String name, int qty, int sub) {
+          String displayName = name;
+          if (displayName.length > 25) {
+            displayName = displayName.substring(0, 25) + "..";
+          }
+          print2ColumnSmall("($qty) $displayName", sub.toString());
+          for (var opt in element.selectedOptions) {
+            String optLine = '  + ${opt.optionName}';
+            String optPrice = '+${opt.priceAdjustment}';
+            print2ColumnSmall(optLine, optPrice);
+          }
+          if (element.customerNote != null && element.customerNote!.isNotEmpty) {
+            printer.printCustom('  * ${element.customerNote}', 0, 0);
+          }
+        }
+
+        if (element.dineInQuantity > 0) {
+          printItemLine(element.namaPesanan, element.dineInQuantity, effectivePrice * element.dineInQuantity);
+        }
+        if (element.takeAwayQuantity > 0) {
+          printItemLine("${element.namaPesanan} (bgks)", element.takeAwayQuantity, effectivePrice * element.takeAwayQuantity);
         }
       }
       if (displayTakeAway) {
@@ -807,43 +835,61 @@ class HomeController extends ChangeNotifier {
       }
       
       printer.printNewLine();
-      print2ColumnSmall('ITEM (QTY)', 'SUBTOTAL');
+      print2ColumnSmall('(QTY) ITEM', 'SUBTOTAL');
 
-      for (var item in orderItems) {
+      // Sort items: Food (isMakanan: true) first, then Drinks
+      final List<dynamic> sortedOrderItems = List<dynamic>.from(orderItems);
+      sortedOrderItems.sort((a, b) {
+        final bool isMakananA = a['isMakanan'] ?? true;
+        final bool isMakananB = b['isMakanan'] ?? true;
+        if (isMakananA && !isMakananB) return -1;
+        if (!isMakananA && isMakananB) return 1;
+        return 0;
+      });
+
+      for (var item in sortedOrderItems) {
         String itemName = item['namaPesanan'] ?? '';
         int harga = (item['harga'] ?? 0) is num ? (item['harga'] as num).toInt() : 0;
-
-        int totalQty;
-        if (isRecentlyServedFormat) {
-          totalQty = (item['quantity'] ?? 0) is num ? (item['quantity'] as num).toInt() : 0;
-        } else {
-          int dineIn = (item['dineInQuantity'] ?? 0) is num ? (item['dineInQuantity'] as num).toInt() : 0;
-          int takeAway = (item['takeAwayQuantity'] ?? 0) is num ? (item['takeAwayQuantity'] as num).toInt() : 0;
-          totalQty = dineIn + takeAway;
-        }
+        final List<dynamic> selectedOpts = item['selectedOptions'] ?? [];
+        final String? note = item['customerNote'];
 
         int optionsAdj = 0;
-        final List<dynamic> selectedOpts = item['selectedOptions'] ?? [];
         for (var opt in selectedOpts) {
           optionsAdj += ((opt['priceAdjustment'] ?? 0) as num).toInt();
         }
         int effectivePrice = harga + optionsAdj;
-        int subtotal = effectivePrice * totalQty;
 
-        if (itemName.length > 15) {
-          itemName = itemName.substring(0, 15) + "..";
+        void printReprintLine(String name, int qty) {
+          String displayName = name;
+          if (displayName.length > 25) {
+            displayName = displayName.substring(0, 25) + "..";
+          }
+          print2ColumnSmall("($qty) $displayName", (effectivePrice * qty).toString());
+          for (var opt in selectedOpts) {
+            String optName = opt['optionName'] ?? '';
+            int adj = ((opt['priceAdjustment'] ?? 0) as num).toInt();
+            String optPrice = '+$adj';
+            print2ColumnSmall('  + $optName', optPrice);
+          }
+          if (note != null && note.isNotEmpty) {
+            printer.printCustom('  * ${note}', 0, 0);
+          }
         }
-        print2ColumnSmall("$itemName($totalQty)", subtotal.toString());
 
-        for (var opt in selectedOpts) {
-          String optName = opt['optionName'] ?? '';
-          int adj = ((opt['priceAdjustment'] ?? 0) as num).toInt();
-          String optPrice = adj > 0 ? '+$adj' : '';
-          print2ColumnSmall('  + $optName', optPrice);
-        }
-        final String? note = item['customerNote'];
-        if (note != null && note.isNotEmpty) {
-          printer.printCustom('  * ${note}', 1, 0);
+        if (isRecentlyServedFormat) {
+          int qty = (item['quantity'] ?? 0) is num ? (item['quantity'] as num).toInt() : 0;
+          bool isTA = (item['orderType'] ?? '') == 'take-away';
+          printReprintLine(isTA ? "$itemName (bgks)" : itemName, qty);
+        } else {
+          int dineIn = (item['dineInQuantity'] ?? 0) is num ? (item['dineInQuantity'] as num).toInt() : 0;
+          int takeAway = (item['takeAwayQuantity'] ?? 0) is num ? (item['takeAwayQuantity'] as num).toInt() : 0;
+
+          if (dineIn > 0) {
+            printReprintLine(itemName, dineIn);
+          }
+          if (takeAway > 0) {
+            printReprintLine("$itemName (bgks)", takeAway);
+          }
         }
       }
 
@@ -1118,9 +1164,9 @@ class HomeController extends ChangeNotifier {
   }
 
   void print2ColumnSmall(String left, String right) {
-    // Medium font (size 1) - easier to read
-    // Standard 58mm = ~32 chars. 
-    int maxChars = 32;
+    // Small font (size 0) - allows for more characters
+    // Standard 58mm with size 0 = ~42 chars. 
+    int maxChars = 42;
 
     int spaces = maxChars - left.length - right.length;
 
@@ -1129,8 +1175,8 @@ class HomeController extends ChangeNotifier {
 
     String fullLine = left + (" " * spaces) + right;
 
-    // Use size 1 for slightly larger text
-    printer.printCustom(fullLine, 1, 0);
+    // Use size 0 for smallest text
+    printer.printCustom(fullLine, 0, 0);
   }
 
   void printDynamicSize({
