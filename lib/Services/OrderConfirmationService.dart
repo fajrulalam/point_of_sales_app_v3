@@ -42,7 +42,9 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal, String? customerName,
+      int originalTotal,
+      String? customerName,
+      int? voucherRemaining,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -53,12 +55,19 @@ class OrderConfirmationService {
     List<String> menuItems = const [], // Available menu items for filtering recommendations
     bool printerIsConnected = false,
   }) async {
-    if (pesananList.isEmpty) {
+    final activePesananList = pesananList.where((p) => p.totalQuantity > 0).toList();
+    if (activePesananList.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tidak ada item pesanan untuk diproses'),
+          backgroundColor: Colors.red,
+        ),
+      );
       return;
     }
 
     // 🎯 Generate recommendations based on current order
-    final recommendations = await _generateRecommendations(pesananList);
+    final recommendations = await _generateRecommendations(activePesananList);
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -70,7 +79,7 @@ class OrderConfirmationService {
           customerNameController: customerNameController,
           uangYangDiterimaController: uangYangDiterimaController,
           recommendations: recommendations,
-          pesananList: pesananList,
+          pesananList: activePesananList,
           onAddRecommendedItem: addRecommendedItem,
           getTotal: getTotal,
           menuItems: menuItems,
@@ -82,7 +91,8 @@ class OrderConfirmationService {
     if (result != null && result['chargeToTab'] == true) {
       await _processOpenBillOrder(
         context: context,
-        pesananList: pesananList,
+        pesananList: activePesananList,
+        basketToClear: pesananList,
         totalHarga: totalHarga,
         originalTotal: totalHarga,
         isTakeAway: isTakeAway,
@@ -109,7 +119,8 @@ class OrderConfirmationService {
 
       await _processOrder(
         context: context,
-        pesananList: pesananList,
+        pesananList: activePesananList,
+        basketToClear: pesananList,
         totalHarga: finalTotal,
         originalTotal: totalHarga,
         isTakeAway: isTakeAway,
@@ -130,6 +141,7 @@ class OrderConfirmationService {
         isPosVoucher: result['isPosVoucher'] ?? false,
         discountAmount: totalHarga - finalTotal,
         transactionMethod: paymentMethod,
+        voucherRemaining: result['voucherRemaining'],
         isSplitPayment: result['isSplitPayment'] ?? false,
         splitCashAmount: result['splitCashAmount'] ?? 0,
         splitQrisAmount: result['splitQrisAmount'] ?? 0,
@@ -162,7 +174,9 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal, String? customerName,
+      int originalTotal,
+      String? customerName,
+      int? voucherRemaining,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -172,12 +186,19 @@ class OrderConfirmationService {
     List<String> menuItems = const [],
     VoidCallback? onOrderCompleted,
   }) async {
-    if (pesananList.isEmpty) {
+    final activePesananList = pesananList.where((p) => p.totalQuantity > 0).toList();
+    if (activePesananList.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tidak ada item pesanan untuk diproses'),
+          backgroundColor: Colors.red,
+        ),
+      );
       return;
     }
 
     // Generate recommendations (may be empty for self-orders)
-    final recommendations = await _generateRecommendations(pesananList);
+    final recommendations = await _generateRecommendations(activePesananList);
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -191,7 +212,7 @@ class OrderConfirmationService {
           customerNameController: customerNameController,
           uangYangDiterimaController: uangYangDiterimaController,
           recommendations: recommendations,
-          pesananList: pesananList,
+          pesananList: activePesananList,
           onAddRecommendedItem: addRecommendedItem,
           getTotal: getTotal,
           menuItems: menuItems,
@@ -209,7 +230,7 @@ class OrderConfirmationService {
       await _processSelfOrder(
         context: context,
         selfOrder: selfOrder,
-        pesananList: pesananList,
+        pesananList: activePesananList,
         totalHarga: finalTotal,
         originalTotal: totalHarga,
         isTakeAway: isTakeAway,
@@ -231,6 +252,7 @@ class OrderConfirmationService {
         discountAmount: totalHarga - finalTotal,
         onOrderCompleted: onOrderCompleted,
         transactionMethod: paymentMethod,
+        voucherRemaining: result['voucherRemaining'],
         isSplitPayment: result['isSplitPayment'] ?? false,
         splitCashAmount: result['splitCashAmount'] ?? 0,
         splitQrisAmount: result['splitQrisAmount'] ?? 0,
@@ -263,7 +285,9 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal, String? customerName,
+      int originalTotal,
+      String? customerName,
+      int? voucherRemaining,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -277,6 +301,7 @@ class OrderConfirmationService {
     int discountAmount = 0,
     VoidCallback? onOrderCompleted,
     String? transactionMethod,
+    int? voucherRemaining,
     bool isSplitPayment = false,
     int splitCashAmount = 0,
     int splitQrisAmount = 0,
@@ -490,7 +515,7 @@ class OrderConfirmationService {
     await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
 
     if (appliedVoucherCode != null) {
-      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch);
+      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch, usedAmount: discountAmount);
     }
 
     if (voucherProgramId != null) {
@@ -522,7 +547,9 @@ class OrderConfirmationService {
         overrideTotalHarga: totalHarga,
         overrideIsTakeAway: isTakeAway,
         discountAmount: discountAmount,
-        originalTotal: originalTotal, customerName: customerNameController.text,
+        originalTotal: originalTotal,
+        customerName: customerNameController.text,
+        voucherRemaining: voucherRemaining,
       );
 
       if (context.mounted) {
@@ -552,6 +579,7 @@ class OrderConfirmationService {
                 ? (totalHarga - programNominal) - programExtraSplitQrisAmount 
                 : 0),
         programNominal: programNominal,
+        voucherRemaining: voucherRemaining,
       );
 
       onOrderCompleted?.call();
@@ -590,6 +618,7 @@ class OrderConfirmationService {
     required Function(int) setJumlahItem,
     int splitCashAmount = 0,
     int programNominal = 0,
+    int? voucherRemaining,
   }) async {
     await showDialog(
       context: context,
@@ -660,6 +689,16 @@ class OrderConfirmationService {
                           fontSize: 14,
                           color: Colors.green),
                     ),
+                    if (voucherRemaining != null && voucherRemaining! > 0) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Sisa Voucher: Rp ${NumberFormat.decimalPattern().format(voucherRemaining).replaceAll(',', '.')}',
+                        style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w400,
+                            fontSize: 12,
+                            color: Colors.green.shade700),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                   ],
                   Row(
@@ -725,6 +764,7 @@ class OrderConfirmationService {
   static Future<void> _processOrder({
     required BuildContext context,
     required List<PesananObject> pesananList,
+    required List<PesananObject> basketToClear,
     required int totalHarga,
     required int originalTotal, String? customerName,
     required bool isTakeAway,
@@ -739,7 +779,9 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal, String? customerName,
+      int originalTotal,
+      String? customerName,
+      int? voucherRemaining,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -752,6 +794,7 @@ class OrderConfirmationService {
     bool isPosVoucher = false,
     int discountAmount = 0,
     String? transactionMethod,
+    int? voucherRemaining,
     bool isSplitPayment = false,
     int splitCashAmount = 0,
     int splitQrisAmount = 0,
@@ -961,7 +1004,7 @@ class OrderConfirmationService {
     await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
     
     if (appliedVoucherCode != null) {
-      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch);
+      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch, usedAmount: discountAmount);
     }
     
     if (voucherProgramId != null) {
@@ -989,7 +1032,9 @@ class OrderConfirmationService {
         overrideTotalHarga: totalHarga,
         overrideIsTakeAway: isTakeAway,
         discountAmount: discountAmount,
-        originalTotal: originalTotal, customerName: customerNameController.text,
+        originalTotal: originalTotal,
+        customerName: customerNameController.text,
+        voucherRemaining: voucherRemaining,
       );
 
       if (context.mounted) {
@@ -1008,6 +1053,7 @@ class OrderConfirmationService {
         originalTotal: originalTotal,
         discountAmount: discountAmount,
         pesananList: pesananList,
+        basketToClear: basketToClear,
         customerNameController: customerNameController,
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: getTotal,
@@ -1018,6 +1064,7 @@ class OrderConfirmationService {
                 ? (totalHarga - programNominal) - programExtraSplitQrisAmount 
                 : 0),
         programNominal: programNominal,
+        voucherRemaining: voucherRemaining,
       );
     } catch (error) {
       if (context.mounted && !loaderPopped) {
@@ -1029,6 +1076,7 @@ class OrderConfirmationService {
   static Future<void> _processOpenBillOrder({
     required BuildContext context,
     required List<PesananObject> pesananList,
+    required List<PesananObject> basketToClear,
     required int totalHarga,
     required int originalTotal, String? customerName,
     required bool isTakeAway,
@@ -1043,7 +1091,9 @@ class OrderConfirmationService {
       int? overrideTotalHarga,
       bool? overrideIsTakeAway,
       int discountAmount,
-      int originalTotal, String? customerName,
+      int originalTotal,
+      String? customerName,
+      int? voucherRemaining,
     }) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -1212,6 +1262,7 @@ class OrderConfirmationService {
         originalTotal: originalTotal,
         discountAmount: 0,
         pesananList: pesananList,
+        basketToClear: basketToClear,
         customerNameController: customerNameController,
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: getTotal,
@@ -1241,12 +1292,14 @@ class OrderConfirmationService {
     required int originalTotal, String? customerName,
     required int discountAmount,
     required List<PesananObject> pesananList,
+    required List<PesananObject> basketToClear,
     required TextEditingController customerNameController,
     required TextEditingController uangYangDiterimaController,
     required Function() getTotal,
     required Function(int) setJumlahItem,
     int splitCashAmount = 0,
     int programNominal = 0,
+    int? voucherRemaining,
   }) async {
     await showDialog(
       context: context,
@@ -1284,6 +1337,16 @@ class OrderConfirmationService {
                           fontSize: 14,
                           color: Colors.green),
                     ),
+                    if (voucherRemaining != null && voucherRemaining! > 0) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Sisa Voucher: Rp ${NumberFormat.decimalPattern().format(voucherRemaining).replaceAll(',', '.')}',
+                        style: GoogleFonts.montserrat(
+                            fontWeight: FontWeight.w400,
+                            fontSize: 12,
+                            color: Colors.green.shade700),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                   ],
                   Row(
@@ -1315,7 +1378,7 @@ class OrderConfirmationService {
       },
     );
 
-    pesananList.clear();
+    basketToClear.clear();
     uangYangDiterimaController.clear();
     customerNameController.clear();
     setJumlahItem(0);
@@ -1415,7 +1478,7 @@ class OrderConfirmationService {
   }
 
   static Future<void> _appendVoucherToBatchOrTransaction(
-      String voucherCode, bool isPosVoucher, {WriteBatch? batch, Transaction? transaction}) async {
+      String voucherCode, bool isPosVoucher, {WriteBatch? batch, Transaction? transaction, int usedAmount = 0}) async {
     try {
       if (batch == null && transaction == null) return;
       
@@ -1424,7 +1487,7 @@ class OrderConfirmationService {
         DocumentReference voucherRef =
             fs.collection(Col.name("vouchers")).doc(voucherCode);
 
-        // Fetch document to get voucherGroupId
+        // Fetch document to get voucherGroupId and multi-use fields
         DocumentSnapshot doc;
         if (transaction != null) {
             doc = await transaction.get(voucherRef);
@@ -1435,9 +1498,29 @@ class OrderConfirmationService {
         if (doc.exists) {
           Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
           String? groupId = data['voucherGroupId'];
+          bool sekaliPakai = data['sekaliPakai'] ?? true;
 
-          if (batch != null) batch.update(voucherRef, {'status': 'CLAIMED'});
-          if (transaction != null) transaction.update(voucherRef, {'status': 'CLAIMED'});
+          if (!sekaliPakai && usedAmount > 0) {
+            // 🔄 Multi-use voucher: decrement balance instead of marking CLAIMED
+            int currentRemaining = (data['valueRemaining'] ?? data['value'] ?? 0) as int;
+            int newRemaining = (currentRemaining - usedAmount).clamp(0, currentRemaining);
+            Map<String, dynamic> updates = {
+              'valueUsed': FieldValue.increment(usedAmount),
+              'valueRemaining': newRemaining,
+            };
+            // Only mark as CLAIMED when balance is fully depleted
+            if (newRemaining <= 0) {
+              updates['status'] = 'CLAIMED';
+              updates['isClaimed'] = true;
+            }
+            if (batch != null) batch.update(voucherRef, updates);
+            if (transaction != null) transaction.update(voucherRef, updates);
+            print('🔄 Multi-use voucher: deducted $usedAmount, remaining: $newRemaining');
+          } else {
+            // Single-use voucher: mark as CLAIMED immediately
+            if (batch != null) batch.update(voucherRef, {'status': 'CLAIMED', 'isClaimed': true});
+            if (transaction != null) transaction.update(voucherRef, {'status': 'CLAIMED', 'isClaimed': true});
+          }
 
           if (groupId != null) {
             var groupRef = fs.collection(Col.name('voucherGroup')).doc(groupId);
@@ -1447,12 +1530,45 @@ class OrderConfirmationService {
           }
         }
       } else {
+        // e-santren voucher: must read the doc first to check sekaliPakai
         FirebaseFirestore eSantrenFs =
             FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
         DocumentReference voucherRef =
-            eSantrenFs.collection("vouchers").doc(voucherCode);
-        if (batch != null) batch.update(voucherRef, {'isClaimed': true});
-        if (transaction != null) transaction.update(voucherRef, {'isClaimed': true});
+            eSantrenFs.collection(Col.name("vouchers")).doc(voucherCode);
+
+        // Bypass POS batch/transaction since e-santren is a different Firestore instance.
+        DocumentSnapshot eSantrenDoc = await voucherRef.get();
+
+        if (eSantrenDoc.exists) {
+          Map<String, dynamic> eSantrenData = eSantrenDoc.data() as Map<String, dynamic>;
+          bool sekaliPakai = eSantrenData['sekaliPakai'] ?? true;
+          String? groupId = eSantrenData['voucherGroupId'];
+
+          if (!sekaliPakai && usedAmount > 0) {
+            // 🔄 Multi-use e-santren voucher: decrement balance
+            int currentRemaining = (eSantrenData['valueRemaining'] ?? eSantrenData['value'] ?? 0) as int;
+            int newRemaining = (currentRemaining - usedAmount).clamp(0, currentRemaining);
+            Map<String, dynamic> updates = {
+              'valueUsed': FieldValue.increment(usedAmount),
+              'valueRemaining': newRemaining,
+            };
+            // Only mark isClaimed when balance is fully depleted
+            if (newRemaining <= 0) {
+              updates['isClaimed'] = true;
+            }
+            await voucherRef.update(updates);
+            print('🔄 e-santren multi-use voucher: deducted $usedAmount, remaining: $newRemaining');
+          } else {
+            // Single-use: mark as claimed immediately
+            await voucherRef.update({'isClaimed': true});
+          }
+
+          // Also update the voucherGroup totalClaimed counter on e-santren
+          if (groupId != null) {
+            var groupRef = eSantrenFs.collection(Col.name('voucherGroup')).doc(groupId);
+            await groupRef.update({'totalClaimed': FieldValue.increment(1)});
+          }
+        }
       }
       print('✅ Voucher $voucherCode claimed successfully inside atomic unit');
     } catch (e) {
@@ -1505,22 +1621,58 @@ class OrderConfirmationService {
       }
 
       DateTime now = DateTime.now();
-      DateTime activeDate = (data['activeDate'] as Timestamp).toDate();
-      DateTime expireDate = (data['expireDate'] as Timestamp).toDate();
+      
+      // Fallback to createdAt if activeDate is missing. 
+      DateTime activeDate = data['activeDate'] != null 
+          ? (data['activeDate'] as Timestamp).toDate() 
+          : (data['createdAt'] != null ? (data['createdAt'] as Timestamp).toDate() : now);
+          
+      // If expireDate is missing, assume it doesn't expire (or set far future)
+      DateTime expireDate = data['expireDate'] != null 
+          ? (data['expireDate'] as Timestamp).toDate() 
+          : now.add(const Duration(days: 3650)); // ~10 years into the future
       bool isClaimed = data['isClaimed'] ?? false;
       bool isActive = data['isActive'] ?? true; // Default to true if missing
       String status = data['status'] ?? '';
+      bool sekaliPakai = data['sekaliPakai'] ?? true; // Default to single-use
 
       if (now.isBefore(activeDate) || now.isAfter(expireDate)) {
         return {'error': 'Voucher sudah tidak berlaku'};
       }
 
-      if (isClaimed || (isPosVoucher && status == 'CLAIMED')) {
-        return {'error': 'Voucher sudah digunakan'};
+      // 🔄 For multi-use vouchers, check valueRemaining instead of isClaimed
+      if (!sekaliPakai) {
+        int valueRemaining = (data['valueRemaining'] ?? 0) as int;
+        if (valueRemaining <= 0 || status == 'CLAIMED') {
+          return {'error': 'Saldo voucher sudah habis'};
+        }
+      } else {
+        if (isClaimed || (isPosVoucher && status == 'CLAIMED')) {
+          return {'error': 'Voucher sudah digunakan'};
+        }
       }
 
       if (!isActive && status != 'READY_TO_CLAIM') {
         return {'error': 'Voucher tidak aktif'};
+      }
+
+      // Determine the effective discount value
+      int effectiveValue;
+      if (!sekaliPakai) {
+        // Multi-use: discount is capped by remaining balance OR order total (whichever is less)
+        int valueRemaining = (data['valueRemaining'] ?? data['value'] ?? 0) as int;
+        effectiveValue = valueRemaining < currentTotal ? valueRemaining : currentTotal;
+      } else {
+        effectiveValue = (data['value'] ?? 0) as int;
+      }
+
+      int transactionRequirement = (data['transactionRequirement'] ?? 0) as int;
+      if (transactionRequirement > 0 && currentTotal < transactionRequirement) {
+        return {
+          'error':
+              'Transaksi belum mencapai syarat minimal Rp ${NumberFormat.decimalPattern().format(transactionRequirement).replaceAll(',', '.')} untuk voucher ini',
+          'isSnackbarError': true,
+        };
       }
 
       // 🎁 POS Specific Logic: Cashback Campaigns
@@ -1528,10 +1680,10 @@ class OrderConfirmationService {
         int userPoints = data['userPoints'] ?? 0;
         int threshold = data['threshold'] ?? 0;
         int requirement = data['transactionRequirement'] ?? 0;
-        String status = data['status'] ?? '';
+        String campaignStatus = data['status'] ?? '';
 
         // Expire voucher if it is past date but hasn't been officially set to EXPIRED yet
-        if (now.isAfter(expireDate) && status == 'READY_TO_CLAIM') {
+        if (now.isAfter(expireDate) && campaignStatus == 'READY_TO_CLAIM') {
           await fs.collection(Col.name("vouchers")).doc(voucherCode).update({
             'status': 'EXPIRED',
           });
@@ -1559,8 +1711,11 @@ class OrderConfirmationService {
         'success': true,
         'nama': data['nama'],
         'voucherName': data['voucherName'] ?? 'Voucher',
-        'value': data['value'],
+        'value': effectiveValue,        // ← effective discount (may be partial for multi-use)
+        'originalValue': data['value'], // ← original face value for display
+        'valueRemaining': data['valueRemaining'] ?? data['value'] ?? 0, // ← current balance
         'isPosVoucher': isPosVoucher,
+        'sekaliPakai': sekaliPakai,
         'userId': data['userId'],
         'docId': actualDocId,
       };
@@ -1746,7 +1901,7 @@ class OrderConfirmationService {
     required bool printerIsConnected,
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
-    required Future<void> Function({int discountAmount, int originalTotal, String? customerName, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway})
+    required Future<void> Function({int discountAmount, int originalTotal, String? customerName, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway, int? voucherRemaining})
         printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -1843,6 +1998,7 @@ class OrderConfirmationService {
         isPosVoucher: result['isPosVoucher'] ?? false,
         discountAmount: billTotalWithFee - finalTotal,
         transactionMethod: paymentMethod,
+        voucherRemaining: result['voucherRemaining'],
         isSplitPayment: result['isSplitPayment'] ?? false,
         splitCashAmount: result['splitCashAmount'] ?? 0,
         splitQrisAmount: result['splitQrisAmount'] ?? 0,
@@ -1866,7 +2022,7 @@ class OrderConfirmationService {
     required int totalTakeAwayFee,
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
-    required Future<void> Function({int discountAmount, int originalTotal, String? customerName, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway}) printReceipt,
+    required Future<void> Function({int discountAmount, int originalTotal, String? customerName, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway, int? voucherRemaining}) printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
@@ -1875,6 +2031,7 @@ class OrderConfirmationService {
     bool isPosVoucher = false,
     int discountAmount = 0,
     String? transactionMethod,
+    int? voucherRemaining,
     bool isSplitPayment = false,
     int splitCashAmount = 0,
     int splitQrisAmount = 0,
@@ -1952,7 +2109,7 @@ class OrderConfirmationService {
       }
 
       if (appliedVoucherCode != null) {
-        await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch);
+        await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch, usedAmount: discountAmount);
       }
       
       if (voucherProgramId != null) {
@@ -1978,7 +2135,9 @@ class OrderConfirmationService {
         overrideNomorBerikutnya: openBill.customerNumber,
         overrideIsTakeAway: totalTakeAwayFee > 0,
         discountAmount: discountAmount,
-        originalTotal: originalTotal, customerName: openBill.memberName,
+        originalTotal: originalTotal,
+        customerName: openBill.memberName,
+        voucherRemaining: voucherRemaining,
       );
 
       Navigator.pop(context); // Close loader
@@ -1993,6 +2152,7 @@ class OrderConfirmationService {
         originalTotal: originalTotal,
         discountAmount: discountAmount,
         pesananList: aggregatedItems,
+        basketToClear: aggregatedItems,
         customerNameController: TextEditingController(text: openBill.memberName),
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: () {},
@@ -2003,6 +2163,7 @@ class OrderConfirmationService {
                 ? (totalHarga - programNominal) - programExtraSplitQrisAmount 
                 : 0),
         programNominal: programNominal,
+        voucherRemaining: voucherRemaining,
       );
     } catch (e) {
       Navigator.pop(context);
@@ -2055,6 +2216,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   bool isValidatingVoucher = false;
   bool isPosVoucher = false;
   String? voucherDocId;
+  int? voucherBalance;
+  bool sekaliPakai = true;
   late int
       currentTotal; // Track current total that updates when items are added
   List<Member> _members = [];
@@ -2139,13 +2302,17 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
           voucherValue = 0;
           isPosVoucher = false;
           voucherDocId = null;
+          voucherBalance = null;
+          sekaliPakai = true;
         } else if (result != null) {
-          voucherName = result['name'];
+          voucherName = result['voucherName'];
           voucherValue = result['value'];
           voucherApplied = true;
           voucherError = null;
           isPosVoucher = result['isPosVoucher'] ?? false;
           voucherDocId = result['docId'];
+          voucherBalance = result['valueRemaining'];
+          sekaliPakai = result['sekaliPakai'] ?? true;
         }
       });
     }
@@ -2304,6 +2471,15 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           fontSize: 12,
                         ),
                       ),
+                      if (!sekaliPakai && voucherBalance != null)
+                        Text(
+                          'Sisa Saldo: Rp ${NumberFormat.decimalPattern().format(voucherBalance! - voucherValue).replaceAll(',', '.')}',
+                          style: GoogleFonts.poppins(
+                            color: Colors.green.shade600,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
                     ],
                     const SizedBox(height: 16),
                     if (widget.isTakeAway)
@@ -2462,6 +2638,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                           voucherValue = 0;
                                           isPosVoucher = false;
                                           voucherDocId = null;
+                                          voucherBalance = null;
+                                          sekaliPakai = true;
                                         } else if (result != null) {
                                           voucherError = null;
                                           voucherApplied = true;
@@ -2469,6 +2647,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                           voucherValue = result['value'];
                                           isPosVoucher = result['isPosVoucher'] ?? false;
                                           voucherDocId = result['docId'];
+                                          voucherBalance = result['valueRemaining'];
+                                          sekaliPakai = result['sekaliPakai'] ?? true;
 
                                           // Automatically put customer name and handle member link
                                           String? returnedName = result['nama'];
@@ -3186,6 +3366,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                     'voucherCode': voucherApplied ? voucherDocId : null,
                                     'isPosVoucher': voucherApplied ? isPosVoucher : false,
                                     'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
+                                    'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
                                   });
                                 } else {
                                   _showTopError(context, 'Uang yang diterima masih kurang');
@@ -3299,6 +3480,8 @@ class _SelfOrderConfirmationDialogState
   String? voucherName;
   int voucherValue = 0;
   bool voucherApplied = false;
+  int? voucherBalance;
+  bool sekaliPakai = true;
   String? voucherError;
   bool isValidatingVoucher = false;
   bool isPosVoucher = false;
@@ -3366,13 +3549,17 @@ class _SelfOrderConfirmationDialogState
           voucherValue = 0;
           isPosVoucher = false;
           voucherDocId = null;
+          voucherBalance = null;
+          sekaliPakai = true;
         } else if (result != null) {
-          voucherName = result['name'];
+          voucherName = result['voucherName'];
           voucherValue = result['value'];
           voucherApplied = true;
           voucherError = null;
           isPosVoucher = result['isPosVoucher'] ?? false;
           voucherDocId = result['docId'];
+          voucherBalance = result['valueRemaining'];
+          sekaliPakai = result['sekaliPakai'] ?? true;
         }
       });
     }
@@ -3649,6 +3836,18 @@ class _SelfOrderConfirmationDialogState
                         ),
                       ],
                     ),
+                    if (voucherApplied && !sekaliPakai && voucherBalance != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Sisa Saldo Voucher: Rp ${NumberFormat.decimalPattern().format(voucherBalance! - voucherValue).replaceAll(',', '.')}',
+                          style: GoogleFonts.poppins(
+                            color: Colors.green.shade600,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     if (_isLoadingVouchers)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 8.0),
@@ -3817,12 +4016,28 @@ class _SelfOrderConfirmationDialogState
                               Icon(Icons.check_circle,
                                   color: Colors.green.shade700, size: 18),
                               const SizedBox(width: 8),
-                              Text(
-                                '$voucherName - Diskon Rp ${NumberFormat.decimalPattern().format(voucherValue).replaceAll(',', '.')}',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.green.shade700,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 13,
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '$voucherName - Diskon Rp ${NumberFormat.decimalPattern().format(voucherValue).replaceAll(',', '.')}',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.green.shade700,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    if (!sekaliPakai && voucherBalance != null)
+                                      Text(
+                                        'Sisa Saldo: Rp ${NumberFormat.decimalPattern().format(voucherBalance! - voucherValue).replaceAll(',', '.')}',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.green.shade600,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w400,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             ],
@@ -4083,6 +4298,7 @@ class _SelfOrderConfirmationDialogState
                               'voucherCode': voucherApplied ? voucherDocId : null,
                               'isPosVoucher': voucherApplied ? isPosVoucher : false,
                               'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
+                              'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
                             });
                           },
                           child: Text('Konfirmasi Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
@@ -4130,6 +4346,7 @@ class _SelfOrderConfirmationDialogState
                                 'voucherCode': voucherApplied ? voucherDocId : null,
                                 'isPosVoucher': voucherApplied ? isPosVoucher : false,
                                 'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
+                                'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
                               });
                             } else {
                               _showTopError(context, 'Uang yang diterima masih kurang');
@@ -4206,6 +4423,8 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
   bool isValidatingVoucher = false;
   bool isPosVoucher = false;
   String? voucherDocId;
+  int? voucherBalance;
+  bool sekaliPakai = true;
   String? _selectedPaymentMethod;
   List<Map<String, dynamic>> _activePrograms = [];
   String? _selectedProgramId;
@@ -4268,12 +4487,16 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
         voucherError = result!['error'];
         voucherApplied = false;
         voucherDocId = null;
+        voucherBalance = null;
+        sekaliPakai = true;
       } else if (result != null) {
         voucherApplied = true;
         voucherName = result['voucherName'];
         voucherValue = result['value'] ?? 0;
         isPosVoucher = result['isPosVoucher'] ?? false;
         voucherDocId = result['docId'];
+        voucherBalance = result['valueRemaining'];
+        sekaliPakai = result['sekaliPakai'] ?? true;
       }
     });
   }
@@ -4405,6 +4628,18 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                   ),
                 ],
               ),
+              if (voucherApplied && !sekaliPakai && voucherBalance != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Sisa Saldo Voucher: Rp ${NumberFormat.decimalPattern().format(voucherBalance! - voucherValue).replaceAll(',', '.')}',
+                    style: GoogleFonts.poppins(
+                      color: Colors.green.shade600,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
               
               const SizedBox(height: 16),
               
@@ -4648,6 +4883,7 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                 'voucherCode': voucherApplied ? voucherDocId : null,
                 'isPosVoucher': voucherApplied ? isPosVoucher : false,
                 'discountAmount': voucherApplied ? (baseTotal - displayTotal) : 0,
+                'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
               });
               return;
             }
@@ -4662,6 +4898,7 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
               'voucherCode': voucherApplied ? voucherDocId : null,
               'isPosVoucher': voucherApplied ? isPosVoucher : false,
               'discountAmount': voucherApplied ? (baseTotal - displayTotal) : 0,
+              'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
             });
           },
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),

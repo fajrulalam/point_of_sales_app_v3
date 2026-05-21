@@ -516,11 +516,14 @@ Widget _buildMainContent() {
                         controller.incrementTakeAway(index),
                     onDecrementTakeAway: (index) =>
                         controller.decrementTakeAway(index),
+                    onRemoveItem: (index) =>
+                        controller.removeItem(index),
                     onNoteChanged: (index, note) {
                       setState(() {
                         controller.pesananList[index].customerNote = note;
                       });
                     },
+                    onEditOptions: (index) => _handleEditOptions(index),
                   ),
                 ),
               ),
@@ -563,19 +566,53 @@ Widget _buildMainContent() {
       return;
     }
 
-    final result = await OptionSelectionBottomSheet.show(
+    final results = await OptionSelectionBottomSheet.show(
       context,
       menu: menu,
       linkedGroups: linkedGroups,
     );
 
-    if (result != null) {
-      await controller.addToOrder(
-        menu,
-        controller.isTakeAway,
-        options: result.options,
-        quantity: result.quantity,
-      );
+    if (results != null) {
+      for (var result in results) {
+        await controller.addToOrder(
+          menu,
+          controller.isTakeAway,
+          options: result.options,
+          quantity: result.quantity,
+        );
+      }
+    }
+  }
+
+  Future<void> _handleEditOptions(int index) async {
+    if (index < 0 || index >= controller.pesananList.length) return;
+    final order = controller.pesananList[index];
+    final menu = controller.menuObjectList.firstWhere(
+      (m) => m.id == order.menuItemId,
+      orElse: () => controller.menuObjectList.firstWhere(
+        (m) => m.namaMenu == order.namaPesanan,
+        orElse: () => MenuObject(
+          id: order.menuItemId,
+          namaMenu: order.namaPesanan,
+          harga: order.harga,
+          isMakanan: true,
+          imagePath: '',
+        ),
+      ),
+    );
+
+    final linkedGroups = controller.getLinkedOptionGroups(menu.id);
+
+    final results = await OptionSelectionBottomSheet.show(
+      context,
+      menu: menu,
+      linkedGroups: linkedGroups,
+      initialOptions: order.selectedOptions,
+      initialQuantity: order.totalQuantity,
+    );
+
+    if (results != null && results.isNotEmpty) {
+      await controller.updateOrderOptions(index, results[0].options, results[0].quantity);
     }
   }
 
@@ -641,6 +678,7 @@ Widget _buildMainContent() {
           int discountAmount = 0,
           int originalTotal = 0,
           String? customerName,
+          int? voucherRemaining,
         }) async =>
             await controller.printReceipt(
           customPesananList: customPesananList ?? controller.pesananList,
@@ -651,6 +689,7 @@ Widget _buildMainContent() {
           discountAmount: discountAmount,
           originalTotal: originalTotal,
           customerName: customerName,
+          voucherRemaining: voucherRemaining,
         ),
         getYear: controller.getYear,
         getMonth: controller.getMonth,
@@ -747,20 +786,20 @@ Widget _buildMainContent() {
                  getYear: controller.getYear,
                  getMonth: controller.getMonth,
                  getDate: controller.getDate,
-                 printReceipt: ({String? customerName}) async {
-                   await controller.printReceipt(
-                     overrideNomorBerikutnya: controller.editOriginalData?['customerNumber'],
-                     customPesananList: controller.pesananList,
-                     overrideTotalHarga: controller.totalHarga,
-                     customerName: customerName,
-                   );
-                   controller.clearEditMode();
-                   if (mounted) {
-                     ScaffoldMessenger.of(context).showSnackBar(
-                       const SnackBar(content: Text('Pesanan berhasil diubah')),
-                     );
-                   }
-                 },
+                 printReceipt: ({String? customerName, List<PesananObject>? activePesananList}) async {
+                    await controller.printReceipt(
+                      overrideNomorBerikutnya: controller.editOriginalData?['customerNumber'],
+                      customPesananList: activePesananList ?? controller.pesananList,
+                      overrideTotalHarga: controller.totalHarga,
+                      customerName: customerName,
+                    );
+                    controller.clearEditMode();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Pesanan berhasil diubah')),
+                      );
+                    }
+                  },
                );
             },
             child: Text('Simpan Perubahan', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),

@@ -33,6 +33,7 @@ class _FinancialReportBottomSheetState
     super.initState();
     _fetchSystemTotal();
     _fetchTodayExpenses();
+    _fetchSavedReport();
   }
 
   @override
@@ -41,6 +42,39 @@ class _FinancialReportBottomSheetState
     _qrisController.dispose();
     _onlineController.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchSavedReport() async {
+    try {
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final doc = await FirebaseFirestore.instance
+          .collection(Col.name('DailyFinancialReport'))
+          .doc(today)
+          .get();
+
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        final actualCash = data['actualCash'] as int?;
+        final actualQris = data['actualQris'] as int?;
+        final actualOnline = data['actualOnline'] as int?;
+
+        if (mounted) {
+          setState(() {
+            if (actualCash != null) {
+              _cashController.text = _fmt(actualCash);
+            }
+            if (actualQris != null) {
+              _qrisController.text = _fmt(actualQris);
+            }
+            if (actualOnline != null) {
+              _onlineController.text = _fmt(actualOnline);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      // Ignore
+    }
   }
 
   Future<void> _fetchSystemTotal() async {

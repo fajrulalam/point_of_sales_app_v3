@@ -58,7 +58,7 @@ class PesananObject {
   final int harga;
   int dineInQuantity;
   int takeAwayQuantity;
-  final List<SelectedOption> selectedOptions;
+  List<SelectedOption> selectedOptions;
   String? customerNote;
 
   PesananObject({

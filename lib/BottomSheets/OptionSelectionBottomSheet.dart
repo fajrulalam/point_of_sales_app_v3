@@ -9,26 +9,34 @@ import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 class OptionSelectionBottomSheet extends StatefulWidget {
   final MenuObject menu;
   final List<OptionGroup> linkedGroups;
+  final List<SelectedOption>? initialOptions;
+  final int? initialQuantity;
 
   const OptionSelectionBottomSheet({
     Key? key,
     required this.menu,
     required this.linkedGroups,
+    this.initialOptions,
+    this.initialQuantity,
   }) : super(key: key);
 
-  /// Shows the bottom sheet and returns the selected options + quantity, or null if cancelled.
-  static Future<({List<SelectedOption> options, int quantity})?> show(
+  /// Shows the bottom sheet and returns the selected options per group with their quantity, or null if cancelled.
+  static Future<List<({List<SelectedOption> options, int quantity})>?> show(
     BuildContext context, {
     required MenuObject menu,
     required List<OptionGroup> linkedGroups,
+    List<SelectedOption>? initialOptions,
+    int? initialQuantity,
   }) {
-    return showModalBottomSheet<({List<SelectedOption> options, int quantity})>(
+    return showModalBottomSheet<List<({List<SelectedOption> options, int quantity})>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => OptionSelectionBottomSheet(
         menu: menu,
         linkedGroups: linkedGroups,
+        initialOptions: initialOptions,
+        initialQuantity: initialQuantity,
       ),
     );
   }
@@ -40,55 +48,72 @@ class OptionSelectionBottomSheet extends StatefulWidget {
 
 class _OptionSelectionBottomSheetState
     extends State<OptionSelectionBottomSheet> {
-  // groupId -> set of selected option names
-  final Map<String, Set<String>> _selections = {};
-  // Track validation errors per group
-  final Map<String, String?> _errors = {};
-  int _quantity = 1;
+  final List<_GroupConfig> _groups = [];
+
+  bool get isEditMode => widget.initialOptions != null || widget.initialQuantity != null;
 
   @override
   void initState() {
     super.initState();
-    for (var group in widget.linkedGroups) {
-      _selections[group.id] = {};
-    }
-  }
-
-  int get _optionsTotal {
-    int total = 0;
-    for (var group in widget.linkedGroups) {
-      final selected = _selections[group.id] ?? {};
-      for (var option in group.options) {
-        if (selected.contains(option.name)) {
-          total += option.priceAdjustment;
+    final config = _GroupConfig(widget.linkedGroups);
+    if (widget.initialOptions != null) {
+      for (var selectedOpt in widget.initialOptions!) {
+        final groupSelections = config.selections[selectedOpt.groupId];
+        if (groupSelections != null) {
+          groupSelections.add(selectedOpt.optionName);
         }
       }
+    }
+    if (widget.initialQuantity != null) {
+      config.quantity = widget.initialQuantity!;
+    }
+    _groups.add(config);
+  }
+
+  int get _totalPrice {
+    int total = 0;
+    for (var groupConfig in _groups) {
+      int optionsTotal = 0;
+      for (var group in widget.linkedGroups) {
+        final selected = groupConfig.selections[group.id] ?? {};
+        for (var option in group.options) {
+          if (selected.contains(option.name)) {
+            optionsTotal += option.priceAdjustment;
+          }
+        }
+      }
+      total += (widget.menu.harga + optionsTotal) * groupConfig.quantity;
     }
     return total;
   }
 
-  int get _effectivePrice => widget.menu.harga + _optionsTotal;
-  int get _totalPrice => _effectivePrice * _quantity;
-
-  bool _validate() {
-    bool valid = true;
-    for (var group in widget.linkedGroups) {
-      final selected = _selections[group.id] ?? {};
-      if (group.isRequired && selected.isEmpty) {
-        _errors[group.id] = 'Pilih minimal ${group.minSelection > 0 ? group.minSelection : 1} opsi';
-        valid = false;
-      } else if (group.minSelection > 0 && selected.length < group.minSelection) {
-        _errors[group.id] = 'Pilih minimal ${group.minSelection} opsi';
-        valid = false;
-      } else {
-        _errors[group.id] = null;
-      }
-    }
-    return valid;
+  int get _quantity {
+    return _groups.fold(0, (sum, group) => sum + group.quantity);
   }
 
-  void _toggleOption(OptionGroup group, OptionItem option) {
-    final bool isSelected = (_selections[group.id] ?? {}).contains(option.name);
+  bool _validate() {
+    bool allValid = true;
+    for (var i = 0; i < _groups.length; i++) {
+      final groupConfig = _groups[i];
+      for (var group in widget.linkedGroups) {
+        final selected = groupConfig.selections[group.id] ?? {};
+        if (group.isRequired && selected.isEmpty) {
+          groupConfig.errors[group.id] = 'Pilih minimal ${group.minSelection > 0 ? group.minSelection : 1} opsi';
+          allValid = false;
+        } else if (group.minSelection > 0 && selected.length < group.minSelection) {
+          groupConfig.errors[group.id] = 'Pilih minimal ${group.minSelection} opsi';
+          allValid = false;
+        } else {
+          groupConfig.errors[group.id] = null;
+        }
+      }
+    }
+    return allValid;
+  }
+
+  void _toggleOption(int index, OptionGroup group, OptionItem option) {
+    final groupConfig = _groups[index];
+    final bool isSelected = (groupConfig.selections[group.id] ?? {}).contains(option.name);
     
     // If selecting (not deselecting), check stock for a warning
     if (!isSelected) {
@@ -106,7 +131,7 @@ class _OptionSelectionBottomSheetState
     }
 
     setState(() {
-      final selected = _selections[group.id]!;
+      final selected = groupConfig.selections[group.id]!;
       if (selected.contains(option.name)) {
         selected.remove(option.name);
       } else {
@@ -121,7 +146,7 @@ class _OptionSelectionBottomSheetState
         }
         selected.add(option.name);
       }
-      _errors[group.id] = null;
+      groupConfig.errors[group.id] = null;
     });
   }
 
@@ -131,22 +156,26 @@ class _OptionSelectionBottomSheetState
       return;
     }
 
-    final result = <SelectedOption>[];
-    for (var group in widget.linkedGroups) {
-      final selected = _selections[group.id] ?? {};
-      for (var option in group.options) {
-        if (selected.contains(option.name)) {
-          result.add(SelectedOption(
-            groupId: group.id,
-            optionId: option.id,
-            groupName: group.name,
-            optionName: option.name,
-            priceAdjustment: option.priceAdjustment,
-          ));
+    final results = <({List<SelectedOption> options, int quantity})>[];
+    for (var groupConfig in _groups) {
+      final groupResults = <SelectedOption>[];
+      for (var group in widget.linkedGroups) {
+        final selected = groupConfig.selections[group.id] ?? {};
+        for (var option in group.options) {
+          if (selected.contains(option.name)) {
+            groupResults.add(SelectedOption(
+              groupId: group.id,
+              optionId: option.id,
+              groupName: group.name,
+              optionName: option.name,
+              priceAdjustment: option.priceAdjustment,
+            ));
+          }
         }
       }
+      results.add((options: groupResults, quantity: groupConfig.quantity));
     }
-    Navigator.pop(context, (options: result, quantity: _quantity));
+    Navigator.pop(context, results);
   }
 
   @override
@@ -168,9 +197,38 @@ class _OptionSelectionBottomSheetState
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: widget.linkedGroups
-                    .map((group) => _buildGroupSection(group))
-                    .toList(),
+                children: [
+                  ...List.generate(_groups.length, (index) => _buildGroupCard(index)),
+                  if (!isEditMode) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _groups.add(_GroupConfig(widget.linkedGroups));
+                          });
+                        },
+                        icon: const Icon(Icons.add, color: Color(0xFF2E7D32)),
+                        label: Text(
+                          '+ Add Another Variation',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF2E7D32),
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: const BorderSide(color: Color(0xFF2E7D32), width: 1.5),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                ],
               ),
             ),
           ),
@@ -224,7 +282,7 @@ class _OptionSelectionBottomSheetState
             ),
           ),
           Text(
-            'Pilih opsi',
+            isEditMode ? 'Ubah opsi' : 'Pilih opsi',
             style: GoogleFonts.poppins(
               fontSize: 13,
               color: Colors.grey.shade600,
@@ -235,9 +293,126 @@ class _OptionSelectionBottomSheetState
     );
   }
 
-  Widget _buildGroupSection(OptionGroup group) {
-    final selected = _selections[group.id] ?? {};
-    final error = _errors[group.id];
+  Widget _buildGroupCard(int index) {
+    final groupConfig = _groups[index];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Group Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.widgets_outlined, size: 18, color: Color(0xFF2E7D32)),
+                const SizedBox(width: 8),
+                Text(
+                  'Combination #${index + 1}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                if (_groups.length > 1)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                    onPressed: () {
+                      setState(() {
+                        _groups.removeAt(index);
+                      });
+                    },
+                    constraints: const BoxConstraints(),
+                    padding: EdgeInsets.zero,
+                  ),
+              ],
+            ),
+          ),
+          // Option selection list
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ...widget.linkedGroups
+                    .map((group) => _buildGroupSection(groupConfig, group, index))
+                    .toList(),
+                const Divider(height: 24),
+                // Local quantity controls inside each card
+                Row(
+                  children: [
+                    Text(
+                      'Jumlah untuk kombinasi ini:',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildQtyButton(
+                            icon: Icons.remove,
+                            onTap: groupConfig.quantity > 1
+                                ? () => setState(() => groupConfig.quantity--)
+                                : null,
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Text(
+                              '${groupConfig.quantity}',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          _buildQtyButton(
+                            icon: Icons.add,
+                            onTap: () => setState(() => groupConfig.quantity++),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGroupSection(_GroupConfig groupConfig, OptionGroup group, int index) {
+    final selected = groupConfig.selections[group.id] ?? {};
+    final error = groupConfig.errors[group.id];
 
     String subtitle = group.isRequired ? 'Wajib' : 'Opsional';
     if (group.maxSelection == 1) {
@@ -259,8 +434,9 @@ class _OptionSelectionBottomSheetState
               Text(
                 group.name,
                 style: GoogleFonts.poppins(
-                  fontSize: 15,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
+                  color: Colors.black87,
                 ),
               ),
               const SizedBox(width: 8),
@@ -275,7 +451,7 @@ class _OptionSelectionBottomSheetState
                 child: Text(
                   subtitle,
                   style: GoogleFonts.poppins(
-                    fontSize: 11,
+                    fontSize: 10,
                     color: group.isRequired
                         ? const Color(0xFF2E7D32)
                         : Colors.grey.shade600,
@@ -290,7 +466,7 @@ class _OptionSelectionBottomSheetState
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 error,
-                style: GoogleFonts.poppins(fontSize: 12, color: Colors.red),
+                style: GoogleFonts.poppins(fontSize: 11, color: Colors.red),
               ),
             ),
           const SizedBox(height: 10),
@@ -301,7 +477,7 @@ class _OptionSelectionBottomSheetState
               final isSelected = selected.contains(option.name);
               final maxServings = InventoryService().getMaxServings(option.ingredients);
               return _buildOptionChip(option, isSelected, maxServings, () {
-                _toggleOption(group, option);
+                _toggleOption(index, group, option);
               });
             }).toList(),
           ),
@@ -375,8 +551,8 @@ class _OptionSelectionBottomSheetState
                   fontSize: 11,
                   color: isSelected
                       ? (option.priceAdjustment < 0
-                          ? const Color(0xFFE65100).withOpacity(0.8)
-                          : const Color(0xFF2E7D32).withOpacity(0.8))
+                          ? const Color(0xFFE65100).withValues(alpha: 0.8)
+                          : const Color(0xFF2E7D32).withValues(alpha: 0.8))
                       : outOfStock
                           ? Colors.grey.shade400
                           : Colors.grey.shade600,
@@ -441,50 +617,16 @@ class _OptionSelectionBottomSheetState
                     color: const Color(0xFF2E7D32),
                   ),
                 ),
-                if (_quantity > 1)
-                  Text(
-                    '$_quantity × Rp ${NumberFormat.decimalPattern().format(_effectivePrice).replaceAll(',', '.')}',
-                    style: GoogleFonts.poppins(
-                      fontSize: 11,
-                      color: Colors.grey.shade500,
-                    ),
+                Text(
+                  '$_quantity Item',
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    color: Colors.grey.shade500,
                   ),
+                ),
               ],
             ),
             const Spacer(),
-            // Middle: Quantity controls
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildQtyButton(
-                    icon: Icons.remove,
-                    onTap: _quantity > 1
-                        ? () => setState(() => _quantity--)
-                        : null,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                      '$_quantity',
-                      style: GoogleFonts.poppins(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  _buildQtyButton(
-                    icon: Icons.add,
-                    onTap: () => setState(() => _quantity++),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
             // Right: Batal + Tambahkan
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -508,7 +650,7 @@ class _OptionSelectionBottomSheetState
                 ),
               ),
               child: Text(
-                'Tambahkan',
+                isEditMode ? 'Simpan Perubahan' : 'Tambahkan',
                 style: GoogleFonts.poppins(
                   fontWeight: FontWeight.w600,
                   fontSize: 15,
@@ -534,5 +676,20 @@ class _OptionSelectionBottomSheetState
         ),
       ),
     );
+  }
+}
+
+class _GroupConfig {
+  // groupId -> set of selected option names
+  final Map<String, Set<String>> selections = {};
+  // Track validation errors per group for this combination
+  final Map<String, String?> errors = {};
+  int quantity = 1;
+
+  _GroupConfig(List<OptionGroup> groups) {
+    for (var group in groups) {
+      selections[group.id] = {};
+      errors[group.id] = null;
+    }
   }
 }

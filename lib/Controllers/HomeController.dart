@@ -21,6 +21,9 @@ import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 
 class HomeController extends ChangeNotifier {
+  final List<StreamSubscription> _subscriptions = [];
+  bool _disposed = false;
+
   // Callback for showing error messages (e.g., snackbars)
   Function(String message, {bool isError})? onShowMessage;
   // State variables
@@ -89,24 +92,32 @@ class HomeController extends ChangeNotifier {
 
   // Menu Management
   void getMenu() {
+    // Clear existing subscriptions if any
+    for (var sub in _subscriptions) {
+      sub.cancel();
+    }
+    _subscriptions.clear();
+
     DocumentReference customerNumber = FirebaseFirestore.instance
         .collection(Col.name('Canteens'))
         .doc('canteen375')
         .collection('Metadata')
         .doc('customerNumber');
 
-    customerNumber.snapshots().listen((event) {
+    _subscriptions.add(customerNumber.snapshots().listen((event) {
+      if (_disposed) return;
       Map map = event.data() as Map<String, dynamic>;
       nomorBerikutnya = map['customerNumber'] + 1;
       notifyListeners();
-    });
+    }));
 
     CollectionReference menuCollection = FirebaseFirestore.instance
         .collection(Col.name('Canteens'))
         .doc('canteen375')
         .collection('MenuCollection');
 
-    menuCollection.snapshots().listen((snapshot) {
+    _subscriptions.add(menuCollection.snapshots().listen((snapshot) {
+      if (_disposed) return;
       menuObjectList = MenuClass.getAllMenus(snapshot);
       menuObjectList_makanan =
           menuObjectList.where((element) => element.isMakanan == true).toList();
@@ -114,35 +125,38 @@ class HomeController extends ChangeNotifier {
           .where((element) => element.isMakanan == false)
           .toList();
       notifyListeners();
-    });
+    }));
 
     // Fetch category order from MenuConfig
-    FirebaseFirestore.instance
+    _subscriptions.add(FirebaseFirestore.instance
         .collection(Col.name('Canteens'))
         .doc('canteen375')
         .collection('Metadata')
         .doc('MenuConfig')
         .snapshots()
         .listen((snapshot) {
+      if (_disposed) return;
       if (snapshot.exists) {
         final data = snapshot.data() as Map<String, dynamic>;
         categoryOrder = List<String>.from(data['categoryOrder'] ?? []);
         notifyListeners();
       }
-    });
+    }));
 
     // Stream option groups for use in ordering flow
-    OptionGroupService().getOptionGroupsStream().listen((groups) {
+    _subscriptions.add(OptionGroupService().getOptionGroupsStream().listen((groups) {
+      if (_disposed) return;
       optionGroups = groups;
       notifyListeners();
-    });
+    }));
   }
 
   void getListGambar() {
-    FirebaseFirestore.instance.collection(Col.name('assets')).snapshots().listen((value) {
+    _subscriptions.add(FirebaseFirestore.instance.collection(Col.name('assets')).snapshots().listen((value) {
+      if (_disposed) return;
       listGambar = AssetsClass.getImageAssets(value);
       notifyListeners();
-    });
+    }));
   }
 
   Future<void> deleteCatalogImage(AssetsObject asset) async {
@@ -391,9 +405,6 @@ class HomeController extends ChangeNotifier {
   void decrementDineIn(int index) {
     if (pesananList[index].dineInQuantity > 0) {
       pesananList[index].dineInQuantity--;
-      if (pesananList[index].totalQuantity == 0) {
-        pesananList.removeAt(index);
-      }
     }
     getTotal();
   }
@@ -443,11 +454,101 @@ class HomeController extends ChangeNotifier {
   void decrementTakeAway(int index) {
     if (pesananList[index].takeAwayQuantity > 0) {
       pesananList[index].takeAwayQuantity--;
-      if (pesananList[index].totalQuantity == 0) {
-        pesananList.removeAt(index);
-      }
     }
     getTotal();
+  }
+
+  void removeItem(int index) {
+    if (index >= 0 && index < pesananList.length) {
+      pesananList.removeAt(index);
+      getTotal();
+    }
+  }
+
+  Future<void> updateOrderOptions(int index, List<SelectedOption> newOptions, int newQuantity) async {
+    if (index < 0 || index >= pesananList.length) return;
+
+    final order = pesananList[index];
+    final menu = menuObjectList.firstWhere(
+      (m) => m.id == order.menuItemId,
+      orElse: () => menuObjectList.firstWhere((m) => m.namaMenu == order.namaPesanan,
+          orElse: () => MenuObject(id: order.menuItemId, namaMenu: order.namaPesanan, harga: order.harga, isMakanan: true, imagePath: '')),
+    );
+
+    // Check availability
+    final inventoryService = InventoryService();
+    final optionIngredients = _resolveOptionIngredients(newOptions);
+    final availability = await inventoryService.checkOrderAvailability(
+      menu,
+      optionIngredients,
+      newQuantity,
+    );
+
+    if (!availability.isAvailable) {
+      onShowMessage?.call(
+        'Tidak bisa mengubah opsi: ${availability.message}',
+        isError: true,
+      );
+      return;
+    }
+
+    if (availability.hasWarning) {
+      onShowMessage?.call(
+        'Peringatan: ${availability.message}',
+        isError: false,
+      );
+    }
+
+    // Determine the target item's key if we update it
+    final tempOrder = PesananObject(
+      menuItemId: menu.id,
+      namaPesanan: menu.namaMenu,
+      harga: menu.harga,
+      selectedOptions: newOptions,
+    );
+
+    // Check if another item in cart matches the new orderKey
+    int matchIndex = pesananList.indexWhere((element) => element.orderKey == tempOrder.orderKey);
+
+    if (matchIndex != -1 && matchIndex != index) {
+      // Merge this item's new quantity into the existing matched item
+      final matchedOrder = pesananList[matchIndex];
+      // Keep original order's choice of Dine In / Take Away if possible
+      if (order.dineInQuantity > 0 && order.takeAwayQuantity == 0) {
+        matchedOrder.dineInQuantity += newQuantity;
+      } else if (order.takeAwayQuantity > 0 && order.dineInQuantity == 0) {
+        matchedOrder.takeAwayQuantity += newQuantity;
+      } else {
+        if (isTakeAway) {
+          matchedOrder.takeAwayQuantity += newQuantity;
+        } else {
+          matchedOrder.dineInQuantity += newQuantity;
+        }
+      }
+      // Remove the edited item from the list since it's merged
+      pesananList.removeAt(index);
+    } else {
+      // Replace/overwrite in place
+      order.selectedOptions = newOptions;
+      if (order.dineInQuantity > 0 && order.takeAwayQuantity == 0) {
+        order.dineInQuantity = newQuantity;
+        order.takeAwayQuantity = 0;
+      } else if (order.takeAwayQuantity > 0 && order.dineInQuantity == 0) {
+        order.takeAwayQuantity = newQuantity;
+        order.dineInQuantity = 0;
+      } else {
+        if (isTakeAway) {
+          order.takeAwayQuantity = newQuantity;
+          order.dineInQuantity = 0;
+        } else {
+          order.dineInQuantity = newQuantity;
+          order.takeAwayQuantity = 0;
+        }
+      }
+    }
+
+    getTotal();
+    notifyListeners();
   }
 
   void toggleTakeAway() {
@@ -682,6 +783,7 @@ class HomeController extends ChangeNotifier {
     int originalTotal = 0,
     int? overrideBiayaBungkus,
     String? customerName,
+    int? voucherRemaining, // Added for multi-use vouchers
   }) async {
     // Check actual printer connection status dynamically
     await checkIfPrinterIsConnected();
@@ -769,8 +871,12 @@ class HomeController extends ChangeNotifier {
       }
       if (discountAmount > 0) {
         printer.printNewLine();
-        printer.printCustom('SUBTOTAL: Rp $originalTotal', 1, 0);
-        printer.printCustom('DISKON: -Rp $discountAmount', 1, 0);
+        print2ColumnSmall('SUBTOTAL', 'Rp $originalTotal');
+        print2ColumnSmall('DISKON', '-Rp $discountAmount');
+        
+        if (voucherRemaining != null) {
+          print2ColumnSmall('SISA VOUCHER', 'Rp $voucherRemaining');
+        }
       }
       printer.printNewLine();
       printer.printCustom('TOTAL: Rp $displayTotal', 3, 0);
@@ -1141,6 +1247,10 @@ class HomeController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    for (var sub in _subscriptions) {
+      sub.cancel();
+    }
     timer?.cancel();
     super.dispose();
   }

@@ -73,6 +73,7 @@ class _EditOrderScreenState extends State<EditOrderScreen> {
             final orderItems = data['orderItems'] as List<dynamic>? ?? [];
             final total = data['total'] as int? ?? 0;
             final customerNumber = data['customerNumber'] as int? ?? 0;
+            final customerName = data['namaCustomer'] as String?;
             final status = data['status'] ?? 'Unknown';
             final isCancelled = status == 'Cancelled';
 
@@ -87,13 +88,19 @@ class _EditOrderScreenState extends State<EditOrderScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Order #$customerNumber',
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                        Expanded(
+                          child: Text(
+                            customerName != null && customerName.isNotEmpty
+                                ? 'Order #$customerNumber - $customerName'
+                                : 'Order #$customerNumber',
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(

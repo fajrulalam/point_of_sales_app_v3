@@ -22,8 +22,21 @@ class EditOrderService {
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
-    required Function({String? customerName}) printReceipt,
+    required Function({String? customerName, List<PesananObject>? activePesananList}) printReceipt,
   }) async {
+    final activePesananList = newPesananList.where((p) => p.totalQuantity > 0).toList();
+    if (activePesananList.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Pesanan tidak boleh kosong. Silakan hapus pesanan atau masukkan minimal 1 item.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
     final fs = FirebaseFirestore.instance;
     final batch = fs.batch();
 
@@ -157,7 +170,7 @@ class EditOrderService {
         }
       }
 
-      for (var pesanan in newPesananList) {
+      for (var pesanan in activePesananList) {
         applyMap[pesanan.namaPesanan] = FieldValue.increment(pesanan.totalQuantity);
       }
 
@@ -166,10 +179,10 @@ class EditOrderService {
       batch.set(docYearly, applyMap, SetOptions(merge: true));
 
       // Apply New Stock
-      await _appendDeductIngredientsToBatch(newPesananList, menuMap, optionGroupLookup, batch: batch);
+      await _appendDeductIngredientsToBatch(activePesananList, menuMap, optionGroupLookup, batch: batch);
 
       // 3. Overwrite Status Document
-      final newOrderItems = newPesananList.map((order) {
+      final newOrderItems = activePesananList.map((order) {
         final menu = menuMap[order.namaPesanan];
         return {
           'namaPesanan': order.namaPesanan,
@@ -212,7 +225,10 @@ class EditOrderService {
 
       if (context.mounted) {
         Navigator.pop(context); // Close loader
-        printReceipt(customerName: originalStatusData['namaCustomer']); // Print new receipt
+        printReceipt(
+          customerName: originalStatusData['namaCustomer'],
+          activePesananList: activePesananList,
+        ); // Print new receipt
       }
 
     } catch (e) {
