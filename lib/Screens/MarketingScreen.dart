@@ -145,7 +145,7 @@ class _MarketingScreenState extends State<MarketingScreen>
       await _loadMembers();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update cache: $e')),
+        SnackBar(content: Text('Gagal memperbarui cache: $e')),
       );
     } finally {
       setState(() => _isLoadingMembers = false);
@@ -814,7 +814,7 @@ class _MarketingScreenState extends State<MarketingScreen>
                                    shape: RoundedRectangleBorder(
                                        borderRadius: BorderRadius.circular(8)),
                                  ),
-                                 child: const Text('Progress', style: TextStyle(fontSize: 12)),
+                                 child: const Text('Progres', style: TextStyle(fontSize: 12)),
                                ),
                             ),
                           );
@@ -1432,17 +1432,17 @@ class _MarketingScreenState extends State<MarketingScreen>
                       controller: controller,
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       children: [
-                        _buildSectionHeader('Competition Progress'),
+                        _buildSectionHeader('Progres Kompetisi'),
                         _buildProgressCard(
-                          'Monthly Competition',
+                          'Kompetisi Bulanan',
                           '$compPoints Pts',
-                          'Competition Points',
+                          'Poin Kompetisi',
                           Icons.emoji_events,
                           Colors.amber,
                           null,
                         ),
                         const SizedBox(height: 24),
-                        _buildSectionHeader('Campaign Vouchers'),
+                        _buildSectionHeader('Voucher Kampanye'),
                         if (vouchers.isEmpty)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 20),

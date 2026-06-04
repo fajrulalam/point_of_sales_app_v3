@@ -90,6 +90,9 @@ class SelfOrder {
   final String waktuPengambilan;
   final DateTime waktuPesan;
   final String? declineReason;
+  final String paymentMethod;
+  final String paymentStatus;
+  final String paymentProof;
 
   SelfOrder({
     required this.id,
@@ -108,6 +111,9 @@ class SelfOrder {
     required this.waktuPengambilan,
     required this.waktuPesan,
     this.declineReason,
+    this.paymentMethod = 'CASH',
+    this.paymentStatus = 'UNPAID_CASH',
+    this.paymentProof = '',
   });
 
   factory SelfOrder.fromFirestore(DocumentSnapshot doc) {
@@ -153,6 +159,9 @@ class SelfOrder {
         waktuPengambilan: data['waktuPengambilan']?.toString() ?? 'Tidak Memesan',
         waktuPesan: parsedWaktuPesan,
         declineReason: data['declineReason']?.toString(),
+        paymentMethod: data['paymentMethod']?.toString() ?? 'CASH',
+        paymentStatus: data['paymentStatus']?.toString() ?? 'UNPAID_CASH',
+        paymentProof: data['paymentProof']?.toString() ?? '',
       );
     } catch (e, stacktrace) {
       print('Error parsing SelfOrder from doc ${doc.id}: $e');
@@ -174,6 +183,9 @@ class SelfOrder {
         transactionMethod: 'Error',
         waktuPengambilan: '',
         waktuPesan: DateTime.now(),
+        paymentMethod: 'CASH',
+        paymentStatus: 'UNPAID_CASH',
+        paymentProof: '',
       );
     }
   }
@@ -195,6 +207,9 @@ class SelfOrder {
       'waktuPengambilan': waktuPengambilan,
       'waktuPesan': Timestamp.fromDate(waktuPesan),
       'declineReason': declineReason,
+      'paymentMethod': paymentMethod,
+      'paymentStatus': paymentStatus,
+      'paymentProof': paymentProof,
     };
   }
 
@@ -240,6 +255,9 @@ class SelfOrder {
     String? waktuPengambilan,
     DateTime? waktuPesan,
     String? declineReason,
+    String? paymentMethod,
+    String? paymentStatus,
+    String? paymentProof,
   }) {
     return SelfOrder(
       id: id ?? this.id,
@@ -258,6 +276,9 @@ class SelfOrder {
       waktuPengambilan: waktuPengambilan ?? this.waktuPengambilan,
       waktuPesan: waktuPesan ?? this.waktuPesan,
       declineReason: declineReason ?? this.declineReason,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+      paymentProof: paymentProof ?? this.paymentProof,
     );
   }
 }

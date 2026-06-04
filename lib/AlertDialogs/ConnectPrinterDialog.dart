@@ -162,7 +162,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
                                 isExpanded: true,
                                 items: devices
                                     .map((e) => DropdownMenuItem(
-                                        child: Text(e.name ?? 'Unknown Device'),
+                                        child: Text(e.name ?? 'Perangkat Tidak Dikenal'),
                                         value: e))
                                     .toList(),
                                 onChanged: devices.isEmpty
@@ -459,7 +459,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  namaCustomer.isEmpty ? 'Customer' : namaCustomer,
+                  namaCustomer.isEmpty ? 'Pelanggan' : namaCustomer,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -593,7 +593,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  namaCustomer.isEmpty ? 'Customer' : namaCustomer,
+                  namaCustomer.isEmpty ? 'Pelanggan' : namaCustomer,
                   style: GoogleFonts.poppins(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,

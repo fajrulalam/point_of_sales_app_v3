@@ -576,7 +576,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: Text('Update Stok', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                child: Text('Perbarui Stok', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -629,7 +629,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 ),
                 const SizedBox(height: 12),
                 CheckboxListTile(
-                  title: Text('Perishable', style: GoogleFonts.poppins()),
+                  title: Text('Mudah Rusak', style: GoogleFonts.poppins()),
                   subtitle: Text('Stok akan reset ke 0 setiap hari', style: GoogleFonts.poppins(fontSize: 12)),
                   value: isPerishable,
                   onChanged: (value) {
@@ -788,7 +788,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     ),
                     const SizedBox(height: 8),
                     CheckboxListTile(
-                      title: Text('Perishable',
+                      title: Text('Mudah Rusak',
                           style: GoogleFonts.poppins()),
                       subtitle: Text(
                           'Stok akan reset ke 0 setiap hari',
@@ -807,7 +807,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     const SizedBox(height: 16),
                     const Divider(),
                     const SizedBox(height: 8),
-                    Text('Link ke Menu',
+                    Text('Hubungkan ke Menu',
                         style: GoogleFonts.poppins(
                             fontSize: 14,
                             fontWeight: FontWeight.w600)),
@@ -842,7 +842,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       if (allOptionGroups
                           .any((g) => g.options.isNotEmpty)) ...[
                         const SizedBox(height: 12),
-                        Text('Link ke Opsi',
+                        Text('Hubungkan ke Opsi',
                             style: GoogleFonts.poppins(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600)),

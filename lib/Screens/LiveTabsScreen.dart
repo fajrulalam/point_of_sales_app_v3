@@ -637,6 +637,76 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                 const SizedBox(height: 8),
                 _buildPriceRow('Total', order.total, isTotal: true),
 
+                // QRIS Details
+                if (order.paymentMethod == 'QRIS') ...[
+                  const SizedBox(height: 12),
+                  const Divider(height: 12),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.qr_code, color: Colors.blue, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Metode: QRIS',
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: order.paymentStatus == 'PENDING_VERIFICATION'
+                              ? Colors.orange.shade100
+                              : Colors.green.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          order.paymentStatus == 'PENDING_VERIFICATION'
+                              ? 'Butuh Verifikasi'
+                              : 'Terverifikasi',
+                          style: GoogleFonts.poppins(
+                            color: order.paymentStatus == 'PENDING_VERIFICATION'
+                                ? Colors.orange.shade900
+                                : Colors.green.shade900,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (order.paymentProof.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => _viewPaymentProof(order.paymentProof),
+                        icon: const Icon(Icons.image_search, size: 18, color: Colors.blue),
+                        label: Text(
+                          'Lihat Bukti Transfer',
+                          style: GoogleFonts.poppins(
+                            color: Colors.blue,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          backgroundColor: Colors.blue.shade50,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+
                 // Decline reason (if applicable)
                 if (order.isDeclined && order.declineReason != null) ...[
                   const SizedBox(height: 12),
@@ -1016,5 +1086,63 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
         );
       }
     }
+  }
+
+  void _viewPaymentProof(String url) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Bukti Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+          ],
+        ),
+        content: Container(
+          constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (url.toLowerCase().endsWith('.pdf')) ...[
+                  const Icon(Icons.picture_as_pdf, size: 100, color: Colors.red),
+                  const SizedBox(height: 12),
+                  Text('Dokumen Bukti Transfer (PDF)', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      // Open PDF in browser
+                    },
+                    icon: const Icon(Icons.open_in_browser),
+                    label: const Text('Buka PDF di Browser'),
+                  ),
+                ] else ...[
+                  Image.network(
+                    url,
+                    fit: BoxFit.contain,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return const Center(child: CircularProgressIndicator());
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Center(
+                        child: Column(
+                          children: [
+                            Icon(Icons.broken_image, size: 48, color: Colors.grey),
+                            SizedBox(height: 8),
+                            Text('Gagal memuat gambar bukti transfer'),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

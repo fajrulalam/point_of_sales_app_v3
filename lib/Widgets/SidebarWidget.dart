@@ -162,7 +162,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                           if (widget.onInventoryPressed != null)
                             _navItem(
                               icon: Icons.inventory_2_rounded,
-                              label: 'Stock',
+                              label: 'Stok',
                               routeKey: 'inventory',
                               onTap: widget.onInventoryPressed!,
                               showLabels: showLabels,
@@ -170,7 +170,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                           if (widget.onShoppingPressed != null)
                             _navItem(
                               icon: Icons.shopping_cart_rounded,
-                              label: 'Shopping',
+                              label: 'Belanja',
                               routeKey: 'shopping',
                               onTap: widget.onShoppingPressed!,
                               showLabels: showLabels,
@@ -208,7 +208,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
 
                   _navItem(
                     icon: Icons.restart_alt_rounded,
-                    label: 'Reset Queue',
+                    label: 'Reset Antrean',
                     routeKey: '__reset__',
                     onTap: widget.onResetPressed,
                     iconColor: Colors.redAccent,
@@ -222,7 +222,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
 
                   _navItem(
                     icon: Icons.logout_rounded,
-                    label: 'Logout',
+                    label: 'Keluar',
                     routeKey: '__logout__',
                     onTap: widget.onLogoutPressed ?? () {},
                     iconColor: Colors.redAccent.shade200,
@@ -431,7 +431,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Testing',
+                        'Mode Testing',
                         style: TextStyle(
                           fontFamily: 'Montserrat',
                           fontSize: 12,
@@ -477,11 +477,11 @@ class _SidebarWidgetState extends State<SidebarWidget> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Cashier',
+                  'Kasir',
                   style: const TextStyle(fontFamily: 'Montserrat', fontSize: 12, fontWeight: FontWeight.w600, color: kDarkTeal),
                 ),
                 Text(
-                  'Admin Mode',
+                  'Mode Admin',
                   style: TextStyle(fontFamily: 'Montserrat', fontSize: 10, color: kDarkTeal.withOpacity(0.5)),
                 ),
               ],

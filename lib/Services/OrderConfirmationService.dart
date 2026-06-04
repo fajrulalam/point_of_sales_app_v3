@@ -3518,6 +3518,17 @@ class _SelfOrderConfirmationDialogState
     
     // Pre-fill customer name from self-order
     widget.customerNameController.text = widget.selfOrder.namaCustomer;
+
+    // Pre-select payment method based on self-order selection
+    final selfPaymentMethod = widget.selfOrder.paymentMethod;
+    if (selfPaymentMethod == 'QRIS') {
+      _selectedPaymentMethod = 'QRIS';
+      final format = NumberFormat("#,###", "id_ID");
+      widget.uangYangDiterimaController.text = format.format(currentTotal);
+    } else if (selfPaymentMethod == 'CASH') {
+      _selectedPaymentMethod = 'Cash';
+      widget.uangYangDiterimaController.clear();
+    }
   }
 
   Future<void> _loadPrograms() async {
@@ -3801,6 +3812,33 @@ class _SelfOrderConfirmationDialogState
                         ],
                       ),
                     ),
+                    if (widget.selfOrder.paymentMethod == 'QRIS' && widget.selfOrder.paymentProof.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.info, color: Colors.blue, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Pelanggan membayar dengan QRIS dan telah melampirkan bukti transfer. Pastikan bukti transfer valid sebelum memproses.',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: Colors.blue.shade900,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
 
                     // Total display

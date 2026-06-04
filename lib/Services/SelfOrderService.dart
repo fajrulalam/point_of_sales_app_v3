@@ -73,8 +73,15 @@ class SelfOrderService {
       'status': newStatus,
     };
 
-    if (declineReason != null) {
-      updateData['declineReason'] = declineReason;
+    if (declineReason != null || newStatus == SelfOrderStatus.declined) {
+      updateData['declineReason'] = declineReason ?? 'Ditolak oleh kasir';
+      updateData['paymentStatus'] = 'REJECTED';
+      updateData['orderStatus'] = 'CANCELLED';
+    }
+
+    if (newStatus == SelfOrderStatus.processing) {
+      updateData['paymentStatus'] = 'PAID';
+      updateData['orderStatus'] = 'PREPARING';
     }
 
     if (newStatus == SelfOrderStatus.paid ||
@@ -90,10 +97,24 @@ class SelfOrderService {
     await updateStatus(orderId, SelfOrderStatus.processing);
   }
 
-  /// Mark an order as paid by deleting it from SelfOrders
-  /// (the order data is already saved to Status collection by OrderConfirmationService)
+  /// Mark an order as paid by updating its status toPaid first (for live verification on member's client)
+  /// and deleting it after a 3-second delay.
   Future<void> markAsPaid(String orderId) async {
-    await deleteSelfOrder(orderId);
+    await _selfOrdersCollection.doc(orderId).update({
+      'status': SelfOrderStatus.paid,
+      'paymentStatus': 'PAID',
+      'orderStatus': 'COMPLETED',
+      'processedAt': FieldValue.serverTimestamp(),
+    });
+
+    // Delayed deletion to allow member's client app to catch the 'Paid' status update
+    Future.delayed(const Duration(seconds: 20), () async {
+      try {
+        await deleteSelfOrder(orderId);
+      } catch (e) {
+        print('Error deleting self-order after delay: $e');
+      }
+    });
   }
 
   /// Decline an order with a reason

@@ -249,7 +249,7 @@ class _HomeState extends State<Home> {
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: const Center(
                         child: Text(
-                          'TESTING MODE — data will not affect production',
+                          'MODE TESTING — data tidak akan memengaruhi data produksi',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 12,
@@ -876,28 +876,28 @@ Widget _buildMainContent() {
   }
 
   Future<void> _handleTestingModeToggle() async {
-    final turning = Col.testingMode.value ? 'OFF' : 'ON';
+    final turning = Col.testingMode.value ? 'Nonaktifkan' : 'Aktifkan';
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Turn $turning Testing Mode?'),
+        title: Text('$turning Mode Testing?'),
         content: Text(
           Col.testingMode.value
-              ? 'Switching back to production data.'
-              : 'All reads/writes will go to testing collections. '
-                'Data will be migrated on first activation.',
+              ? 'Beralih kembali ke data produksi.'
+              : 'Semua proses baca/tulis akan diarahkan ke koleksi testing. '
+                'Data akan dimigrasikan pada aktivasi pertama.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: const Text('Batal'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Col.testingMode.value ? Colors.teal : Colors.orange,
             ),
-            child: Text('Turn $turning'),
+            child: Text(turning),
           ),
         ],
       ),

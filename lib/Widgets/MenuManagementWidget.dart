@@ -778,7 +778,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             child: OutlinedButton.icon(
               onPressed: _showCreateOptionGroupDialog,
               icon: const Icon(Icons.add),
-              label: const Text('Create New Option Group'),
+              label: const Text('Buat Option Group Baru'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFF2E7D32),
                 side: const BorderSide(color: Color(0xFF2E7D32)),
@@ -789,7 +789,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               ),
             ),
           ),
-          _buildSearchBar(_optionSearchController, 'Search by option group name', _onOptionSearchChanged),
+          _buildSearchBar(_optionSearchController, 'Cari berdasarkan nama grup opsi', _onOptionSearchChanged),
           _buildOptionGroupsHeader(),
           Expanded(child: _buildOptionGroupsList()),
         ],
@@ -1074,8 +1074,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       builder: (context, snapshot) {
         final names = snapshot.data ?? [];
         final displayText = names.isEmpty
-            ? 'No links'
-            : 'Linked to: ${names.take(2).join(", ")}${names.length > 2 ? " +${names.length - 2}" : ""}';
+            ? 'Belum terhubung'
+            : 'Terhubung ke: ${names.take(2).join(", ")}${names.length > 2 ? " +${names.length - 2}" : ""}';
 
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1822,7 +1822,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                     _showLinkMenuItemsDialog(group);
                   },
                   icon: const Icon(Icons.link),
-                  label: const Text('Kelola Link Menu Items'),
+                  label: const Text('Hubungkan ke Menu'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.blue,
                   ),
@@ -1899,7 +1899,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Link ke Menu Items', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          title: Text('Hubungkan ke Menu', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
           content: SizedBox(
             width: 400,
             height: 400,

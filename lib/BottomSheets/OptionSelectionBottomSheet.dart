@@ -211,7 +211,7 @@ class _OptionSelectionBottomSheetState
                         },
                         icon: const Icon(Icons.add, color: Color(0xFF2E7D32)),
                         label: Text(
-                          '+ Add Another Variation',
+                          '+ Tambahkan Variasi Lain',
                           style: GoogleFonts.poppins(
                             fontWeight: FontWeight.w600,
                             color: const Color(0xFF2E7D32),
@@ -325,7 +325,7 @@ class _OptionSelectionBottomSheetState
                 const Icon(Icons.widgets_outlined, size: 18, color: Color(0xFF2E7D32)),
                 const SizedBox(width: 8),
                 Text(
-                  'Combination #${index + 1}',
+                  'Kombinasi #${index + 1}',
                   style: GoogleFonts.poppins(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
