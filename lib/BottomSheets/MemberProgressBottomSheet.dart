@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Widgets/MarketingProgressCard.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class MemberProgressBottomSheet extends StatelessWidget {
   final Member member;
@@ -67,7 +68,7 @@ class MemberProgressBottomSheet extends StatelessWidget {
             Expanded(
               child: FutureBuilder<QuerySnapshot>(
                 future: FirebaseFirestore.instance
-                    .collection('vouchers')
+                    .collection(Col.name('vouchers'))
                     .where('userId', isEqualTo: member.id)
                     .get(),
                 builder: (context, snapshot) {

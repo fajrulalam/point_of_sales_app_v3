@@ -14,10 +14,10 @@ service cloud.firestore {
         request.auth.token.admin == true ||
         request.auth.token.email == "gnavsih1@gmail.com" ||
         request.auth.token.email == "admin@canteen375.com" ||
-        request.auth.token.email == "irene@canteen375.com" ||
+        request.auth.token.email == "siti@canteen375.com" ||
         request.auth.token.email == "amalia@canteen375.com" ||
         request.auth.token.email == "eka@canteen375.com" ||
-        request.auth.token.email == "dina@canteen375.com"
+        request.auth.token.email == "widya@canteen375.com"
       );
     }
 
@@ -145,6 +145,12 @@ service cloud.firestore {
 
     match /SelfOrders/{orderId} {
       allow read, write: if true;
+    }
+    
+    // ── TRANSACTION HISTORY (MEMBERS) ─────────────────────────────────────────
+    match /pointTransactions/{id} {
+      allow read: if isAuthenticated() && memberIdRefersToAuthUser(resource.data.memberId);
+      allow write: if isAdmin();
     }
     
     // ── FEEDBACKS ─────────────────────────────────────────────────────────────
@@ -328,6 +334,26 @@ service cloud.firestore {
       match /{subcollection=**} {
         allow read, write, update, delete: if true;
       }
+    }
+
+    match /zTesting_pointTransactions/{id} {
+      allow read, write, update, delete: if true;
+    }
+
+    match /zTesting_SelfOrders/{id} {
+      allow read, write, update, delete: if true;
+    }
+
+    match /zTesting_feedbacks/{id} {
+      allow read, write, update, delete: if true;
+    }
+
+    match /zTesting_assets/{id} {
+      allow read, write, update, delete: if true;
+    }
+
+    match /zTesting_config/{id} {
+      allow read, write, update, delete: if true;
     }
   }
 }

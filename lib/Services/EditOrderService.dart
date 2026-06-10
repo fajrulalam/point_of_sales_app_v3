@@ -111,23 +111,28 @@ class EditOrderService {
         ));
       }
 
-      // Apply revert to Daily/Monthly/Yearly (if they are for today)
+      final bool isOpenBill = originalStatusData['transactionMethod'] == 'Open Bill' &&
+          originalStatusData['isClosed'] == false;
+
+      // Apply revert to Daily/Monthly/Yearly (if they are for today and not an active open bill)
       // Note: If the order was from a previous day, we should use its original date.
       // Assuming EditOrderScreen only shows today's orders.
-      final oldWaktuPesan = originalStatusData['waktuPesan'] as Timestamp?;
-      DateTime orderDate = oldWaktuPesan?.toDate() ?? DateTime.now();
-      String formattedDate = DateFormat('yyyy-MM-dd').format(orderDate);
-      String orderMonth = DateFormat('yyyy-MM').format(orderDate);
-      String orderYear = DateFormat('yyyy').format(orderDate);
+      if (!isOpenBill) {
+        final oldWaktuPesan = originalStatusData['waktuPesan'] as Timestamp?;
+        DateTime orderDate = oldWaktuPesan?.toDate() ?? DateTime.now();
+        String formattedDate = DateFormat('yyyy-MM-dd').format(orderDate);
+        String orderMonth = DateFormat('yyyy-MM').format(orderDate);
+        String orderYear = DateFormat('yyyy').format(orderDate);
 
-      final docDaily = fs.collection(Col.name('DailyTransaction')).doc(formattedDate);
-      batch.set(docDaily, revertMap, SetOptions(merge: true));
+        final docDaily = fs.collection(Col.name('DailyTransaction')).doc(formattedDate);
+        batch.set(docDaily, revertMap, SetOptions(merge: true));
 
-      final docMonthly = fs.collection(Col.name('MonthlyTransaction')).doc(orderMonth);
-      batch.set(docMonthly, revertMap, SetOptions(merge: true));
+        final docMonthly = fs.collection(Col.name('MonthlyTransaction')).doc(orderMonth);
+        batch.set(docMonthly, revertMap, SetOptions(merge: true));
 
-      final docYearly = fs.collection(Col.name('YearlyTransaction')).doc(orderYear);
-      batch.set(docYearly, revertMap, SetOptions(merge: true));
+        final docYearly = fs.collection(Col.name('YearlyTransaction')).doc(orderYear);
+        batch.set(docYearly, revertMap, SetOptions(merge: true));
+      }
 
       // Revert Old Stock
       await _appendRevertIngredientsToBatch(oldPesananList, menuMap, optionGroupLookup, batch: batch);
@@ -174,17 +179,44 @@ class EditOrderService {
         applyMap[pesanan.namaPesanan] = FieldValue.increment(pesanan.totalQuantity);
       }
 
-      batch.set(docDaily, applyMap, SetOptions(merge: true));
-      batch.set(docMonthly, applyMap, SetOptions(merge: true));
-      batch.set(docYearly, applyMap, SetOptions(merge: true));
+      if (!isOpenBill) {
+        final oldWaktuPesan = originalStatusData['waktuPesan'] as Timestamp?;
+        DateTime orderDate = oldWaktuPesan?.toDate() ?? DateTime.now();
+        String formattedDate = DateFormat('yyyy-MM-dd').format(orderDate);
+        String orderMonth = DateFormat('yyyy-MM').format(orderDate);
+        String orderYear = DateFormat('yyyy').format(orderDate);
+
+        final docDaily = fs.collection(Col.name('DailyTransaction')).doc(formattedDate);
+        final docMonthly = fs.collection(Col.name('MonthlyTransaction')).doc(orderMonth);
+        final docYearly = fs.collection(Col.name('YearlyTransaction')).doc(orderYear);
+
+        batch.set(docDaily, applyMap, SetOptions(merge: true));
+        batch.set(docMonthly, applyMap, SetOptions(merge: true));
+        batch.set(docYearly, applyMap, SetOptions(merge: true));
+      }
 
       // Apply New Stock
       await _appendDeductIngredientsToBatch(activePesananList, menuMap, optionGroupLookup, batch: batch);
 
-      // 3. Overwrite Status Document
+      // 3. Update Status Document (preserving kitchen progress)
+      // Build a lookup of original items keyed by orderKey so we can
+      // preserve kitchen-side progress (preparedQuantity, status) for
+      // items that haven't been removed.
+      final oldItemsByKey = <String, Map<String, dynamic>>{};
+      for (var item in oldOrderItemsRaw) {
+        final key = _buildOrderKeyFromMap(item);
+        oldItemsByKey[key] = Map<String, dynamic>.from(item as Map);
+      }
+
       final newOrderItems = activePesananList.map((order) {
         final menu = menuMap[order.namaPesanan];
+        final orderKey = order.orderKey;
+        final oldItem = oldItemsByKey[orderKey];
+
         return {
+          'menuItemId': order.menuItemId.isNotEmpty
+              ? order.menuItemId
+              : (oldItem?['menuItemId'] ?? menu?.id ?? ''),
           'namaPesanan': order.namaPesanan,
           'harga': order.harga,
           'dineInQuantity': order.dineInQuantity,
@@ -192,15 +224,19 @@ class EditOrderService {
           'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
           'isMakanan': menu?.isMakanan ?? false,
           'customerNote': order.customerNote ?? '',
-          'status': '',
-          'dineInPreparedQuantity': 0,
-          'takeAwayPreparedQuantity': 0,
+          // Preserve kitchen progress for items that already existed;
+          // new items start at zero.
+          'status': oldItem?['status'] ?? '',
+          'dineInPreparedQuantity': oldItem?['dineInPreparedQuantity'] ?? 0,
+          'takeAwayPreparedQuantity': oldItem?['takeAwayPreparedQuantity'] ?? 0,
+          'orderedAt': oldItem?['orderedAt'] ?? DateTime.now().millisecondsSinceEpoch,
         };
       }).toList();
 
+      // Use batch.update instead of batch.set(merge:false) to avoid
+      // overwriting concurrent kitchen-app changes to other fields.
       final statusRef = fs.collection(Col.name('Status')).doc(statusDocId);
-      final newStatusMap = {
-        ...originalStatusData,
+      final Map<String, dynamic> updateFields = {
         'orderItems': newOrderItems,
         'total': newTotalHarga,
         'subTotal': newSubTotal,
@@ -213,13 +249,13 @@ class EditOrderService {
         final splitDetails = originalStatusData['splitDetails'] ?? {};
         final oldQris = splitDetails['qrisAmount'] as int? ?? 0;
         final newCash = newTotalHarga > oldQris ? newTotalHarga - oldQris : 0;
-        newStatusMap['splitDetails'] = {
+        updateFields['splitDetails'] = {
           'cashAmount': newCash,
           'qrisAmount': newTotalHarga > oldQris ? oldQris : newTotalHarga,
         };
       }
 
-      batch.set(statusRef, newStatusMap, SetOptions(merge: false));
+      batch.update(statusRef, updateFields);
 
       await batch.commit();
 
@@ -239,6 +275,23 @@ class EditOrderService {
         );
       }
     }
+  }
+
+  /// Builds the same orderKey that [PesananObject.orderKey] produces,
+  /// but from the raw Firestore map stored in `orderItems`.
+  static String _buildOrderKeyFromMap(dynamic item) {
+    final menuItemId = (item['menuItemId'] ?? '') as String;
+    final namaPesanan = (item['namaPesanan'] ?? '') as String;
+    final base = menuItemId.isNotEmpty ? menuItemId : namaPesanan;
+
+    final selectedOptions = item['selectedOptions'] as List<dynamic>? ?? [];
+    if (selectedOptions.isEmpty) return base;
+
+    final optionKeys = selectedOptions
+        .map((o) => '${o['groupName'] ?? ''}:${o['optionName'] ?? ''}')
+        .toList()
+      ..sort();
+    return '$base|${optionKeys.join(',')}';
   }
 
   static List<MenuIngredient> _resolveOptionIngredients(

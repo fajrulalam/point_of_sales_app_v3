@@ -1079,7 +1079,6 @@ class HomeController extends ChangeNotifier {
           int dineIn = item['dineInQuantity'] ?? 0;
           int takeAway = item['takeAwayQuantity'] ?? 0;
           int harga = item['harga'] ?? 0;
-          int totalQty = dineIn + takeAway;
 
           int optionsAdj = 0;
           final List<dynamic> selectedOpts = item['selectedOptions'] ?? [];
@@ -1087,23 +1086,41 @@ class HomeController extends ChangeNotifier {
             optionsAdj += (opt['priceAdjustment'] ?? 0) as int;
           }
           int effectivePrice = harga + optionsAdj;
-          int subtotal = effectivePrice * totalQty;
 
-          if (itemName.length > 15) {
-            itemName = "${itemName.substring(0, 15)}..";
-          }
-          print2ColumnSmall("$itemName($totalQty)", subtotal.toString());
+          void printItemLine(String name, int qty) {
+            String displayName = name;
+            if (displayName.length > 20) {
+              displayName = "${displayName.substring(0, 20)}..";
+            }
+            int subtotal = effectivePrice * qty;
+            print2ColumnSmall("$displayName($qty)", subtotal.toString());
 
-          for (var opt in selectedOpts) {
-            String optName = opt['optionName'] ?? '';
-            int adj = opt['priceAdjustment'] ?? 0;
-            String optPrice = adj > 0 ? '+$adj' : '';
-            print2ColumnSmall('  + $optName', optPrice);
+            for (var opt in selectedOpts) {
+              String optName = opt['optionName'] ?? '';
+              int adj = opt['priceAdjustment'] ?? 0;
+              String optPrice = adj > 0 ? '+$adj' : '';
+              print2ColumnSmall('  + $optName', optPrice);
+            }
+            final String? note = item['customerNote'];
+            if (note != null && note.isNotEmpty) {
+              printer.printCustom('  * $note', 1, 0);
+            }
           }
-          final String? note = item['customerNote'];
-          if (note != null && note.isNotEmpty) {
-            printer.printCustom('  * ${note}', 1, 0);
+
+          if (dineIn > 0) {
+            printItemLine(itemName, dineIn);
           }
+          if (takeAway > 0) {
+            printItemLine("$itemName (bgks)", takeAway);
+          }
+        }
+
+        // Print packing fee if applicable for flatItems format
+        final int takeAwayFee = (data['takeAwayFee'] ?? 0) is num 
+            ? (data['takeAwayFee'] as num).toInt() 
+            : 0;
+        if (takeAwayFee > 0) {
+          print2ColumnSmall('Bungkus', takeAwayFee.toString());
         }
       } else if (legacyOrders != null) {
         // Legacy format: orders[].items[]

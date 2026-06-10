@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Widgets/MarketingProgressCard.dart';
+import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class CampaignDetailsBottomSheet extends StatelessWidget {
   final QueryDocumentSnapshot campaignDoc;
@@ -66,7 +67,7 @@ class CampaignDetailsBottomSheet extends StatelessWidget {
             Expanded(
               child: FutureBuilder<QuerySnapshot>(
                 future: FirebaseFirestore.instance
-                    .collection('vouchers')
+                    .collection(Col.name('vouchers'))
                     .where('voucherGroupId', isEqualTo: campaignId)
                     .get(),
                 builder: (context, snapshot) {

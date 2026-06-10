@@ -457,6 +457,7 @@ class OrderConfirmationService {
         'status': '',
         'dineInPreparedQuantity': 0,
         'takeAwayPreparedQuantity': 0,
+        'orderedAt': DateTime.now().millisecondsSinceEpoch,
       };
     }).toList();
 
@@ -624,6 +625,7 @@ class OrderConfirmationService {
       context: context,
       builder: (BuildContext context) {
         return Dialog(
+          alignment: Alignment.topCenter,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -948,6 +950,7 @@ class OrderConfirmationService {
         'status': '',
         'dineInPreparedQuantity': 0,
         'takeAwayPreparedQuantity': 0,
+        'orderedAt': DateTime.now().millisecondsSinceEpoch,
       };
     }).toList();
 
@@ -1188,6 +1191,7 @@ class OrderConfirmationService {
         'status': '',
         'dineInPreparedQuantity': 0,
         'takeAwayPreparedQuantity': 0,
+        'orderedAt': DateTime.now().millisecondsSinceEpoch,
       };
     }).toList();
 
@@ -1305,6 +1309,7 @@ class OrderConfirmationService {
       context: context,
       builder: (BuildContext context) {
         return Dialog(
+          alignment: Alignment.topCenter,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1623,14 +1628,54 @@ class OrderConfirmationService {
       DateTime now = DateTime.now();
       
       // Fallback to createdAt if activeDate is missing. 
-      DateTime activeDate = data['activeDate'] != null 
-          ? (data['activeDate'] as Timestamp).toDate() 
-          : (data['createdAt'] != null ? (data['createdAt'] as Timestamp).toDate() : now);
+      DateTime activeDate;
+      final activeRaw = data['activeDate'] ?? data['createdAt'];
+      if (activeRaw != null) {
+        if (activeRaw is Timestamp) {
+          activeDate = activeRaw.toDate();
+        } else if (activeRaw is DateTime) {
+          activeDate = activeRaw;
+        } else if (activeRaw is String) {
+          activeDate = DateTime.tryParse(activeRaw) ?? now;
+        } else {
+          activeDate = now;
+        }
+      } else {
+        activeDate = now;
+      }
           
       // If expireDate is missing, assume it doesn't expire (or set far future)
-      DateTime expireDate = data['expireDate'] != null 
-          ? (data['expireDate'] as Timestamp).toDate() 
-          : now.add(const Duration(days: 3650)); // ~10 years into the future
+      DateTime expireDate;
+      final expireRaw = data['expireDate'];
+      if (expireRaw != null) {
+        if (expireRaw is Timestamp) {
+          expireDate = expireRaw.toDate();
+        } else if (expireRaw is DateTime) {
+          expireDate = expireRaw;
+        } else if (expireRaw is String) {
+          expireDate = DateTime.tryParse(expireRaw) ?? now.add(const Duration(days: 3650));
+        } else {
+          expireDate = now.add(const Duration(days: 3650));
+        }
+      } else {
+        // Fallback: Try to parse from voucherName
+        final voucherName = data['voucherName'] ?? '';
+        final regExp = RegExp(r'(\d{4})-(\d{2})');
+        final match = regExp.firstMatch(voucherName);
+        if (match != null) {
+          final year = int.tryParse(match.group(1) ?? '');
+          final month = int.tryParse(match.group(2) ?? '');
+          if (year != null && month != null) {
+            final expiryYear = month == 12 ? year + 1 : year;
+            final expiryMonth = month == 12 ? 1 : month + 1;
+            expireDate = DateTime(expiryYear, expiryMonth + 1, 0, 23, 59, 59);
+          } else {
+            expireDate = now.add(const Duration(days: 3650));
+          }
+        } else {
+          expireDate = now.add(const Duration(days: 3650));
+        }
+      }
       bool isClaimed = data['isClaimed'] ?? false;
       bool isActive = data['isActive'] ?? true; // Default to true if missing
       String status = data['status'] ?? '';
@@ -1914,6 +1959,7 @@ class OrderConfirmationService {
     for (var order in billOrders) {
       for (var item in order.items) {
         final pesanan = PesananObject(
+          menuItemId: item.menuItemId,
           namaPesanan: item.namaPesanan,
           harga: item.harga,
           dineInQuantity: item.dineInQuantity,
@@ -2124,9 +2170,26 @@ class OrderConfirmationService {
       await batch.commit();
 
       // 💳 STEP 3: Update member points and competition records
-      _incrementMemberPoints(openBill.memberId, totalHarga);
-      _updateCompetitionRecord(openBill.memberId, totalHarga);
-      _processPeriodicCashbackCampaign(openBill.memberId, totalHarga, openBill.memberName);
+      String memberId = openBill.memberId;
+      if (memberId == openBill.statusDocId || memberId.endsWith('_plazaUnipdu')) {
+        try {
+          final memberQuery = await FirebaseFirestore.instance
+              .collection(Col.name('Members'))
+              .where('nama', isEqualTo: openBill.memberName)
+              .limit(1)
+              .get();
+          if (memberQuery.docs.isNotEmpty) {
+            memberId = memberQuery.docs.first.id;
+            print('🔍 Fallback lookup resolved member ID: $memberId for ${openBill.memberName}');
+          }
+        } catch (e) {
+          print('❌ Error resolving member ID fallback: $e');
+        }
+      }
+
+      _incrementMemberPoints(memberId, totalHarga);
+      _updateCompetitionRecord(memberId, totalHarga);
+      _processPeriodicCashbackCampaign(memberId, totalHarga, openBill.memberName);
 
       // 📠 STEP 4: Print Receipt
       await printReceipt(
@@ -2142,7 +2205,8 @@ class OrderConfirmationService {
 
       Navigator.pop(context); // Close loader
 
-      int uangYangDiterima = int.parse(uangYangDiterimaController.text.replaceAll('.', ''));
+      final String inputText = uangYangDiterimaController.text.replaceAll('.', '');
+      int uangYangDiterima = int.tryParse(inputText) ?? 0;
 
       await _showSuccessDialog(
         context: context,
@@ -2235,7 +2299,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
 
     try {
       final snapshot = await FirebaseFirestore.instance
-          .collection('vouchers')
+          .collection(Col.name('vouchers'))
           .where('userId', isEqualTo: memberId)
           .where('status', isEqualTo: 'READY_TO_CLAIM')
           .get();
@@ -2243,16 +2307,61 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
       if (mounted) {
         setState(() {
           final now = DateTime.now();
+          final todayStart = DateTime(now.year, now.month, now.day);
+          print('DEBUG [vouchers]: Found ${snapshot.docs.length} docs from Firestore.');
+          for (var doc in snapshot.docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            print('DEBUG [vouchers]: docId=${doc.id}, name=${data['voucherName']}, status=${data['status']}, isClaimed=${data['isClaimed']}, expireDate=${data['expireDate']}');
+          }
           _redeemableVouchers = snapshot.docs
               .map((doc) => {...doc.data(), 'id': doc.id})
               .where((v) {
+                // Exclude if claimed
+                final isClaimed = v['isClaimed'] ?? false;
+                final status = v['status'] ?? '';
+                if (isClaimed || status == 'CLAIMED') {
+                  print('DEBUG [vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
+                  return false;
+                }
+
                 final expireRaw = v['expireDate'];
-                if (expireRaw == null) return true; // no expiry = still valid
-                final expireDate = expireRaw is Timestamp
-                    ? expireRaw.toDate()
-                    : (expireRaw is DateTime ? expireRaw : null);
-                if (expireDate == null) return true;
-                return expireDate.isAfter(now);
+                DateTime? expireDate;
+                if (expireRaw != null) {
+                  if (expireRaw is Timestamp) {
+                    expireDate = expireRaw.toDate();
+                  } else if (expireRaw is DateTime) {
+                    expireDate = expireRaw;
+                  } else if (expireRaw is String) {
+                    expireDate = DateTime.tryParse(expireRaw);
+                  }
+                }
+                
+                if (expireDate == null) {
+                  // Fallback: Try to parse from name
+                  final voucherName = v['voucherName'] ?? '';
+                  final regExp = RegExp(r'(\d{4})-(\d{2})');
+                  final match = regExp.firstMatch(voucherName);
+                  if (match != null) {
+                    final year = int.tryParse(match.group(1) ?? '');
+                    final month = int.tryParse(match.group(2) ?? '');
+                    if (year != null && month != null) {
+                      final expiryYear = month == 12 ? year + 1 : year;
+                      final expiryMonth = month == 12 ? 1 : month + 1;
+                      expireDate = DateTime(expiryYear, expiryMonth + 1, 0, 23, 59, 59);
+                    }
+                  }
+                }
+                
+                if (expireDate == null) {
+                  print('DEBUG [vouchers]: Showed ${v['voucherName']} (no expiry found)');
+                  return true;
+                }
+                // Do not show if the voucher's expireDate is before today
+                final isValid = !expireDate.isBefore(todayStart);
+                if (!isValid) {
+                  print('DEBUG [vouchers]: Excluded ${v['voucherName']} because expired on $expireDate (todayStart: $todayStart)');
+                }
+                return isValid;
               })
               .toList();
           _isLoadingVouchers = false;
@@ -2282,7 +2391,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   String _lastSearchQuery = '';
   Iterable<Member> _lastOptionsFound = const Iterable<Member>.empty();
 
-  Future<void> _applyVoucherCode(String code) async {
+  Future<void> _applyVoucherCode(String code, {String? docId}) async {
     setState(() {
       applyPromo = true;
       voucherController.text = code;
@@ -2290,7 +2399,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
       voucherError = null;
     });
 
-    final result = await OrderConfirmationService._validateVoucher(code, currentTotal);
+    final result = await OrderConfirmationService._validateVoucher(docId ?? code, currentTotal);
 
     if (mounted) {
       setState(() {
@@ -2304,6 +2413,14 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
           voucherDocId = null;
           voucherBalance = null;
           sekaliPakai = true;
+          
+          // Show error message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['error'] ?? 'Voucher tidak valid'),
+              backgroundColor: Colors.red,
+            ),
+          );
         } else if (result != null) {
           voucherName = result['voucherName'];
           voucherValue = result['value'];
@@ -2377,6 +2494,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
     int displayTotal = (currentTotal - voucherValue).clamp(0, 99999999);
 
     return AlertDialog(
+      alignment: Alignment.topCenter,
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: null,
@@ -2867,7 +2985,9 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                 return InkWell(
                                   onTap: () {
                                     if (v['voucherId'] != null) {
-                                      _applyVoucherCode(v['voucherId']);
+                                      _applyVoucherCode(v['voucherId'], docId: v['id']);
+                                    } else if (v['id'] != null) {
+                                      _applyVoucherCode(v['id'], docId: v['id']);
                                     }
                                   },
                                   child: Padding(
@@ -3540,7 +3660,7 @@ class _SelfOrderConfirmationDialogState
     }
   }
 
-  Future<void> _applyVoucherCode(String code) async {
+  Future<void> _applyVoucherCode(String code, {String? docId}) async {
     setState(() {
       applyPromo = true;
       voucherController.text = code;
@@ -3548,7 +3668,7 @@ class _SelfOrderConfirmationDialogState
       voucherError = null;
     });
 
-    final result = await OrderConfirmationService._validateVoucher(code, currentTotal);
+    final result = await OrderConfirmationService._validateVoucher(docId ?? code, currentTotal);
 
     if (mounted) {
       setState(() {
@@ -3562,6 +3682,14 @@ class _SelfOrderConfirmationDialogState
           voucherDocId = null;
           voucherBalance = null;
           sekaliPakai = true;
+          
+          // Show error message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['error'] ?? 'Voucher tidak valid'),
+              backgroundColor: Colors.red,
+            ),
+          );
         } else if (result != null) {
           voucherName = result['voucherName'];
           voucherValue = result['value'];
@@ -3610,7 +3738,7 @@ class _SelfOrderConfirmationDialogState
 
     try {
       final snapshot = await FirebaseFirestore.instance
-          .collection('vouchers')
+          .collection(Col.name('vouchers'))
           .where('userId', isEqualTo: memberId)
           .where('status', isEqualTo: 'READY_TO_CLAIM')
           .get();
@@ -3618,16 +3746,61 @@ class _SelfOrderConfirmationDialogState
       if (mounted) {
         setState(() {
           final now = DateTime.now();
+          final todayStart = DateTime(now.year, now.month, now.day);
+          print('DEBUG [self-vouchers]: Found ${snapshot.docs.length} docs from Firestore.');
+          for (var doc in snapshot.docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            print('DEBUG [self-vouchers]: docId=${doc.id}, name=${data['voucherName']}, status=${data['status']}, isClaimed=${data['isClaimed']}, expireDate=${data['expireDate']}');
+          }
           _redeemableVouchers = snapshot.docs
               .map((doc) => {...doc.data(), 'id': doc.id})
               .where((v) {
+                // Exclude if claimed
+                final isClaimed = v['isClaimed'] ?? false;
+                final status = v['status'] ?? '';
+                if (isClaimed || status == 'CLAIMED') {
+                  print('DEBUG [self-vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
+                  return false;
+                }
+
                 final expireRaw = v['expireDate'];
-                if (expireRaw == null) return true; // no expiry = still valid
-                final expireDate = expireRaw is Timestamp
-                    ? expireRaw.toDate()
-                    : (expireRaw is DateTime ? expireRaw : null);
-                if (expireDate == null) return true;
-                return expireDate.isAfter(now);
+                DateTime? expireDate;
+                if (expireRaw != null) {
+                  if (expireRaw is Timestamp) {
+                    expireDate = expireRaw.toDate();
+                  } else if (expireRaw is DateTime) {
+                    expireDate = expireRaw;
+                  } else if (expireRaw is String) {
+                    expireDate = DateTime.tryParse(expireRaw);
+                  }
+                }
+                
+                if (expireDate == null) {
+                  // Fallback: Try to parse from name
+                  final voucherName = v['voucherName'] ?? '';
+                  final regExp = RegExp(r'(\d{4})-(\d{2})');
+                  final match = regExp.firstMatch(voucherName);
+                  if (match != null) {
+                    final year = int.tryParse(match.group(1) ?? '');
+                    final month = int.tryParse(match.group(2) ?? '');
+                    if (year != null && month != null) {
+                      final expiryYear = month == 12 ? year + 1 : year;
+                      final expiryMonth = month == 12 ? 1 : month + 1;
+                      expireDate = DateTime(expiryYear, expiryMonth + 1, 0, 23, 59, 59);
+                    }
+                  }
+                }
+                
+                if (expireDate == null) {
+                  print('DEBUG [self-vouchers]: Showed ${v['voucherName']} (no expiry found)');
+                  return true;
+                }
+                // Do not show if the voucher's expireDate is before today
+                final isValid = !expireDate.isBefore(todayStart);
+                if (!isValid) {
+                  print('DEBUG [self-vouchers]: Excluded ${v['voucherName']} because expired on $expireDate (todayStart: $todayStart)');
+                }
+                return isValid;
               })
               .toList();
           _isLoadingVouchers = false;
@@ -3692,6 +3865,7 @@ class _SelfOrderConfirmationDialogState
     int displayTotal = (currentTotal - voucherValue).clamp(0, 99999999);
 
     return AlertDialog(
+      alignment: Alignment.topCenter,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Column(
         children: [
@@ -3930,7 +4104,9 @@ class _SelfOrderConfirmationDialogState
                               return InkWell(
                                 onTap: () {
                                   if (v['voucherId'] != null) {
-                                    _applyVoucherCode(v['voucherId']);
+                                    _applyVoucherCode(v['voucherId'], docId: v['id']);
+                                  } else if (v['id'] != null) {
+                                    _applyVoucherCode(v['id'], docId: v['id']);
                                   }
                                 },
                                 child: Padding(
@@ -4545,6 +4721,7 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
     int displayTotal = (baseTotal - voucherValue).clamp(0, 99999999);
 
     return AlertDialog(
+      alignment: Alignment.topCenter,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Column(
         children: [

@@ -80,6 +80,9 @@ class MyApp extends StatelessWidget {
               elevation: 2,
               color: Colors.white,
             ),
+            dialogTheme: const DialogThemeData(
+              alignment: Alignment.topCenter,
+            ),
           ),
           // If user is null or anonymous, show login
           initialRoute: isRealUser ? Home.id : LoginScreen.id,

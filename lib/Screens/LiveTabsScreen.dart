@@ -288,9 +288,41 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
     );
   }
 
+  int _calculateTakeAwayFee(OpenBill bill) {
+    if (widget.homeController == null) return 0;
+
+    final Map<String, int> takeAwayQuantities = {};
+    for (var order in bill.orders) {
+      for (var item in order.items) {
+        if (item.takeAwayQuantity > 0) {
+          takeAwayQuantities[item.namaPesanan] = 
+              (takeAwayQuantities[item.namaPesanan] ?? 0) + item.takeAwayQuantity;
+        }
+      }
+    }
+
+    if (takeAwayQuantities.isEmpty) return 0;
+
+    final menuUnitsMap = <String, int>{};
+    for (var menu in widget.homeController!.menuObjectList) {
+      menuUnitsMap[menu.namaMenu] = menu.unitsPerPackage;
+    }
+
+    int totalPackages = 0;
+    takeAwayQuantities.forEach((namaPesanan, quantity) {
+      int unitsPerPackage = menuUnitsMap[namaPesanan] ?? 1;
+      int packagesNeeded = (quantity / unitsPerPackage).ceil();
+      totalPackages += packagesNeeded;
+    });
+
+    return (totalPackages ~/ 4) * 1000;
+  }
+
   Widget _buildOpenBillCard(OpenBill bill) {
     final dateStr = DateFormat('dd MMM yyyy HH:mm').format(bill.createdAt);
     final orders = bill.orders;
+    final int takeAwayFee = _calculateTakeAwayFee(bill);
+    final int totalWithFee = bill.totalAmount + takeAwayFee;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -448,8 +480,14 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                     );
                   })).toList(),
                 const Divider(height: 16),
+                if (takeAwayFee > 0) ...[
+                  _buildPriceRow('Subtotal Makanan', bill.totalAmount),
+                  const SizedBox(height: 4),
+                  _buildPriceRow('Biaya Bungkus', takeAwayFee),
+                  const SizedBox(height: 4),
+                ],
                 // Pricing
-                _buildPriceRow('Total Tagihan', bill.totalAmount, isTotal: true),
+                _buildPriceRow('Total Tagihan', totalWithFee, isTotal: true),
               ],
             ),
           ),

@@ -85,6 +85,7 @@ class OpenBillService {
 
     batch.update(statusRef, {
       'isClosed': true,
+      'status': 'Settled',
       'settledAt': FieldValue.serverTimestamp(),
       'wasOpenBill': true,
       'finalTotal': finalTotal,
