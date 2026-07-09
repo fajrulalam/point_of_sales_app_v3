@@ -54,6 +54,8 @@ class OrderConfirmationService {
         addRecommendedItem, // Add callback to add item
     List<String> menuItems = const [], // Available menu items for filtering recommendations
     bool printerIsConnected = false,
+    Member? initialSelectedMember,
+    void Function(Member?)? onSelectedMemberChanged,
   }) async {
     final activePesananList = pesananList.where((p) => p.totalQuantity > 0).toList();
     if (activePesananList.isEmpty) {
@@ -84,6 +86,8 @@ class OrderConfirmationService {
           getTotal: getTotal,
           menuItems: menuItems,
           printerIsConnected: printerIsConnected,
+          initialSelectedMember: initialSelectedMember,
+          onSelectedMemberChanged: onSelectedMemberChanged,
         );
       },
     );
@@ -109,6 +113,7 @@ class OrderConfirmationService {
         memberId: result['memberId'],
         memberName: result['memberName'],
         memberPhone: result['memberPhone'],
+        onSelectedMemberChanged: onSelectedMemberChanged,
       );
     } else if (result != null && result['confirmed'] == true) {
       int finalTotal = result['finalTotal'] ?? totalHarga;
@@ -149,6 +154,7 @@ class OrderConfirmationService {
         programNominal: result['programNominal'] ?? 0,
         programExtraPaymentMethod: result['programExtraPaymentMethod'],
         programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
+        onSelectedMemberChanged: onSelectedMemberChanged,
       );
     } else {
       uangYangDiterimaController.clear();
@@ -804,6 +810,7 @@ class OrderConfirmationService {
     int programNominal = 0,
     String? programExtraPaymentMethod,
     int programExtraSplitQrisAmount = 0,
+    void Function(Member?)? onSelectedMemberChanged,
   }) async {
     // 🔍 STEP 1: Validate stock availability for all items
     final inventoryService = InventoryService();
@@ -1068,6 +1075,7 @@ class OrderConfirmationService {
                 : 0),
         programNominal: programNominal,
         voucherRemaining: voucherRemaining,
+        onSelectedMemberChanged: onSelectedMemberChanged,
       );
     } catch (error) {
       if (context.mounted && !loaderPopped) {
@@ -1105,6 +1113,7 @@ class OrderConfirmationService {
     required String memberId,
     required String memberName,
     required String? memberPhone,
+    void Function(Member?)? onSelectedMemberChanged,
   }) async {
     final inventoryService = InventoryService();
     final firestore = FirebaseFirestore.instance;
@@ -1271,6 +1280,7 @@ class OrderConfirmationService {
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: getTotal,
         setJumlahItem: setJumlahItem,
+        onSelectedMemberChanged: onSelectedMemberChanged,
       );
     } catch (error) {
       Navigator.pop(context);
@@ -1304,6 +1314,7 @@ class OrderConfirmationService {
     int splitCashAmount = 0,
     int programNominal = 0,
     int? voucherRemaining,
+    void Function(Member?)? onSelectedMemberChanged,
   }) async {
     await showDialog(
       context: context,
@@ -1388,6 +1399,7 @@ class OrderConfirmationService {
     customerNameController.clear();
     setJumlahItem(0);
     getTotal();
+    onSelectedMemberChanged?.call(null);
   }
 
   static Future<int> _assignCustomerNumber() async {
@@ -2250,6 +2262,8 @@ class _OrderConfirmationDialog extends StatefulWidget {
   final Function() getTotal;
   final List<String> menuItems;
   final bool printerIsConnected;
+  final Member? initialSelectedMember;
+  final void Function(Member?)? onSelectedMemberChanged;
 
   const _OrderConfirmationDialog({
     required this.totalHarga,
@@ -2263,6 +2277,8 @@ class _OrderConfirmationDialog extends StatefulWidget {
     required this.getTotal,
     this.menuItems = const [],
     this.printerIsConnected = false,
+    this.initialSelectedMember,
+    this.onSelectedMemberChanged,
   });
 
   @override
@@ -2439,6 +2455,13 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   late FocusNode uangFocusNode;
   late FocusNode voucherFocusNode;
 
+  void _updateSelectedMember(Member? member) {
+    setState(() {
+      _selectedMember = member;
+    });
+    widget.onSelectedMemberChanged?.call(member);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2446,6 +2469,10 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
     uangFocusNode = FocusNode();
     voucherFocusNode = FocusNode();
     currentTotal = widget.totalHarga; // Initialize with the starting total
+    _selectedMember = widget.initialSelectedMember;
+    if (_selectedMember != null) {
+      _fetchRedeemableVouchers(_selectedMember!.id);
+    }
     _loadMembers();
     _loadPrograms();
   }
@@ -2673,6 +2700,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                   if (!isMember) {
                                     _selectedMember = null;
                                     _memberError = null;
+                                    widget.onSelectedMemberChanged?.call(null);
                                   }
                                 });
                               },
@@ -2780,6 +2808,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                               isMember = true;
                                               widget.customerNameController.text =
                                                   _selectedMember!.name;
+                                              widget.onSelectedMemberChanged?.call(_selectedMember);
                                               print(
                                                   "✅ Linked to member: ${_selectedMember!.name}");
                                             } catch (e) {
@@ -2854,6 +2883,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                             widget.customerNameController.text = selection.name;
                           });
                           _fetchRedeemableVouchers(selection.id);
+                          widget.onSelectedMemberChanged?.call(selection);
                         },
                         fieldViewBuilder: (context, controller, focusNode,
                             onFieldSubmitted) {
@@ -2869,6 +2899,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                   _selectedMember = null;
                                   _memberError = null;
                                 });
+                                widget.onSelectedMemberChanged?.call(null);
                               } else if (_memberError != null) {
                                 setState(() => _memberError = null);
                               }
@@ -2906,6 +2937,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                         widget.customerNameController.text = "";
                                         _redeemableVouchers = [];
                                       });
+                                      widget.onSelectedMemberChanged?.call(null);
                                     }
                                   ) 
                                 : null,

@@ -9,6 +9,7 @@ import 'package:point_of_sales_app_v3/Screens/LoginScreen.dart';
 import 'package:point_of_sales_app_v3/Services/OrderConfirmationService.dart';
 import 'package:point_of_sales_app_v3/Services/RecommendationService.dart';
 import 'package:point_of_sales_app_v3/Services/MemberService.dart';
+import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Services/SelfOrderService.dart';
 import 'package:point_of_sales_app_v3/Services/OpenBillService.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
@@ -47,6 +48,7 @@ class _HomeState extends State<Home> {
   late HomeController controller;
   TextEditingController uangYangDiterimaController = TextEditingController();
   TextEditingController customerNameController = TextEditingController();
+  Member? selectedMember;
   String _activeRoute = 'pos_order';
   bool _sidebarMinimized = false;
   
@@ -701,6 +703,9 @@ Widget _buildMainContent() {
           customerNameController.clear();
           uangYangDiterimaController.clear();
           controller.clearSelfOrderMode();
+          setState(() {
+            selectedMember = null;
+          });
         },
       );
     } else {
@@ -722,6 +727,12 @@ Widget _buildMainContent() {
         addRecommendedItem: controller.addRecommendedItem,
         menuItems: menuItemNames,
         printerIsConnected: controller.printerIsConnected,
+        initialSelectedMember: selectedMember,
+        onSelectedMemberChanged: (member) {
+          setState(() {
+            selectedMember = member;
+          });
+        },
       );
     }
   }
