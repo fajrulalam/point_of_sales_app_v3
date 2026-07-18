@@ -538,10 +538,25 @@ class OrderConfirmationService {
 
       // Update member points and competition records
       if (isMember && memberId != null) {
-        _incrementMemberPoints(memberId, totalHarga);
-        _updateCompetitionRecord(memberId, totalHarga);
+        _incrementMemberPoints(
+          memberId,
+          totalHarga,
+          voucherProgramId: voucherProgramId,
+          programNominal: programNominal,
+        );
+        _updateCompetitionRecord(
+          memberId,
+          totalHarga,
+          voucherProgramId: voucherProgramId,
+          programNominal: programNominal,
+        );
         _processPeriodicCashbackCampaign(
-            memberId, totalHarga, customerNameController.text);
+          memberId,
+          totalHarga,
+          customerNameController.text,
+          voucherProgramId: voucherProgramId,
+          programNominal: programNominal,
+        );
       }
 
       // Mark the self-order as paid
@@ -1030,9 +1045,25 @@ class OrderConfirmationService {
 
       // 💳 STEP 3: Update member points and competition records
       if (isMember && memberId != null) {
-        _incrementMemberPoints(memberId, totalHarga);
-        _updateCompetitionRecord(memberId, totalHarga);
-        _processPeriodicCashbackCampaign(memberId, totalHarga, customerNameController.text);
+        _incrementMemberPoints(
+          memberId,
+          totalHarga,
+          voucherProgramId: voucherProgramId,
+          programNominal: programNominal,
+        );
+        _updateCompetitionRecord(
+          memberId,
+          totalHarga,
+          voucherProgramId: voucherProgramId,
+          programNominal: programNominal,
+        );
+        _processPeriodicCashbackCampaign(
+          memberId,
+          totalHarga,
+          customerNameController.text,
+          voucherProgramId: voucherProgramId,
+          programNominal: programNominal,
+        );
       }
 
       // 🖨️ Print receipt after successful finalization
@@ -1713,6 +1744,22 @@ class OrderConfirmationService {
         return {'error': 'Voucher tidak aktif'};
       }
 
+      final String? voucherGroupId = data['voucherGroupId'];
+      if (voucherGroupId != null) {
+        try {
+          final groupFs = isPosVoucher
+              ? fs
+              : FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
+          final groupDoc = await groupFs.collection(Col.name('voucherGroup')).doc(voucherGroupId).get();
+          if (!groupDoc.exists || (groupDoc.data()?['isActive'] ?? true) == false) {
+            return {'error': 'Campaign voucher ini sedang tidak aktif (Suspended)'};
+          }
+        } catch (e) {
+          print('Error checking voucher group activation status: $e');
+        }
+      }
+
+
       // Determine the effective discount value
       int effectiveValue;
       if (!sekaliPakai) {
@@ -1782,9 +1829,18 @@ class OrderConfirmationService {
     }
   }
 
-  static void _incrementMemberPoints(String memberId, int totalHarga) async {
+  static void _incrementMemberPoints(
+    String memberId,
+    int totalHarga, {
+    String? voucherProgramId,
+    int programNominal = 0,
+  }) async {
     try {
-      int pointsToAdd = totalHarga ~/ 10000;
+      int pointsCalculationBase = totalHarga;
+      if (voucherProgramId != null) {
+        pointsCalculationBase = max(0, totalHarga - programNominal);
+      }
+      int pointsToAdd = pointsCalculationBase ~/ 10000;
       if (pointsToAdd <= 0) return;
 
       FirebaseFirestore fs = FirebaseFirestore.instance;
@@ -1800,7 +1856,12 @@ class OrderConfirmationService {
     }
   }
 
-  static void _updateCompetitionRecord(String memberId, int totalHarga) async {
+  static void _updateCompetitionRecord(
+    String memberId,
+    int totalHarga, {
+    String? voucherProgramId,
+    int programNominal = 0,
+  }) async {
     try {
       FirebaseFirestore fs = FirebaseFirestore.instance;
       DateTime now = DateTime.now();
@@ -1809,7 +1870,11 @@ class OrderConfirmationService {
       DocumentReference compRef =
           fs.collection(Col.name("competitionRecords")).doc(monthDocId);
 
-      int pointsEarned = totalHarga ~/ 10000;
+      int pointsCalculationBase = totalHarga;
+      if (voucherProgramId != null) {
+        pointsCalculationBase = max(0, totalHarga - programNominal);
+      }
+      int pointsEarned = pointsCalculationBase ~/ 10000;
 
       // Use set with merge and dot notation for incremental updates to nested fields
       await compRef.set({
@@ -1833,9 +1898,19 @@ class OrderConfirmationService {
         4, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
   }
 
-  static void _processPeriodicCashbackCampaign(String memberId, int totalHarga, String customerName) async {
+  static void _processPeriodicCashbackCampaign(
+    String memberId,
+    int totalHarga,
+    String customerName, {
+    String? voucherProgramId,
+    int programNominal = 0,
+  }) async {
     try {
-      int pointsToAdd = totalHarga ~/ 10000;
+      int pointsCalculationBase = totalHarga;
+      if (voucherProgramId != null) {
+        pointsCalculationBase = max(0, totalHarga - programNominal);
+      }
+      int pointsToAdd = pointsCalculationBase ~/ 10000;
       if (pointsToAdd <= 0) return; // Only process if points are earned
 
       FirebaseFirestore fs = FirebaseFirestore.instance;
@@ -2199,9 +2274,25 @@ class OrderConfirmationService {
         }
       }
 
-      _incrementMemberPoints(memberId, totalHarga);
-      _updateCompetitionRecord(memberId, totalHarga);
-      _processPeriodicCashbackCampaign(memberId, totalHarga, openBill.memberName);
+      _incrementMemberPoints(
+        memberId,
+        totalHarga,
+        voucherProgramId: voucherProgramId,
+        programNominal: programNominal,
+      );
+      _updateCompetitionRecord(
+        memberId,
+        totalHarga,
+        voucherProgramId: voucherProgramId,
+        programNominal: programNominal,
+      );
+      _processPeriodicCashbackCampaign(
+        memberId,
+        totalHarga,
+        openBill.memberName,
+        voucherProgramId: voucherProgramId,
+        programNominal: programNominal,
+      );
 
       // 📠 STEP 4: Print Receipt
       await printReceipt(
@@ -2320,6 +2411,32 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
           .where('status', isEqualTo: 'READY_TO_CLAIM')
           .get();
 
+      // Collect all unique voucherGroupIds
+      final groupIds = snapshot.docs
+          .map((doc) => (doc.data() as Map<String, dynamic>)['voucherGroupId'] as String?)
+          .where((id) => id != null)
+          .cast<String>()
+          .toSet();
+
+      // Fetch active state for all referenced groups
+      final Map<String, bool> activeGroups = {};
+      await Future.wait(groupIds.map((groupId) async {
+        try {
+          final groupDoc = await FirebaseFirestore.instance
+              .collection(Col.name('voucherGroup'))
+              .doc(groupId)
+              .get();
+          if (groupDoc.exists) {
+            activeGroups[groupId] = (groupDoc.data()?['isActive'] ?? true) as bool;
+          } else {
+            activeGroups[groupId] = false;
+          }
+        } catch (e) {
+          print('Error fetching voucher group $groupId: $e');
+          activeGroups[groupId] = false;
+        }
+      }));
+
       if (mounted) {
         setState(() {
           final now = DateTime.now();
@@ -2339,6 +2456,14 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                   print('DEBUG [vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
                   return false;
                 }
+
+                // Exclude if the voucher's campaign/voucherGroup is inactive
+                final groupId = v['voucherGroupId'] as String?;
+                if (groupId != null && activeGroups[groupId] == false) {
+                  print('DEBUG [vouchers]: Excluded ${v['voucherName']} because its campaign is inactive/suspended');
+                  return false;
+                }
+
 
                 final expireRaw = v['expireDate'];
                 DateTime? expireDate;
@@ -3775,6 +3900,32 @@ class _SelfOrderConfirmationDialogState
           .where('status', isEqualTo: 'READY_TO_CLAIM')
           .get();
 
+      // Collect all unique voucherGroupIds
+      final groupIds = snapshot.docs
+          .map((doc) => (doc.data() as Map<String, dynamic>)['voucherGroupId'] as String?)
+          .where((id) => id != null)
+          .cast<String>()
+          .toSet();
+
+      // Fetch active state for all referenced groups
+      final Map<String, bool> activeGroups = {};
+      await Future.wait(groupIds.map((groupId) async {
+        try {
+          final groupDoc = await FirebaseFirestore.instance
+              .collection(Col.name('voucherGroup'))
+              .doc(groupId)
+              .get();
+          if (groupDoc.exists) {
+            activeGroups[groupId] = (groupDoc.data()?['isActive'] ?? true) as bool;
+          } else {
+            activeGroups[groupId] = false;
+          }
+        } catch (e) {
+          print('Error fetching voucher group $groupId: $e');
+          activeGroups[groupId] = false;
+        }
+      }));
+
       if (mounted) {
         setState(() {
           final now = DateTime.now();
@@ -3794,6 +3945,14 @@ class _SelfOrderConfirmationDialogState
                   print('DEBUG [self-vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
                   return false;
                 }
+
+                // Exclude if the voucher's campaign/voucherGroup is inactive
+                final groupId = v['voucherGroupId'] as String?;
+                if (groupId != null && activeGroups[groupId] == false) {
+                  print('DEBUG [self-vouchers]: Excluded ${v['voucherName']} because its campaign is inactive/suspended');
+                  return false;
+                }
+
 
                 final expireRaw = v['expireDate'];
                 DateTime? expireDate;
