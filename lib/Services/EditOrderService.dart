@@ -8,6 +8,7 @@ import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Services/LoaderWidget.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class EditOrderService {
   static Future<void> processEditOrder({
@@ -22,8 +23,30 @@ class EditOrderService {
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
-    required Function({String? customerName, List<PesananObject>? activePesananList}) printReceipt,
+    required Function(
+            {String? customerName, List<PesananObject>? activePesananList})
+        printReceipt,
   }) async {
+    return _processEditOrderTransactional(
+      context: context,
+      statusDocId: statusDocId,
+      originalStatusData: originalStatusData,
+      newPesananList: newPesananList,
+      newTotalHarga: newTotalHarga,
+      newBiayaBungkus: newBiayaBungkus,
+      menuMap: menuMap,
+      optionGroupLookup: optionGroupLookup,
+      getYear: getYear,
+      getMonth: getMonth,
+      getDate: getDate,
+      printReceipt: printReceipt,
+    );
+  }
+
+  // The old batch implementation below is intentionally left unreachable
+  // until historical callers are migrated; the transactional path above is
+  // authoritative for all current edits.
+  /*
     final activePesananList = newPesananList.where((p) => p.totalQuantity > 0).toList();
     if (activePesananList.isEmpty) {
       if (context.mounted) {
@@ -271,31 +294,414 @@ class EditOrderService {
       if (context.mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal mengubah pesanan: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(
+                'Gagal mengubah pesanan: ${UserMessageService.fromError(e)}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+  */
+
+  static MenuObject? _findMenu(
+      PesananObject pesanan, Map<String, MenuObject> menuMap) {
+    final stableId = pesanan.menuItemId.trim();
+    if (stableId.isNotEmpty) {
+      final byId = menuMap['__id__$stableId'];
+      if (byId != null) return byId;
+      for (final menu in menuMap.values) {
+        if (menu.id == stableId) return menu;
+      }
+      return null;
+    }
+    final byName = menuMap['__name__${pesanan.namaPesanan.trim()}'] ??
+        menuMap[pesanan.namaPesanan];
+    if (byName != null) return byName;
+    return null;
+  }
+
+  static List<SelectedOption> _parseSelectedOptions(dynamic raw) {
+    if (raw is! List) return [];
+    return raw
+        .whereType<Map>()
+        .map((item) => SelectedOption.fromMap(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  static PesananObject _parseStoredOrderItem(Map<String, dynamic> item) {
+    return PesananObject(
+      menuItemId: item['menuItemId']?.toString() ?? '',
+      namaPesanan: item['namaPesanan']?.toString() ?? '',
+      harga: InventoryService.toInt(item['harga']),
+      dineInQuantity: InventoryService.toInt(item['dineInQuantity']),
+      takeAwayQuantity: InventoryService.toInt(item['takeAwayQuantity']),
+      selectedOptions: _parseSelectedOptions(item['selectedOptions']),
+      customerNote: item['customerNote']?.toString(),
+    );
+  }
+
+  static Future<StockTransactionPreparation> _prepareNetStock(
+    Transaction transaction, {
+    required List<PesananObject> oldOrders,
+    required List<PesananObject> newOrders,
+    required Map<String, MenuObject> menuMap,
+    required Map<String, Map<String, OptionItem>> optionGroupLookup,
+    required String statusDocId,
+  }) async {
+    final inventory = InventoryService();
+    final returned = inventory.calculateOrderStockDeltas(
+      oldOrders,
+      menuLookup: menuMap,
+      optionLookup: optionGroupLookup,
+      deduct: false,
+      sourceType: 'edit',
+      sourceId: statusDocId,
+    );
+    final deducted = inventory.calculateOrderStockDeltas(
+      newOrders,
+      menuLookup: menuMap,
+      optionLookup: optionGroupLookup,
+      deduct: true,
+      sourceType: 'edit',
+      sourceId: statusDocId,
+    );
+    return inventory.prepareStockDeltasInTransaction(
+      transaction,
+      [
+        ...returned.deltas,
+        ...deducted.deltas,
+      ],
+      sourceType: 'edit',
+      sourceId: statusDocId,
+      additionalAuditFlags: [
+        ...returned.auditFlags,
+        ...deducted.auditFlags,
+      ],
+    );
+  }
+
+  static Map<String, int> _paymentBreakdown(
+      Map<String, dynamic> data, int total) {
+    final result = <String, int>{};
+    void add(String field, int amount) {
+      if (amount != 0) result[field] = (result[field] ?? 0) + amount;
+    }
+
+    if (data['isSplitPayment'] == true) {
+      final split = data['splitDetails'] is Map
+          ? Map<String, dynamic>.from(data['splitDetails'] as Map)
+          : <String, dynamic>{};
+      add('totalCash', InventoryService.toInt(split['cashAmount']));
+      add('totalQris', InventoryService.toInt(split['qrisAmount']));
+      return result;
+    }
+    final method = data['paymentMethod']?.toString();
+    if (method == 'Program') {
+      final nominal = InventoryService.toInt(data['programNominal']);
+      final remaining = total - nominal;
+      final extra = data['programExtraPaymentMethod']?.toString();
+      if (remaining > 0 && extra != null) {
+        if (extra == 'Cash + QRIS') {
+          final split = data['programExtraSplitDetails'] is Map
+              ? Map<String, dynamic>.from(
+                  data['programExtraSplitDetails'] as Map)
+              : <String, dynamic>{};
+          add('totalCash', InventoryService.toInt(split['cashAmount']));
+          add('totalQris', InventoryService.toInt(split['qrisAmount']));
+        } else if (extra == 'Cash') {
+          add('totalCash', remaining);
+        } else if (extra == 'QRIS') {
+          add('totalQris', remaining);
+        } else if (extra == 'Online') {
+          add('totalOnline', remaining);
+        }
+      }
+      return result;
+    }
+    if (method == 'Cash') add('totalCash', total);
+    if (method == 'QRIS') add('totalQris', total);
+    if (method == 'Online') add('totalOnline', total);
+    return result;
+  }
+
+  static Future<void> _processEditOrderTransactional({
+    required BuildContext context,
+    required String statusDocId,
+    required Map<String, dynamic> originalStatusData,
+    required List<PesananObject> newPesananList,
+    required int newTotalHarga,
+    required int newBiayaBungkus,
+    required Map<String, MenuObject> menuMap,
+    required Map<String, Map<String, OptionItem>> optionGroupLookup,
+    required String Function() getYear,
+    required String Function() getMonth,
+    required String Function() getDate,
+    required Function(
+            {String? customerName, List<PesananObject>? activePesananList})
+        printReceipt,
+  }) async {
+    final activeOrders =
+        newPesananList.where((item) => item.totalQuantity > 0).toList();
+    if (activeOrders.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Pesanan tidak boleh kosong.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    final firestore = FirebaseFirestore.instance;
+    final statusRef = firestore.collection(Col.name('Status')).doc(statusDocId);
+    final expectedRevision =
+        InventoryService.toInt(originalStatusData['orderRevision']);
+    final operationId = _buildEditOperationId(
+      statusDocId,
+      expectedRevision,
+      activeOrders,
+      newTotalHarga,
+      newBiayaBungkus,
+    );
+    final operationRef = firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('Orders')
+        .doc(operationId);
+
+    if (context.mounted) {
+      LoaderWidget.showLoaderDialog(context, message: 'Menyimpan perubahan...');
+    }
+    var loaderPopped = false;
+    try {
+      await InventoryService().refreshInventoryCache();
+      final result = await firestore
+          .runTransaction<InventoryOperationResult>((transaction) async {
+        final operationSnapshot = await transaction.get(operationRef);
+        if (operationSnapshot.exists &&
+            operationSnapshot.data()?['status']?.toString().toLowerCase() ==
+                'completed') {
+          return const InventoryOperationResult.alreadyApplied();
+        }
+        final statusSnapshot = await transaction.get(statusRef);
+        if (!statusSnapshot.exists) throw Exception('Pesanan tidak ditemukan.');
+        final current = statusSnapshot.data() ?? <String, dynamic>{};
+        final currentRevision =
+            InventoryService.toInt(current['orderRevision']);
+        if (currentRevision != expectedRevision) {
+          throw Exception(
+              'Pesanan sudah diubah oleh perangkat lain. Muat ulang sebelum mengedit lagi.');
+        }
+        final oldItems = (current['orderItems'] as List<dynamic>? ?? [])
+            .whereType<Map>()
+            .map((item) =>
+                _parseStoredOrderItem(Map<String, dynamic>.from(item)))
+            .toList();
+        final preparation = await _prepareNetStock(
+          transaction,
+          oldOrders: oldItems,
+          newOrders: activeOrders,
+          menuMap: menuMap,
+          optionGroupLookup: optionGroupLookup,
+          statusDocId: statusDocId,
+        );
+
+        final oldTotal = InventoryService.toInt(current['total']);
+        final oldSubTotal = InventoryService.toInt(current['subTotal']);
+        final oldTakeAwayFee = InventoryService.toInt(current['takeAwayFee']);
+        final newSubTotal = newTotalHarga - newBiayaBungkus;
+        final financialDelta = <String, dynamic>{
+          'total': FieldValue.increment(newTotalHarga - oldTotal),
+          'subTotal': FieldValue.increment(newSubTotal - oldSubTotal),
+          'takeAwayFee': FieldValue.increment(newBiayaBungkus - oldTakeAwayFee),
+        };
+        final oldPayments = _paymentBreakdown(current, oldTotal);
+        final newPayments = _paymentBreakdown(current, newTotalHarga);
+        for (final key in {...oldPayments.keys, ...newPayments.keys}) {
+          final delta = (newPayments[key] ?? 0) - (oldPayments[key] ?? 0);
+          if (delta != 0) financialDelta[key] = FieldValue.increment(delta);
+        }
+        final oldCounts = <String, int>{};
+        for (final item in oldItems) {
+          oldCounts[item.namaPesanan] =
+              (oldCounts[item.namaPesanan] ?? 0) + item.totalQuantity;
+        }
+        final newCounts = <String, int>{};
+        for (final item in activeOrders) {
+          newCounts[item.namaPesanan] =
+              (newCounts[item.namaPesanan] ?? 0) + item.totalQuantity;
+        }
+        for (final key in {...oldCounts.keys, ...newCounts.keys}) {
+          final delta = (newCounts[key] ?? 0) - (oldCounts[key] ?? 0);
+          if (delta != 0) financialDelta[key] = FieldValue.increment(delta);
+        }
+
+        if (current['transactionMethod'] != 'Open Bill' ||
+            current['isClosed'] == true) {
+          final rawDate = current['waktuPesan'];
+          final date = rawDate is Timestamp ? rawDate.toDate() : DateTime.now();
+          final dateKey = DateFormat('yyyy-MM-dd').format(date);
+          final monthKey = DateFormat('yyyy-MM').format(date);
+          final yearKey = DateFormat('yyyy').format(date);
+          transaction.set(
+            firestore.collection(Col.name('DailyTransaction')).doc(dateKey),
+            financialDelta,
+            SetOptions(merge: true),
+          );
+          transaction.set(
+            firestore.collection(Col.name('MonthlyTransaction')).doc(monthKey),
+            financialDelta,
+            SetOptions(merge: true),
+          );
+          transaction.set(
+            firestore.collection(Col.name('YearlyTransaction')).doc(yearKey),
+            financialDelta,
+            SetOptions(merge: true),
+          );
+        }
+
+        InventoryService().queuePreparedStockDeltas(transaction, preparation);
+        final oldItemsByKey = <String, Map<String, dynamic>>{};
+        for (final raw in (current['orderItems'] as List<dynamic>? ?? [])) {
+          if (raw is Map) {
+            final map = Map<String, dynamic>.from(raw);
+            oldItemsByKey[_buildOrderKeyFromMap(map)] = map;
+          }
+        }
+        final newOrderItems = activeOrders.map((order) {
+          final menu = _findMenu(order, menuMap);
+          final old = oldItemsByKey[order.orderKey];
+          return <String, dynamic>{
+            'menuItemId': order.menuItemId.isNotEmpty
+                ? order.menuItemId
+                : (old?['menuItemId'] ?? menu?.id ?? ''),
+            'namaPesanan': order.namaPesanan,
+            'harga': order.harga,
+            'dineInQuantity': order.dineInQuantity,
+            'takeAwayQuantity': order.takeAwayQuantity,
+            'selectedOptions':
+                order.selectedOptions.map((o) => o.toMap()).toList(),
+            'isMakanan': menu?.isMakanan ?? false,
+            'customerNote': order.customerNote ?? '',
+            'status': old?['status'] ?? '',
+            'dineInPreparedQuantity': old?['dineInPreparedQuantity'] ?? 0,
+            'takeAwayPreparedQuantity': old?['takeAwayPreparedQuantity'] ?? 0,
+            'orderedAt':
+                old?['orderedAt'] ?? DateTime.now().millisecondsSinceEpoch,
+          };
+        }).toList();
+        final statusUpdates = <String, dynamic>{
+          'orderItems': newOrderItems,
+          'total': newTotalHarga,
+          'subTotal': newSubTotal,
+          'takeAwayFee': newBiayaBungkus,
+          'lastEditedAt': FieldValue.serverTimestamp(),
+          'orderRevision': currentRevision + 1,
+        };
+        if (preparation.auditFlags.isNotEmpty) {
+          statusUpdates['inventoryAuditFlags'] = FieldValue.arrayUnion(
+              preparation.auditFlags.map((flag) => flag.toMap()).toList());
+        }
+        transaction.update(statusRef, statusUpdates);
+        transaction.set(
+            operationRef,
+            {
+              'status': 'completed',
+              'type': 'edit',
+              'sourceId': statusDocId,
+              'completedAt': FieldValue.serverTimestamp(),
+              'auditFlags':
+                  preparation.auditFlags.map((flag) => flag.toMap()).toList(),
+            },
+            SetOptions(merge: true));
+        return InventoryOperationResult.applied(flags: preparation.auditFlags);
+      });
+
+      if (result.wasAlreadyApplied) {
+        if (context.mounted) {
+          loaderPopped = true;
+          Navigator.pop(context);
+        }
+        return;
+      }
+      if (context.mounted) {
+        loaderPopped = true;
+        Navigator.pop(context);
+        await printReceipt(
+          customerName: originalStatusData['namaCustomer']?.toString(),
+          activePesananList: activeOrders,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pesanan berhasil diubah.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted && !loaderPopped) Navigator.pop(context);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Gagal mengubah pesanan: ${UserMessageService.fromError(e)}'),
+              backgroundColor: Colors.red),
         );
       }
     }
   }
 
+  /// Gives each edit intent its own id while keeping identical retries
+  /// idempotent. Different edits based on the same revision therefore reach
+  /// the revision check instead of being mistaken for the same operation.
+  static String _buildEditOperationId(
+    String statusDocId,
+    int expectedRevision,
+    List<PesananObject> orders,
+    int total,
+    int takeAwayFee,
+  ) {
+    final raw = [
+      statusDocId,
+      expectedRevision,
+      total,
+      takeAwayFee,
+      ...orders.map((order) =>
+          '${order.orderKey}:${order.dineInQuantity}:${order.takeAwayQuantity}:${order.harga}'),
+    ].join('|');
+    var hash = 2166136261;
+    for (final codeUnit in raw.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 16777619) & 0x7fffffff;
+    }
+    return 'edit_${expectedRevision}_$hash';
+  }
+
   /// Builds the same orderKey that [PesananObject.orderKey] produces,
   /// but from the raw Firestore map stored in `orderItems`.
   static String _buildOrderKeyFromMap(dynamic item) {
-    final menuItemId = (item['menuItemId'] ?? '') as String;
-    final namaPesanan = (item['namaPesanan'] ?? '') as String;
+    final menuItemId = item['menuItemId']?.toString() ?? '';
+    final namaPesanan = item['namaPesanan']?.toString() ?? '';
     final base = menuItemId.isNotEmpty ? menuItemId : namaPesanan;
 
-    final selectedOptions = item['selectedOptions'] as List<dynamic>? ?? [];
+    final selectedOptions = item['selectedOptions'] is List
+        ? item['selectedOptions'] as List<dynamic>
+        : const <dynamic>[];
     if (selectedOptions.isEmpty) return base;
 
     final optionKeys = selectedOptions
-        .map((o) => '${o['groupName'] ?? ''}:${o['optionName'] ?? ''}')
+        .whereType<Map>()
+        .map((o) =>
+            '${o['groupName']?.toString() ?? ''}:${o['optionName']?.toString() ?? ''}')
         .toList()
       ..sort();
     return '$base|${optionKeys.join(',')}';
   }
 
   static List<MenuIngredient> _resolveOptionIngredients(
-      List<SelectedOption> selectedOptions, Map<String, Map<String, OptionItem>> optionGroupLookup) {
+      List<SelectedOption> selectedOptions,
+      Map<String, Map<String, OptionItem>> optionGroupLookup) {
     final ingredients = <MenuIngredient>[];
     for (var selected in selectedOptions) {
       final groupMap = optionGroupLookup[selected.groupId];
@@ -316,11 +722,15 @@ class EditOrderService {
     for (var pesanan in pesananList) {
       final menu = menuMap[pesanan.namaPesanan];
       if (menu == null) continue;
-      final optIngredients = _resolveOptionIngredients(pesanan.selectedOptions, optionGroupLookup);
-      final singleMenuAgg = InventoryService().aggregateIngredients(menu.ingredients, optIngredients, pesanan.totalQuantity);
+      final optIngredients =
+          _resolveOptionIngredients(pesanan.selectedOptions, optionGroupLookup);
+      final singleMenuAgg = InventoryService().aggregateIngredients(
+          menu.ingredients, optIngredients, pesanan.totalQuantity);
       for (var entry in singleMenuAgg.entries) {
         if (aggregated.containsKey(entry.key)) {
-          aggregated[entry.key]!['totalRequired'] = (aggregated[entry.key]!['totalRequired'] as int) + (entry.value['totalRequired'] as int);
+          aggregated[entry.key]!['totalRequired'] =
+              (aggregated[entry.key]!['totalRequired'] as int) +
+                  (entry.value['totalRequired'] as int);
         } else {
           aggregated[entry.key] = {
             'name': entry.value['name'],
@@ -329,7 +739,8 @@ class EditOrderService {
         }
       }
     }
-    await InventoryService().batchDeductAggregatedIngredients(aggregated, batch);
+    await InventoryService()
+        .batchDeductAggregatedIngredients(aggregated, batch);
   }
 
   static Future<void> _appendRevertIngredientsToBatch(
@@ -341,11 +752,15 @@ class EditOrderService {
     for (var pesanan in pesananList) {
       final menu = menuMap[pesanan.namaPesanan];
       if (menu == null) continue;
-      final optIngredients = _resolveOptionIngredients(pesanan.selectedOptions, optionGroupLookup);
-      final singleMenuAgg = InventoryService().aggregateIngredients(menu.ingredients, optIngredients, pesanan.totalQuantity);
+      final optIngredients =
+          _resolveOptionIngredients(pesanan.selectedOptions, optionGroupLookup);
+      final singleMenuAgg = InventoryService().aggregateIngredients(
+          menu.ingredients, optIngredients, pesanan.totalQuantity);
       for (var entry in singleMenuAgg.entries) {
         if (aggregated.containsKey(entry.key)) {
-          aggregated[entry.key]!['totalRequired'] = (aggregated[entry.key]!['totalRequired'] as int) + (entry.value['totalRequired'] as int);
+          aggregated[entry.key]!['totalRequired'] =
+              (aggregated[entry.key]!['totalRequired'] as int) +
+                  (entry.value['totalRequired'] as int);
         } else {
           aggregated[entry.key] = {
             'name': entry.value['name'],
@@ -354,29 +769,43 @@ class EditOrderService {
         }
       }
     }
-    
+
     // Instead of deducting, we add back
     final fs = FirebaseFirestore.instance;
     final now = DateTime.now();
-    final today = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final today =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
     for (var entry in aggregated.entries) {
       final inventoryId = entry.key;
       final stockName = entry.value['name'] as String;
       final totalRequired = entry.value['totalRequired'] as int;
 
-      final docRef = fs.collection(Col.name('Canteens')).doc('canteen375').collection('Inventory').doc(inventoryId);
-      batch.set(docRef, {'stock': FieldValue.increment(totalRequired)}, SetOptions(merge: true));
+      final docRef = fs
+          .collection(Col.name('Canteens'))
+          .doc('canteen375')
+          .collection('Inventory')
+          .doc(inventoryId);
+      batch.set(docRef, {'stock': FieldValue.increment(totalRequired)},
+          SetOptions(merge: true));
 
       final logId = '${today}_$inventoryId';
-      final logRef = fs.collection(Col.name('Canteens')).doc('canteen375').collection('DailyStockLogs').doc(logId);
-      batch.set(logRef, {
-        'date': today,
-        'inventoryItemId': inventoryId,
-        'inventoryItemName': stockName,
-        'stockUsed': FieldValue.increment(-totalRequired), // Subtract from usage
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final logRef = fs
+          .collection(Col.name('Canteens'))
+          .doc('canteen375')
+          .collection('DailyStockLogs')
+          .doc(logId);
+      batch.set(
+          logRef,
+          {
+            'date': today,
+            'inventoryItemId': inventoryId,
+            'inventoryItemName': stockName,
+            'stockUsed':
+                FieldValue.increment(-totalRequired), // Subtract from usage
+            'lastUpdated': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
     }
   }
 }

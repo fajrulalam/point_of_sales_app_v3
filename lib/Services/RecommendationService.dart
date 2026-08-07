@@ -36,7 +36,12 @@ class RecommendationService {
     'french fries': ['Kentang Goreng', 'French Fries', 'Kentang G'],
     'nasi ayam silep': ['Ayam Silep', 'Nasi Ayam Silep'],
     'soto ayam': ['Soto Ayam', 'Soto'],
-    'telur': ['Telur Mata Sapi', 'Telor Matasapi', 'Telur Dadar', 'Telur Ceplok'],
+    'telur': [
+      'Telur Mata Sapi',
+      'Telor Matasapi',
+      'Telur Dadar',
+      'Telur Ceplok'
+    ],
     'nasi telur': ['Nasi Telur'],
     'cireng isi': ['Cireng Isi', 'Cireng', 'Cireng Isi Ayam'],
     'sosis goreng': ['Sosis Goreng', 'Sosis', 'Sosis 1rb', 'Sosis 1k'],
@@ -202,7 +207,7 @@ class RecommendationService {
 
     try {
       print('🔄 Initializing recommendation system...');
-      
+
       // 1. Wait for authentication if not ready
       await _waitForAuth();
 
@@ -216,7 +221,7 @@ class RecommendationService {
         return RecommendationInitResult(
           success: true,
           ruleCount: 0,
-          errorMessage: 'Recommendation system is disabled',
+          errorMessage: 'Sistem rekomendasi sedang dinonaktifkan',
         );
       }
 
@@ -272,7 +277,8 @@ class RecommendationService {
 
       if (doc.exists && doc.data() != null) {
         final config = RecommendationConfig.fromFirestore(doc.data()!);
-        print('✅ Config loaded: version=${config.version}, file=${config.csvFileName}');
+        print(
+            '✅ Config loaded: version=${config.version}, file=${config.csvFileName}');
         return config;
       } else {
         print('⚠️ Config document does not exist in Firestore, using defaults');
@@ -283,7 +289,8 @@ class RecommendationService {
     }
 
     final defaultConfig = RecommendationConfig.defaultConfig();
-    print('ℹ️ Using default config: version=${defaultConfig.version}, file=${defaultConfig.csvFileName}');
+    print(
+        'ℹ️ Using default config: version=${defaultConfig.version}, file=${defaultConfig.csvFileName}');
     return defaultConfig;
   }
 
@@ -291,11 +298,12 @@ class RecommendationService {
   Future<void> _waitForAuth() async {
     int attempts = 0;
     while (FirebaseAuth.instance.currentUser == null && attempts < 10) {
-      print('⏳ Waiting for Firebase Authentication... (attempt ${attempts + 1})');
+      print(
+          '⏳ Waiting for Firebase Authentication... (attempt ${attempts + 1})');
       await Future.delayed(const Duration(milliseconds: 1000));
       attempts++;
     }
-    
+
     if (FirebaseAuth.instance.currentUser != null) {
       print('✅ Authenticated as: ${FirebaseAuth.instance.currentUser?.uid}');
     } else {
@@ -371,7 +379,8 @@ class RecommendationService {
     bool isFrozensetFormat = false;
     if (lines.length > 1) {
       isFrozensetFormat = lines[1].contains('frozenset');
-      print('📋 Detected format: ${isFrozensetFormat ? "frozenset" : "simple"}');
+      print(
+          '📋 Detected format: ${isFrozensetFormat ? "frozenset" : "simple"}');
     }
 
     // Regex pattern for frozenset format
@@ -815,7 +824,8 @@ class RecommendationService {
               if (!canonicalRecommendations.containsKey(normalizedConsequent) ||
                   canonicalRecommendations[normalizedConsequent]! <
                       rule.confidence) {
-                canonicalRecommendations[normalizedConsequent] = rule.confidence;
+                canonicalRecommendations[normalizedConsequent] =
+                    rule.confidence;
                 canonicalBasedOn[normalizedConsequent] = rule.antecedents;
               }
             }
@@ -855,12 +865,13 @@ class RecommendationService {
 
   /// Get variations for a canonical item, filtered by available menu items
   /// Returns only variations that exist in the provided menu list
-  List<String> getAvailableVariations(String canonicalName, List<String> menuItems) {
+  List<String> getAvailableVariations(
+      String canonicalName, List<String> menuItems) {
     final allVariations = expandItemName(canonicalName);
-    
+
     // Normalize menu items for comparison
     final normalizedMenu = menuItems.map((m) => m.toLowerCase().trim()).toSet();
-    
+
     // Filter to only include variations that exist in the menu
     return allVariations.where((variation) {
       return normalizedMenu.contains(variation.toLowerCase().trim());

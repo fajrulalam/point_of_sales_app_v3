@@ -10,6 +10,7 @@ import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/AddOrEditMenu.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class MenuManagementWidget extends StatefulWidget {
   final List<MenuObject> menuObjectList_makanan;
@@ -108,7 +109,9 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
     final filteredMap = <String, List<MenuObject>>{};
     _groupedByCategory.forEach((category, items) {
       final filteredItems = items.where((item) {
-        return item.namaMenu.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+        return item.namaMenu
+                .toLowerCase()
+                .contains(_searchQuery.toLowerCase()) ||
             item.category.toLowerCase().contains(_searchQuery.toLowerCase());
       }).toList();
       filteredMap[category] = filteredItems;
@@ -220,7 +223,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
     try {
       await Col.migrateMenuCollection();
-      
+
       // Refresh inventory cache to ensure consistency
       await InventoryService().refreshInventoryCache();
 
@@ -242,7 +245,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Gagal melakukan migrasi: $e',
+              'Gagal melakukan migrasi: ${UserMessageService.fromError(e)}',
               style: GoogleFonts.poppins(),
             ),
             backgroundColor: Colors.red.shade700,
@@ -257,20 +260,22 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       color: Colors.white,
       child: TabBar(
         controller: _tabController,
-      labelColor: const Color(0xFF1A1A1A),
-      unselectedLabelColor: Colors.grey.shade500,
-      indicatorSize: TabBarIndicatorSize.tab,
-      indicator: const BoxDecoration(
-        color: Color(0xFFE8F5E9),
-        border: Border(
-          bottom: BorderSide(
-            color: Color(0xFF2E7D32),
-            width: 3,
+        labelColor: const Color(0xFF1A1A1A),
+        unselectedLabelColor: Colors.grey.shade500,
+        indicatorSize: TabBarIndicatorSize.tab,
+        indicator: const BoxDecoration(
+          color: Color(0xFFE8F5E9),
+          border: Border(
+            bottom: BorderSide(
+              color: Color(0xFF2E7D32),
+              width: 3,
+            ),
           ),
         ),
-      ),
-      labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
-      unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
+        labelStyle:
+            GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+        unselectedLabelStyle:
+            GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
         tabs: const [
           Tab(text: 'MENU OVERVIEW'),
           Tab(text: 'OPTION GROUPS'),
@@ -316,7 +321,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       ),
       child: Column(
         children: [
-          _buildSearchBar(_searchController, 'Cari nama menu...', _onSearchChanged),
+          _buildSearchBar(
+              _searchController, 'Cari nama menu...', _onSearchChanged),
           _buildCategoryHeader(),
           Expanded(child: _buildCategoryList()),
         ],
@@ -324,8 +330,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
     );
   }
 
-  Widget _buildSearchBar(
-      TextEditingController controller, String hint, Function(String) onChanged) {
+  Widget _buildSearchBar(TextEditingController controller, String hint,
+      Function(String) onChanged) {
     return Container(
       padding: const EdgeInsets.all(12),
       child: TextField(
@@ -333,7 +339,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
         onChanged: onChanged,
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 14),
+          hintStyle:
+              GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 14),
           prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
           suffixIcon: controller.text.isNotEmpty
               ? IconButton(
@@ -350,7 +357,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide.none,
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
       ),
     );
@@ -415,7 +423,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
   Widget _buildCategoryList() {
     final categories = _sortedCategories;
-    
+
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: categories.length,
@@ -432,7 +440,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               color: isSelected ? const Color(0xFFE8F5E9) : Colors.transparent,
               border: Border(
                 left: BorderSide(
-                  color: isSelected ? const Color(0xFF2E7D32) : Colors.transparent,
+                  color:
+                      isSelected ? const Color(0xFF2E7D32) : Colors.transparent,
                   width: 3,
                 ),
               ),
@@ -444,15 +453,20 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                     category,
                     style: GoogleFonts.poppins(
                       fontSize: 14,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                      color: isSelected ? const Color(0xFF1B5E20) : Colors.black87,
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.normal,
+                      color:
+                          isSelected ? const Color(0xFF1B5E20) : Colors.black87,
                     ),
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF2E7D32) : Colors.grey.shade200,
+                    color: isSelected
+                        ? const Color(0xFF2E7D32)
+                        : Colors.grey.shade200,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -535,7 +549,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               // Determine if selected category is all Makanan or all Minuman
               bool? categoryIsMakanan;
               if (_selectedCategory != null) {
-                final categoryItems = _groupedByCategory[_selectedCategory] ?? [];
+                final categoryItems =
+                    _groupedByCategory[_selectedCategory] ?? [];
                 if (categoryItems.isNotEmpty) {
                   categoryIsMakanan = categoryItems.first.isMakanan;
                 }
@@ -782,14 +797,16 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFF2E7D32),
                 side: const BorderSide(color: Color(0xFF2E7D32)),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(24),
                 ),
               ),
             ),
           ),
-          _buildSearchBar(_optionSearchController, 'Cari berdasarkan nama grup opsi', _onOptionSearchChanged),
+          _buildSearchBar(_optionSearchController,
+              'Cari berdasarkan nama grup opsi', _onOptionSearchChanged),
           _buildOptionGroupsHeader(),
           Expanded(child: _buildOptionGroupsList()),
         ],
@@ -832,7 +849,9 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
         final groups = snapshot.data ?? [];
         final filteredGroups = _optionSearchQuery.isEmpty
             ? groups
-            : groups.where((g) => g.name.toLowerCase().contains(_optionSearchQuery)).toList();
+            : groups
+                .where((g) => g.name.toLowerCase().contains(_optionSearchQuery))
+                .toList();
 
         if (filteredGroups.isEmpty) {
           return Center(
@@ -860,12 +879,16 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             return InkWell(
               onTap: () => setState(() => _selectedOptionGroupId = group.id),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFE8F5E9) : Colors.transparent,
+                  color:
+                      isSelected ? const Color(0xFFE8F5E9) : Colors.transparent,
                   border: Border(
                     left: BorderSide(
-                      color: isSelected ? const Color(0xFF2E7D32) : Colors.transparent,
+                      color: isSelected
+                          ? const Color(0xFF2E7D32)
+                          : Colors.transparent,
                       width: 3,
                     ),
                   ),
@@ -877,15 +900,21 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                         group.name,
                         style: GoogleFonts.poppins(
                           fontSize: 14,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                          color: isSelected ? const Color(0xFF1B5E20) : Colors.black87,
+                          fontWeight:
+                              isSelected ? FontWeight.w600 : FontWeight.normal,
+                          color: isSelected
+                              ? const Color(0xFF1B5E20)
+                              : Colors.black87,
                         ),
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFF2E7D32) : Colors.grey.shade200,
+                        color: isSelected
+                            ? const Color(0xFF2E7D32)
+                            : Colors.grey.shade200,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
@@ -893,7 +922,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                         style: GoogleFonts.poppins(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: isSelected ? Colors.white : Colors.grey.shade700,
+                          color:
+                              isSelected ? Colors.white : Colors.grey.shade700,
                         ),
                       ),
                     ),
@@ -1040,7 +1070,9 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
   Widget _buildSelectionRuleBadge(OptionGroup group) {
     String label;
-    if (group.minSelection > 0 && group.maxSelection > 0 && group.minSelection == group.maxSelection) {
+    if (group.minSelection > 0 &&
+        group.maxSelection > 0 &&
+        group.minSelection == group.maxSelection) {
       label = 'Pilih tepat ${group.minSelection}';
     } else if (group.minSelection > 0 && group.maxSelection == 0) {
       label = 'Pilih minimal ${group.minSelection}';
@@ -1196,7 +1228,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                           const SizedBox(width: 8),
                           Flexible(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFE3F2FD),
                                 borderRadius: BorderRadius.circular(4),
@@ -1204,13 +1237,18 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.inventory_2_outlined, size: 12, color: Colors.blue.shade700),
+                                  Icon(Icons.inventory_2_outlined,
+                                      size: 12, color: Colors.blue.shade700),
                                   const SizedBox(width: 3),
                                   Flexible(
                                     child: Text(
                                       option.ingredients.map((ing) {
-                                        final item = InventoryService().allInventoryItems[ing.inventoryItemId];
-                                        return item != null ? item.name : 'Unknown';
+                                        final item = InventoryService()
+                                                .allInventoryItems[
+                                            ing.inventoryItemId];
+                                        return item != null
+                                            ? item.name
+                                            : 'Unknown';
                                       }).join(', '),
                                       style: GoogleFonts.poppins(
                                         fontSize: 11,
@@ -1263,7 +1301,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       required List<String> existingCategories}) {
     showModalBottomSheet(
       isScrollControlled: true,
-      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+      constraints:
+          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
@@ -1309,7 +1348,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
   void _deleteMenu(String menuId) async {
     final firestore = FirebaseFirestore.instance;
-    final canteenDoc = firestore.collection(Col.name('Canteens')).doc('canteen375');
+    final canteenDoc =
+        firestore.collection(Col.name('Canteens')).doc('canteen375');
 
     // 1. Delete the Menu
     await canteenDoc.collection('MenuCollection').doc(menuId).delete();
@@ -1333,12 +1373,13 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
   void _showCategoryReorderDialog() {
     final categories = List<String>.from(_sortedCategories);
-    
+
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Atur Urutan Kategori', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          title: Text('Atur Urutan Kategori',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
           content: SizedBox(
             width: 400,
             height: 400,
@@ -1356,7 +1397,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                   key: Key(categories[index]),
                   leading: const Icon(Icons.drag_handle),
                   title: Text(categories[index]),
-                  trailing: Text('${_groupedByCategory[categories[index]]?.length ?? 0}'),
+                  trailing: Text(
+                      '${_groupedByCategory[categories[index]]?.length ?? 0}'),
                 );
               },
             ),
@@ -1373,11 +1415,14 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                     .doc('canteen375')
                     .collection('Metadata')
                     .doc('MenuConfig')
-                    .set({'categoryOrder': categories}, SetOptions(merge: true));
+                    .set(
+                        {'categoryOrder': categories}, SetOptions(merge: true));
                 Navigator.pop(context);
               },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-              child: const Text('Simpan', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32)),
+              child:
+                  const Text('Simpan', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -1490,7 +1535,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2E7D32),
               ),
-              child: const Text('Simpan', style: TextStyle(color: Colors.white)),
+              child:
+                  const Text('Simpan', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -1529,7 +1575,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               }
               Navigator.pop(context);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32)),
             child: const Text('Tambah', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -1547,7 +1594,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Buat Option Group Baru', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          title: Text('Buat Option Group Baru',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1572,13 +1620,15 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Aturan Pemilihan',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Biarkan tidak dipilih jika pelanggan bebas memilih berapa saja.',
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                  style: GoogleFonts.poppins(
+                      fontSize: 12, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 12),
                 Wrap(
@@ -1637,7 +1687,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                           textAlign: TextAlign.center,
                           decoration: const InputDecoration(
                             border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                            contentPadding: EdgeInsets.symmetric(
+                                vertical: 8, horizontal: 8),
                           ),
                         ),
                       ),
@@ -1684,7 +1735,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                   Navigator.pop(context);
                 }
               },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32)),
               child: const Text('Buat', style: TextStyle(color: Colors.white)),
             ),
           ],
@@ -1700,7 +1752,9 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
     // Derive the current rule from minSelection/maxSelection
     String? selectionRule;
     int selectionValue = 1;
-    if (group.minSelection > 0 && group.maxSelection > 0 && group.minSelection == group.maxSelection) {
+    if (group.minSelection > 0 &&
+        group.maxSelection > 0 &&
+        group.minSelection == group.maxSelection) {
       selectionRule = 'exactly';
       selectionValue = group.minSelection;
     } else if (group.minSelection > 0 && group.maxSelection == 0) {
@@ -1712,13 +1766,15 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
     }
     // else: no rule (both 0)
 
-    final valueController = TextEditingController(text: selectionValue.toString());
+    final valueController =
+        TextEditingController(text: selectionValue.toString());
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Edit Option Group', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          title: Text('Edit Option Group',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1741,13 +1797,15 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Aturan Pemilihan',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Biarkan tidak dipilih jika pelanggan bebas memilih berapa saja.',
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                  style: GoogleFonts.poppins(
+                      fontSize: 12, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 12),
                 Wrap(
@@ -1806,7 +1864,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                           textAlign: TextAlign.center,
                           decoration: const InputDecoration(
                             border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                            contentPadding: EdgeInsets.symmetric(
+                                vertical: 8, horizontal: 8),
                           ),
                         ),
                       ),
@@ -1836,7 +1895,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                 if (group.linkedMenuItems.isNotEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Tidak bisa hapus group yang masih terhubung ke menu'),
+                      content: Text(
+                          'Tidak bisa hapus group yang masih terhubung ke menu'),
                       backgroundColor: Colors.red,
                     ),
                   );
@@ -1883,8 +1943,10 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                   Navigator.pop(context);
                 }
               },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-              child: const Text('Simpan', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32)),
+              child:
+                  const Text('Simpan', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -1899,7 +1961,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Hubungkan ke Menu', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          title: Text('Hubungkan ke Menu',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
           content: SizedBox(
             width: 400,
             height: 400,
@@ -1934,10 +1997,13 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             ElevatedButton(
               onPressed: () async {
                 Navigator.pop(context);
-                await _optionGroupService.linkMenuItems(group.id, selectedIds.toList());
+                await _optionGroupService.linkMenuItems(
+                    group.id, selectedIds.toList());
               },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-              child: const Text('Simpan', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32)),
+              child:
+                  const Text('Simpan', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -1979,11 +2045,13 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       children: [
         Row(
           children: [
-            Icon(Icons.inventory_2_outlined, size: 16, color: Colors.grey.shade700),
+            Icon(Icons.inventory_2_outlined,
+                size: 16, color: Colors.grey.shade700),
             const SizedBox(width: 6),
             Text(
               'Bahan Baku',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+              style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600, fontSize: 14),
             ),
           ],
         ),
@@ -2012,18 +2080,21 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                     children: [
                       Text(
                         ing.inventoryItemName,
-                        style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
+                        style: GoogleFonts.poppins(
+                            fontSize: 13, fontWeight: FontWeight.w500),
                       ),
                       Text(
                         'Qty: ${ing.quantityNeeded}',
-                        style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                        style: GoogleFonts.poppins(
+                            fontSize: 12, color: Colors.grey.shade600),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
                   icon: Icon(Icons.close, size: 18, color: Colors.red.shade400),
-                  onPressed: () => setDialogState(() => ingredients.removeAt(idx)),
+                  onPressed: () =>
+                      setDialogState(() => ingredients.removeAt(idx)),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                 ),
@@ -2036,11 +2107,13 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
           stream: InventoryService().getInventoryStream(),
           builder: (context, snapshot) {
             final items = snapshot.data ?? [];
-            items.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+            items.sort(
+                (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
             return OutlinedButton.icon(
               onPressed: items.isEmpty
                   ? null
-                  : () => _showAddIngredientPicker(items, ingredients, setDialogState),
+                  : () => _showAddIngredientPicker(
+                      items, ingredients, setDialogState),
               icon: const Icon(Icons.add, size: 18),
               label: Text(
                 'Tambah Bahan',
@@ -2049,7 +2122,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFF2E7D32),
                 side: const BorderSide(color: Color(0xFF2E7D32)),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
             );
           },
@@ -2068,12 +2142,14 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
     // Filter out items that are already linked
     final linkedIds = ingredients.map((i) => i.inventoryItemId).toSet();
-    final available = inventoryItems.where((i) => !linkedIds.contains(i.id)).toList();
+    final available =
+        inventoryItems.where((i) => !linkedIds.contains(i.id)).toList();
 
     if (available.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Semua bahan baku sudah ditambahkan.', style: GoogleFonts.poppins()),
+          content: Text('Semua bahan baku sudah ditambahkan.',
+              style: GoogleFonts.poppins()),
         ),
       );
       return;
@@ -2083,7 +2159,9 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setPickerState) => AlertDialog(
-          title: Text('Pilih Bahan Baku', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)),
+          title: Text('Pilih Bahan Baku',
+              style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold, fontSize: 16)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2132,8 +2210,10 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                       });
                       Navigator.pop(ctx);
                     },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-              child: const Text('Tambah', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32)),
+              child:
+                  const Text('Tambah', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -2150,7 +2230,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Tambah Opsi', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          title: Text('Tambah Opsi',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
           content: SizedBox(
             width: 420,
             child: SingleChildScrollView(
@@ -2211,8 +2292,10 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                 }
                 Navigator.pop(context);
               },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-              child: const Text('Tambah', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32)),
+              child:
+                  const Text('Tambah', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -2222,14 +2305,16 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
   void _showEditOptionDialog(OptionGroup group, OptionItem option) {
     final nameController = TextEditingController(text: option.name);
-    final priceController = TextEditingController(text: option.priceAdjustment.toString());
+    final priceController =
+        TextEditingController(text: option.priceAdjustment.toString());
     final ingredients = List<MenuIngredient>.from(option.ingredients);
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Edit Opsi', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          title: Text('Edit Opsi',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
           content: SizedBox(
             width: 420,
             child: SingleChildScrollView(
@@ -2270,15 +2355,18 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                   final updatedOptions = group.options.map((o) {
                     if (identical(o, option)) {
                       return OptionItem(
-                        id: o.id.isNotEmpty ? o.id : DateTime.now().millisecondsSinceEpoch.toString(),
+                        id: o.id.isNotEmpty
+                            ? o.id
+                            : DateTime.now().millisecondsSinceEpoch.toString(),
                         name: nameController.text,
-                        priceAdjustment: int.tryParse(priceController.text) ?? 0,
+                        priceAdjustment:
+                            int.tryParse(priceController.text) ?? 0,
                         ingredients: ingredients,
                       );
                     }
                     return o;
                   }).toList();
-                  
+
                   await _optionGroupService.updateOptionGroup(OptionGroup(
                     id: group.id,
                     name: group.name,
@@ -2291,8 +2379,10 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                 }
                 Navigator.pop(context);
               },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-              child: const Text('Simpan', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32)),
+              child:
+                  const Text('Simpan', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -2313,7 +2403,8 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
           ),
           ElevatedButton(
             onPressed: () async {
-              final updatedOptions = group.options.where((o) => !identical(o, option)).toList();
+              final updatedOptions =
+                  group.options.where((o) => !identical(o, option)).toList();
               await _optionGroupService.updateOptionGroup(OptionGroup(
                 id: group.id,
                 name: group.name,

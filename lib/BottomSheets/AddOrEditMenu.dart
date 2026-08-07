@@ -16,6 +16,7 @@ import 'dart:io';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class AddMenuBottomSheet extends StatefulWidget {
   final String query;
@@ -65,7 +66,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
   static final _buttonTextStyle = GoogleFonts.poppins(
       color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16);
   static const _edgeInsets16 = EdgeInsets.all(16.0);
-  static const _edgeInsetsHorizontal24Vertical12 = 
+  static const _edgeInsetsHorizontal24Vertical12 =
       EdgeInsets.symmetric(horizontal: 24, vertical: 12);
 
   @override
@@ -87,7 +88,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
       hargaMakananController.text = widget.menuObject!.harga.toString();
       categoryController.text = widget.menuObject!.category;
       descriptionController.text = widget.menuObject!.menuDescription;
-      unitsPerPackageController.text = widget.menuObject!.unitsPerPackage.toString();
+      unitsPerPackageController.text =
+          widget.menuObject!.unitsPerPackage.toString();
       isRecommended = widget.menuObject!.isRecommended;
       selectedImageIndex = listGambar.indexWhere(
           (element) => element.path == widget.menuObject!.imagePath);
@@ -133,7 +135,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                   _buildFormFields(),
                   const SizedBox(height: 16),
                   _buildImageGrid(),
-                  const SizedBox(height: 80), // Added padding for better scrolling
+                  const SizedBox(
+                      height: 80), // Added padding for better scrolling
                 ],
               ),
             ),
@@ -151,13 +154,15 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
         decoration: BoxDecoration(
           color: isUploading ? Colors.grey : const Color(0xFF81C784),
           borderRadius: BorderRadius.circular(12),
-          boxShadow: isUploading ? null : [
-            BoxShadow(
-              color: const Color(0xFF81C784).withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          boxShadow: isUploading
+              ? null
+              : [
+                  BoxShadow(
+                    color: const Color(0xFF81C784).withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
         ),
         child: Row(
           children: [
@@ -188,13 +193,15 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
       children: [
         Row(
           children: [
-            _buildTextField(namaMakananController, 'Nama ${widget.makananOrMinuman}'),
+            _buildTextField(
+                namaMakananController, 'Nama ${widget.makananOrMinuman}'),
             const SizedBox(width: 16),
             _buildPriceField(),
             const SizedBox(width: 16),
             _buildCategoryDropdown(),
             const SizedBox(width: 16),
-            _buildTextField(unitsPerPackageController, 'Stok per Paket', isNumber: true),
+            _buildTextField(unitsPerPackageController, 'Stok per Paket',
+                isNumber: true),
             const SizedBox(width: 16),
             _buildIngredientButton(),
           ],
@@ -210,7 +217,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
                   labelText: 'Deskripsi / Bahan-bahan',
-                  hintText: 'Contoh: Nasi putih, ayam goreng, sambal, lalapan...',
+                  hintText:
+                      'Contoh: Nasi putih, ayam goreng, sambal, lalapan...',
                 ),
               ),
             ),
@@ -244,7 +252,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
             'Populer',
             style: GoogleFonts.poppins(
               fontWeight: isRecommended ? FontWeight.w600 : FontWeight.normal,
-              color: isRecommended ? Colors.amber.shade800 : Colors.grey.shade600,
+              color:
+                  isRecommended ? Colors.amber.shade800 : Colors.grey.shade600,
             ),
           ),
           const SizedBox(width: 8),
@@ -258,12 +267,14 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, {bool isNumber = false}) {
+  Widget _buildTextField(TextEditingController controller, String label,
+      {bool isNumber = false}) {
     return Expanded(
       child: TextField(
         controller: controller,
         keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-        inputFormatters: isNumber ? [FilteringTextInputFormatter.digitsOnly] : null,
+        inputFormatters:
+            isNumber ? [FilteringTextInputFormatter.digitsOnly] : null,
         decoration: InputDecoration(
           border: const OutlineInputBorder(),
           labelText: label,
@@ -275,14 +286,17 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
   Widget _buildCategoryDropdown() {
     // Ensure the current value is in the list
     final List<String> categories = List.from(widget.existingCategories);
-    if (categoryController.text.isNotEmpty && !categories.contains(categoryController.text)) {
+    if (categoryController.text.isNotEmpty &&
+        !categories.contains(categoryController.text)) {
       categories.add(categoryController.text);
     }
     if (categories.isEmpty) categories.add('Umum');
 
     return Expanded(
       child: DropdownButtonFormField<String>(
-        value: categoryController.text.isEmpty ? categories.first : categoryController.text,
+        value: categoryController.text.isEmpty
+            ? categories.first
+            : categoryController.text,
         decoration: const InputDecoration(
           border: OutlineInputBorder(),
           labelText: 'Kategori',
@@ -339,7 +353,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
     return ElevatedButton.icon(
       onPressed: _showIngredientsDialog,
       icon: const Icon(Icons.inventory_2, size: 18),
-      label: Text('Atur Bahan (${selectedIngredients.length})', style: _labelStyle),
+      label: Text('Atur Bahan (${selectedIngredients.length})',
+          style: _labelStyle),
       style: ElevatedButton.styleFrom(
         backgroundColor: Colors.blue.shade100,
         foregroundColor: Colors.blue.shade800,
@@ -381,7 +396,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                     _imageAspectRatio = '1:1';
                   });
                 },
-                onLongPress: () => _confirmDeleteCatalogImage(listGambar[actualIndex]),
+                onLongPress: () =>
+                    _confirmDeleteCatalogImage(listGambar[actualIndex]),
               );
             },
           );
@@ -462,7 +478,9 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
     if (namaMakananController.text == '' ||
         hargaMakananController.text == '' ||
         categoryController.text == '' ||
-        (selectedImageIndex == -1 && selectedLocalFile == null && _existingImageUrl == null)) {
+        (selectedImageIndex == -1 &&
+            selectedLocalFile == null &&
+            _existingImageUrl == null)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Mohon isi semua field dan pilih gambar menu')));
       return;
@@ -474,10 +492,13 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
       String finalImagePath = '';
       if (selectedLocalFile != null) {
         final storageRef = FirebaseStorage.instance.ref();
-        final fileName = "${DateTime.now().millisecondsSinceEpoch}_${selectedLocalFile!.name}";
+        final fileName =
+            "${DateTime.now().millisecondsSinceEpoch}_${selectedLocalFile!.name}";
         final imageRef = storageRef.child("menu_images/$fileName");
         final fileBytes = await File(selectedLocalFile!.path).readAsBytes();
-        await imageRef.putData(fileBytes, SettableMetadata(contentType: 'image/jpeg')).timeout(const Duration(seconds: 30));
+        await imageRef
+            .putData(fileBytes, SettableMetadata(contentType: 'image/jpeg'))
+            .timeout(const Duration(seconds: 30));
         finalImagePath = await imageRef.getDownloadURL();
 
         // Automatically save gallery uploads to catalog
@@ -496,8 +517,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
           .doc('canteen375')
           .collection('MenuCollection');
 
-      final newDocId = widget.query == 'add' 
-          ? menuCollectionRef.doc().id 
+      final newDocId = widget.query == 'add'
+          ? menuCollectionRef.doc().id
           : widget.menuObject!.id;
 
       await menuCollectionRef.doc(newDocId).set({
@@ -514,12 +535,12 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
         'sortOrder': _sortOrder,
       });
 
-
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Gagal menyimpan menu: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'Gagal menyimpan menu: ${UserMessageService.fromError(e)}')));
       }
     } finally {
       if (mounted) setState(() => isUploading = false);
@@ -544,7 +565,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
               Navigator.pop(context);
               widget.onDeleteCatalogImage?.call(asset);
               // If the deleted image was selected, reset it
-              if (selectedImageIndex != -1 && listGambar[selectedImageIndex].path == asset.path) {
+              if (selectedImageIndex != -1 &&
+                  listGambar[selectedImageIndex].path == asset.path) {
                 setState(() {
                   selectedImageIndex = -1;
                 });
@@ -562,7 +584,6 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
     );
   }
 
-
   Future<void> _showIngredientsDialog() async {
     final tempIngredients = List<MenuIngredient>.from(selectedIngredients);
 
@@ -570,8 +591,10 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Atur Bahan untuk ${namaMakananController.text.isEmpty ? "Menu Ini" : namaMakananController.text}',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 18)),
+          title: Text(
+              'Atur Bahan untuk ${namaMakananController.text.isEmpty ? "Menu Ini" : namaMakananController.text}',
+              style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold, fontSize: 18)),
           content: SizedBox(
             width: 500,
             height: 400,
@@ -583,24 +606,29 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                 }
 
                 final allInventory = snapshot.data!;
-                allInventory.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+                allInventory.sort((a, b) =>
+                    a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
                 return Column(
                   children: [
                     // Selected ingredients list
                     if (tempIngredients.isNotEmpty) ...[
-                      Text('Bahan Terpilih:', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                      Text('Bahan Terpilih:',
+                          style:
+                              GoogleFonts.poppins(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       ...tempIngredients.map((ing) {
                         return Card(
                           child: ListTile(
                             title: Text(ing.inventoryItemName),
-                            subtitle: Text('Jumlah per porsi: ${ing.quantityNeeded}'),
+                            subtitle:
+                                Text('Jumlah per porsi: ${ing.quantityNeeded}'),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.remove_circle, color: Colors.red),
+                                  icon: const Icon(Icons.remove_circle,
+                                      color: Colors.red),
                                   onPressed: () {
                                     if (ing.quantityNeeded > 1) {
                                       setDialogState(() {
@@ -610,7 +638,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                                   },
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.add_circle, color: Colors.green),
+                                  icon: const Icon(Icons.add_circle,
+                                      color: Colors.green),
                                   onPressed: () {
                                     setDialogState(() {
                                       ing.quantityNeeded++;
@@ -618,7 +647,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                                   },
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  icon: const Icon(Icons.delete,
+                                      color: Colors.red),
                                   onPressed: () {
                                     setDialogState(() {
                                       tempIngredients.remove(ing);
@@ -633,7 +663,9 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                       const Divider(),
                     ],
                     // Available ingredients to add
-                    Text('Tambah Bahan:', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                    Text('Tambah Bahan:',
+                        style:
+                            GoogleFonts.poppins(fontWeight: FontWeight.bold)),
                     const SizedBox(height: 8),
                     Expanded(
                       child: ListView.builder(
@@ -649,7 +681,8 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
                             title: Text(item.name),
                             subtitle: Text('Stok: ${item.stock} ${item.unit}'),
                             trailing: IconButton(
-                              icon: const Icon(Icons.add_circle, color: Color(0xFF2E7D32)),
+                              icon: const Icon(Icons.add_circle,
+                                  color: Color(0xFF2E7D32)),
                               onPressed: () {
                                 setDialogState(() {
                                   tempIngredients.add(MenuIngredient(
@@ -699,7 +732,8 @@ class _LocalPickerTile extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
 
-  const _LocalPickerTile({required this.selectedFile, required this.onTap, this.onLongPress});
+  const _LocalPickerTile(
+      {required this.selectedFile, required this.onTap, this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
@@ -708,7 +742,9 @@ class _LocalPickerTile extends StatelessWidget {
         color: selectedFile != null ? const Color(0xFFE8F5E9) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: selectedFile != null ? const Color(0xFF2E7D32) : Colors.grey.shade300,
+          color: selectedFile != null
+              ? const Color(0xFF2E7D32)
+              : Colors.grey.shade300,
           width: selectedFile != null ? 2 : 1,
         ),
       ),
@@ -721,11 +757,14 @@ class _LocalPickerTile extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (selectedFile == null) ...[
-                const Icon(Icons.add_photo_alternate_rounded, size: 40, color: Color(0xFF2E7D32)),
+                const Icon(Icons.add_photo_alternate_rounded,
+                    size: 40, color: Color(0xFF2E7D32)),
                 const SizedBox(height: 8),
                 Text('Pilih dari Galeri',
                     style: GoogleFonts.poppins(
-                        fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF2E7D32))),
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF2E7D32))),
               ] else ...[
                 Padding(
                   padding: const EdgeInsets.all(8.0),
@@ -739,7 +778,8 @@ class _LocalPickerTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text('Terganti',
-                    style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey)),
+                    style:
+                        GoogleFonts.poppins(fontSize: 10, color: Colors.grey)),
               ]
             ],
           ),

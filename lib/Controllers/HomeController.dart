@@ -19,6 +19,7 @@ import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class HomeController extends ChangeNotifier {
   final List<StreamSubscription> _subscriptions = [];
@@ -29,16 +30,16 @@ class HomeController extends ChangeNotifier {
   // State variables
 
   int nomorBerikutnya = 0;
-  
+
   // Edit mode state
   bool isEditMode = false;
   String? editDocumentId;
   Map<String, dynamic>? editOriginalData;
-  
+
   // Self Order mode state
   bool isSelfOrderMode = false;
   SelfOrder? currentSelfOrder;
-  
+
   List<MenuObject> menuObjectList = [];
   List<MenuObject> menuObjectList_makanan = [];
   List<MenuObject> menuObjectList_minuman = [];
@@ -85,7 +86,7 @@ class HomeController extends ChangeNotifier {
 
     getMenu();
     getListGambar();
-    
+
     // Check for missed perishable resets from previous days
     EndOfDayService.checkAndAutoResetPerishables();
   }
@@ -144,7 +145,8 @@ class HomeController extends ChangeNotifier {
     }));
 
     // Stream option groups for use in ordering flow
-    _subscriptions.add(OptionGroupService().getOptionGroupsStream().listen((groups) {
+    _subscriptions
+        .add(OptionGroupService().getOptionGroupsStream().listen((groups) {
       if (_disposed) return;
       optionGroups = groups;
       notifyListeners();
@@ -152,7 +154,10 @@ class HomeController extends ChangeNotifier {
   }
 
   void getListGambar() {
-    _subscriptions.add(FirebaseFirestore.instance.collection(Col.name('assets')).snapshots().listen((value) {
+    _subscriptions.add(FirebaseFirestore.instance
+        .collection(Col.name('assets'))
+        .snapshots()
+        .listen((value) {
       if (_disposed) return;
       listGambar = AssetsClass.getImageAssets(value);
       notifyListeners();
@@ -163,7 +168,7 @@ class HomeController extends ChangeNotifier {
     try {
       final firestore = FirebaseFirestore.instance;
       final batch = firestore.batch();
-      
+
       // 1. Update all menu items using this image
       final menuQuery = await firestore
           .collection(Col.name('Canteens'))
@@ -171,18 +176,22 @@ class HomeController extends ChangeNotifier {
           .collection('MenuCollection')
           .where('imagePath', isEqualTo: asset.path)
           .get();
-          
+
       for (var doc in menuQuery.docs) {
         batch.update(doc.reference, {'imagePath': 'tidak ada'});
       }
-      
+
       // 2. Delete the asset document
       batch.delete(firestore.collection(Col.name('assets')).doc(asset.id));
-      
+
       await batch.commit();
-      onShowMessage?.call('Gambar berhasil dihapus dari katalog', isError: false);
+      onShowMessage?.call('Gambar berhasil dihapus dari katalog',
+          isError: false);
     } catch (e) {
-      onShowMessage?.call('Gagal menghapus gambar: $e', isError: true);
+      onShowMessage?.call(
+        'Gagal menghapus gambar: ${UserMessageService.fromError(e)}',
+        isError: true,
+      );
     }
   }
 
@@ -195,7 +204,8 @@ class HomeController extends ChangeNotifier {
 
   /// Resolve selected options into a flat list of MenuIngredients
   /// using the cached optionGroups data.
-  List<MenuIngredient> _resolveOptionIngredients(List<SelectedOption> selectedOptions) {
+  List<MenuIngredient> _resolveOptionIngredients(
+      List<SelectedOption> selectedOptions) {
     final ingredients = <MenuIngredient>[];
     for (var selected in selectedOptions) {
       final group = optionGroups.firstWhere(
@@ -223,8 +233,10 @@ class HomeController extends ChangeNotifier {
     final List<dynamic> orderItems = statusData['orderItems'] ?? [];
     for (var item in orderItems) {
       final selectedOptsRaw = item['selectedOptions'] as List<dynamic>? ?? [];
-      final selectedOpts = selectedOptsRaw.map((e) => SelectedOption.fromMap(e as Map<String, dynamic>)).toList();
-      
+      final selectedOpts = selectedOptsRaw
+          .map((e) => SelectedOption.fromMap(e as Map<String, dynamic>))
+          .toList();
+
       pesananList.add(PesananObject(
         menuItemId: item['menuItemId'] ?? '',
         namaPesanan: item['namaPesanan'] ?? '',
@@ -252,7 +264,7 @@ class HomeController extends ChangeNotifier {
   void loadSelfOrder(SelfOrder order) {
     // If there's an existing order, clear it first
     if (isEditMode) clearEditMode();
-    
+
     isSelfOrderMode = true;
     currentSelfOrder = order;
 
@@ -289,7 +301,8 @@ class HomeController extends ChangeNotifier {
   // Order Management
   bool _addToOrderLock = false;
 
-  Future<void> addToOrder(MenuObject menu, bool isTakeAway, {List<SelectedOption>? options, int quantity = 1}) async {
+  Future<void> addToOrder(MenuObject menu, bool isTakeAway,
+      {List<SelectedOption>? options, int quantity = 1}) async {
     if (_addToOrderLock) return;
     _addToOrderLock = true;
 
@@ -303,8 +316,8 @@ class HomeController extends ChangeNotifier {
         selectedOptions: selectedOpts,
       ).orderKey;
 
-      int orderIndex = pesananList
-          .indexWhere((element) => element.orderKey == matchKey);
+      int orderIndex =
+          pesananList.indexWhere((element) => element.orderKey == matchKey);
 
       int newQuantity = quantity;
       if (orderIndex != -1) {
@@ -335,8 +348,8 @@ class HomeController extends ChangeNotifier {
       }
 
       // Re-check after the async gap to prevent duplicate rows from rapid taps
-      orderIndex = pesananList
-          .indexWhere((element) => element.orderKey == matchKey);
+      orderIndex =
+          pesananList.indexWhere((element) => element.orderKey == matchKey);
 
       if (orderIndex == -1) {
         pesananList.add(PesananObject(
@@ -373,7 +386,8 @@ class HomeController extends ChangeNotifier {
 
     // Check availability (menu + option ingredients aggregated)
     final inventoryService = InventoryService();
-    final optionIngredients = _resolveOptionIngredients(pesananList[index].selectedOptions);
+    final optionIngredients =
+        _resolveOptionIngredients(pesananList[index].selectedOptions);
     final availability = await inventoryService.checkOrderAvailability(
       menuItem,
       optionIngredients,
@@ -422,7 +436,8 @@ class HomeController extends ChangeNotifier {
 
     // Check availability (menu + option ingredients aggregated)
     final inventoryService = InventoryService();
-    final optionIngredients = _resolveOptionIngredients(pesananList[index].selectedOptions);
+    final optionIngredients =
+        _resolveOptionIngredients(pesananList[index].selectedOptions);
     final availability = await inventoryService.checkOrderAvailability(
       menuItem,
       optionIngredients,
@@ -465,14 +480,21 @@ class HomeController extends ChangeNotifier {
     }
   }
 
-  Future<void> updateOrderOptions(int index, List<SelectedOption> newOptions, int newQuantity) async {
+  Future<void> updateOrderOptions(
+      int index, List<SelectedOption> newOptions, int newQuantity) async {
     if (index < 0 || index >= pesananList.length) return;
 
     final order = pesananList[index];
     final menu = menuObjectList.firstWhere(
       (m) => m.id == order.menuItemId,
-      orElse: () => menuObjectList.firstWhere((m) => m.namaMenu == order.namaPesanan,
-          orElse: () => MenuObject(id: order.menuItemId, namaMenu: order.namaPesanan, harga: order.harga, isMakanan: true, imagePath: '')),
+      orElse: () => menuObjectList.firstWhere(
+          (m) => m.namaMenu == order.namaPesanan,
+          orElse: () => MenuObject(
+              id: order.menuItemId,
+              namaMenu: order.namaPesanan,
+              harga: order.harga,
+              isMakanan: true,
+              imagePath: '')),
     );
 
     // Check availability
@@ -508,7 +530,8 @@ class HomeController extends ChangeNotifier {
     );
 
     // Check if another item in cart matches the new orderKey
-    int matchIndex = pesananList.indexWhere((element) => element.orderKey == tempOrder.orderKey);
+    int matchIndex = pesananList
+        .indexWhere((element) => element.orderKey == tempOrder.orderKey);
 
     if (matchIndex != -1 && matchIndex != index) {
       // Merge this item's new quantity into the existing matched item
@@ -606,7 +629,7 @@ class HomeController extends ChangeNotifier {
   // Price Calculations
   void getTotal() {
     int subtotal = pesananList.fold(0, (acc, order) => acc + order.subtotal);
-    
+
     int totalPackages = 0;
     for (var order in pesananList) {
       if (order.takeAwayQuantity > 0) {
@@ -614,28 +637,27 @@ class HomeController extends ChangeNotifier {
         final menu = menuObjectList.firstWhere(
           (m) => m.namaMenu == order.namaPesanan,
           orElse: () => MenuObject(
-            id: '', 
-            namaMenu: order.namaPesanan, 
-            harga: order.harga, 
-            isMakanan: true, 
-            imagePath: '', 
-            unitsPerPackage: 1
-          ),
+              id: '',
+              namaMenu: order.namaPesanan,
+              harga: order.harga,
+              isMakanan: true,
+              imagePath: '',
+              unitsPerPackage: 1),
         );
-        
+
         // Calculate packages for this item: ceil(quantity / unitsPerPackage)
-        int packagesNeeded = (order.takeAwayQuantity / menu.unitsPerPackage).ceil();
+        int packagesNeeded =
+            (order.takeAwayQuantity / menu.unitsPerPackage).ceil();
         totalPackages += packagesNeeded;
       }
     }
 
-    jumlahItem = totalPackages; // Use this to track total physical packages for takeaway
+    jumlahItem =
+        totalPackages; // Use this to track total physical packages for takeaway
     biayaBungkus = (totalPackages ~/ 4) * 1000;
     totalHarga = subtotal + biayaBungkus;
     notifyListeners();
   }
-
-
 
   // Printer Management
   Future<void> checkIfPrinterIsConnected() async {
@@ -678,24 +700,26 @@ class HomeController extends ChangeNotifier {
       const double canvasHeight = 140.0;
       final recorder = ui.PictureRecorder();
       final canvas = ui.Canvas(recorder);
-      
+
       // Fill background white
       final paint = ui.Paint()..color = ui.Color(0xFFFFFFFF);
       canvas.drawRect(ui.Rect.fromLTWH(0, 0, paperWidth, canvasHeight), paint);
 
       // 2. Draw Logo
-      final ui.Image logoImage = await _loadUiImage('assets/Logo Canteen375 (PNG).png');
+      final ui.Image logoImage =
+          await _loadUiImage('assets/Logo Canteen375 (PNG).png');
       const double logoSize = 110.0;
       canvas.drawImageRect(
         logoImage,
-        ui.Rect.fromLTWH(0, 0, logoImage.width.toDouble(), logoImage.height.toDouble()),
+        ui.Rect.fromLTWH(
+            0, 0, logoImage.width.toDouble(), logoImage.height.toDouble()),
         ui.Rect.fromLTWH(0, 15, logoSize, logoSize),
         ui.Paint(),
       );
 
       // 3. Draw Branding Text with Custom Fonts
       final double textLeft = logoSize + 10;
-      
+
       // Title: Canteen 375 (Playfair Display Bold)
       final titlePainter = TextPainter(
         text: TextSpan(
@@ -729,16 +753,18 @@ class HomeController extends ChangeNotifier {
 
       // 4. Convert Canvas to Printer-ready Image
       final picture = recorder.endRecording();
-      final imgRes = await picture.toImage(paperWidth.toInt(), canvasHeight.toInt());
+      final imgRes =
+          await picture.toImage(paperWidth.toInt(), canvasHeight.toInt());
       final byteData = await imgRes.toByteData(format: ui.ImageByteFormat.png);
-      
+
       if (byteData != null) {
         // Process with 'image' package to ensure it's grayscale/1-bit for best thermal results
-        final img.Image? decoded = img.decodeImage(byteData.buffer.asUint8List());
+        final img.Image? decoded =
+            img.decodeImage(byteData.buffer.asUint8List());
         if (decoded != null) {
           final Directory tempDir = await getTemporaryDirectory();
           final File headerFile = File('${tempDir.path}/canteen_header_v2.png');
-          
+
           // Grayscale conversion helps the thermal printer handle colors better
           final img.Image gray = img.grayscale(decoded);
           await headerFile.writeAsBytes(img.encodePng(gray));
@@ -796,35 +822,39 @@ class HomeController extends ChangeNotifier {
     final int displayNomor = overrideNomorBerikutnya ?? nomorBerikutnya;
     final int displayTotal = overrideTotalHarga ?? totalHarga;
     final bool displayTakeAway = overrideIsTakeAway ?? isTakeAway;
-    final List<PesananObject> displayPesananList = customPesananList ?? pesananList;
+    final List<PesananObject> displayPesananList =
+        customPesananList ?? pesananList;
 
     try {
       await _printReceiptHeader();
       printer.printNewLine();
       DateTime now = DateTime.now();
       String formattedDate = DateFormat('dd-MM-yy HH:mm').format(now);
-      
+
       // Date and Queue Number - Small font
       print2ColumnSmall(formattedDate, "No. $displayNomor");
-      
+
       // Customer Name - Small font
       if (customerName != null && customerName.isNotEmpty) {
         printer.printCustom("$customerName", 1, 0);
       }
-      
+
       printer.printNewLine();
       print2ColumnSmall('(QTY) ITEM', 'SUBTOTAL');
 
       // Sort items: Food (isMakanan: true) first, then Drinks
-      final List<PesananObject> sortedPesananList = List<PesananObject>.from(displayPesananList);
+      final List<PesananObject> sortedPesananList =
+          List<PesananObject>.from(displayPesananList);
       sortedPesananList.sort((a, b) {
         final menuA = menuObjectList.firstWhere(
           (m) => m.id == a.menuItemId,
-          orElse: () => MenuObject(id: '', namaMenu: '', harga: 0, isMakanan: true, imagePath: ''),
+          orElse: () => MenuObject(
+              id: '', namaMenu: '', harga: 0, isMakanan: true, imagePath: ''),
         );
         final menuB = menuObjectList.firstWhere(
           (m) => m.id == b.menuItemId,
-          orElse: () => MenuObject(id: '', namaMenu: '', harga: 0, isMakanan: true, imagePath: ''),
+          orElse: () => MenuObject(
+              id: '', namaMenu: '', harga: 0, isMakanan: true, imagePath: ''),
         );
         if (menuA.isMakanan && !menuB.isMakanan) return -1;
         if (!menuA.isMakanan && menuB.isMakanan) return 1;
@@ -849,22 +879,28 @@ class HomeController extends ChangeNotifier {
             String optPrice = '+${opt.priceAdjustment}';
             print2ColumnSmall(optLine, optPrice);
           }
-          if (element.customerNote != null && element.customerNote!.isNotEmpty) {
+          if (element.customerNote != null &&
+              element.customerNote!.isNotEmpty) {
             printer.printCustom('  * ${element.customerNote}', 0, 0);
           }
         }
 
         if (element.dineInQuantity > 0) {
-          printItemLine(element.namaPesanan, element.dineInQuantity, effectivePrice * element.dineInQuantity);
+          printItemLine(element.namaPesanan, element.dineInQuantity,
+              effectivePrice * element.dineInQuantity);
         }
         if (element.takeAwayQuantity > 0) {
-          printItemLine("${element.namaPesanan} (bgks)", element.takeAwayQuantity, effectivePrice * element.takeAwayQuantity);
+          printItemLine(
+              "${element.namaPesanan} (bgks)",
+              element.takeAwayQuantity,
+              effectivePrice * element.takeAwayQuantity);
         }
       }
       if (displayTakeAway) {
         final int displayBiayaBungkus = overrideBiayaBungkus ?? biayaBungkus;
         final int displayJumlahItem = overrideBiayaBungkus != null
-            ? displayPesananList.fold<int>(0, (sum, o) => sum + o.takeAwayQuantity)
+            ? displayPesananList.fold<int>(
+                0, (sum, o) => sum + o.takeAwayQuantity)
             : jumlahItem;
         print2ColumnSmall(
             'Bungkus ($displayJumlahItem)', displayBiayaBungkus.toString());
@@ -873,7 +909,7 @@ class HomeController extends ChangeNotifier {
         printer.printNewLine();
         print2ColumnSmall('SUBTOTAL', 'Rp $originalTotal');
         print2ColumnSmall('DISKON', '-Rp $discountAmount');
-        
+
         if (voucherRemaining != null) {
           print2ColumnSmall('SISA VOUCHER', 'Rp $voucherRemaining');
         }
@@ -919,7 +955,8 @@ class HomeController extends ChangeNotifier {
       }
 
       // Detect data format: RecentlyServed uses 'quantity', Status uses 'dineInQuantity'/'takeAwayQuantity'
-      final bool isRecentlyServedFormat = orderItems.isNotEmpty && orderItems.first.containsKey('quantity');
+      final bool isRecentlyServedFormat =
+          orderItems.isNotEmpty && orderItems.first.containsKey('quantity');
 
       bool hasTakeAway = isRecentlyServedFormat
           ? orderItems.any((item) => (item['orderType'] ?? '') == 'take-away')
@@ -930,16 +967,16 @@ class HomeController extends ChangeNotifier {
       String formattedDate = waktuPesan != null
           ? DateFormat('dd-MM-yy HH:mm').format(waktuPesan)
           : DateFormat('dd-MM-yy HH:mm').format(DateTime.now());
-      
+
       // Date and Queue Number - Small font
       print2ColumnSmall(formattedDate, "No. $customerNumber");
-      
+
       // Customer Name - Medium font
       final String? customerName = orderData["namaCustomer"];
       if (customerName != null && customerName.isNotEmpty) {
         printer.printCustom("$customerName", 1, 0);
       }
-      
+
       printer.printNewLine();
       print2ColumnSmall('(QTY) ITEM', 'SUBTOTAL');
 
@@ -955,7 +992,8 @@ class HomeController extends ChangeNotifier {
 
       for (var item in sortedOrderItems) {
         String itemName = item['namaPesanan'] ?? '';
-        int harga = (item['harga'] ?? 0) is num ? (item['harga'] as num).toInt() : 0;
+        int harga =
+            (item['harga'] ?? 0) is num ? (item['harga'] as num).toInt() : 0;
         final List<dynamic> selectedOpts = item['selectedOptions'] ?? [];
         final String? note = item['customerNote'];
 
@@ -970,7 +1008,8 @@ class HomeController extends ChangeNotifier {
           if (displayName.length > 25) {
             displayName = displayName.substring(0, 25) + "..";
           }
-          print2ColumnSmall("($qty) $displayName", (effectivePrice * qty).toString());
+          print2ColumnSmall(
+              "($qty) $displayName", (effectivePrice * qty).toString());
           for (var opt in selectedOpts) {
             String optName = opt['optionName'] ?? '';
             int adj = ((opt['priceAdjustment'] ?? 0) as num).toInt();
@@ -983,12 +1022,18 @@ class HomeController extends ChangeNotifier {
         }
 
         if (isRecentlyServedFormat) {
-          int qty = (item['quantity'] ?? 0) is num ? (item['quantity'] as num).toInt() : 0;
+          int qty = (item['quantity'] ?? 0) is num
+              ? (item['quantity'] as num).toInt()
+              : 0;
           bool isTA = (item['orderType'] ?? '') == 'take-away';
           printReprintLine(isTA ? "$itemName (bgks)" : itemName, qty);
         } else {
-          int dineIn = (item['dineInQuantity'] ?? 0) is num ? (item['dineInQuantity'] as num).toInt() : 0;
-          int takeAway = (item['takeAwayQuantity'] ?? 0) is num ? (item['takeAwayQuantity'] as num).toInt() : 0;
+          int dineIn = (item['dineInQuantity'] ?? 0) is num
+              ? (item['dineInQuantity'] as num).toInt()
+              : 0;
+          int takeAway = (item['takeAwayQuantity'] ?? 0) is num
+              ? (item['takeAwayQuantity'] as num).toInt()
+              : 0;
 
           if (dineIn > 0) {
             printReprintLine(itemName, dineIn);
@@ -1001,7 +1046,9 @@ class HomeController extends ChangeNotifier {
 
       if (hasTakeAway) {
         if (isRecentlyServedFormat) {
-          int bungkusFee = (orderData['bungkus'] ?? 0) is num ? (orderData['bungkus'] as num).toInt() : 0;
+          int bungkusFee = (orderData['bungkus'] ?? 0) is num
+              ? (orderData['bungkus'] as num).toInt()
+              : 0;
           if (bungkusFee > 0) {
             print2ColumnSmall('Bungkus', bungkusFee.toString());
           }
@@ -1010,9 +1057,12 @@ class HomeController extends ChangeNotifier {
               ? (orderData['takeAwayFee'] as num).toInt()
               : 0;
           int takeAwayCount = orderItems.fold<int>(
-              0, (sum, item) => sum + (((item['takeAwayQuantity'] ?? 0) as num).toInt()));
+              0,
+              (sum, item) =>
+                  sum + (((item['takeAwayQuantity'] ?? 0) as num).toInt()));
           if (bungkusFee > 0) {
-            print2ColumnSmall('Bungkus ($takeAwayCount)', bungkusFee.toString());
+            print2ColumnSmall(
+                'Bungkus ($takeAwayCount)', bungkusFee.toString());
           }
         }
       }
@@ -1043,9 +1093,12 @@ class HomeController extends ChangeNotifier {
     }
 
     try {
-      final String memberName = data['namaCustomer'] ?? data['memberName'] ?? 'Member';
-      final int finalTotal = data['finalTotal'] ?? data['total'] ?? data['totalAmount'] ?? 0;
-      final int originalTotal = data['totalAmount'] ?? data['total'] ?? finalTotal;
+      final String memberName =
+          data['namaCustomer'] ?? data['memberName'] ?? 'Member';
+      final int finalTotal =
+          data['finalTotal'] ?? data['total'] ?? data['totalAmount'] ?? 0;
+      final int originalTotal =
+          data['totalAmount'] ?? data['total'] ?? finalTotal;
       final int discountAmount = data['discountAmount'] ?? 0;
       final String paymentMethod = data['paymentMethod'] ?? '';
 
@@ -1062,13 +1115,13 @@ class HomeController extends ChangeNotifier {
       String formattedDate = settledAt != null
           ? DateFormat('dd-MM-yy HH:mm').format(settledAt)
           : DateFormat('dd-MM-yy HH:mm').format(DateTime.now());
-      
+
       // Date and Method - Small font
       print2ColumnSmall(formattedDate, paymentMethod);
-      
+
       // Customer Name - Medium font
       printer.printCustom("$memberName", 1, 0);
-      
+
       printer.printNewLine();
       print2ColumnSmall('ITEM (QTY)', 'SUBTOTAL');
 
@@ -1116,8 +1169,8 @@ class HomeController extends ChangeNotifier {
         }
 
         // Print packing fee if applicable for flatItems format
-        final int takeAwayFee = (data['takeAwayFee'] ?? 0) is num 
-            ? (data['takeAwayFee'] as num).toInt() 
+        final int takeAwayFee = (data['takeAwayFee'] ?? 0) is num
+            ? (data['takeAwayFee'] as num).toInt()
             : 0;
         if (takeAwayFee > 0) {
           print2ColumnSmall('Bungkus', takeAwayFee.toString());
@@ -1292,7 +1345,7 @@ class HomeController extends ChangeNotifier {
 
   void print2ColumnSmall(String left, String right) {
     // Small font (size 0) - allows for more characters
-    // Standard 58mm with size 0 = ~42 chars. 
+    // Standard 58mm with size 0 = ~42 chars.
     int maxChars = 42;
 
     int spaces = maxChars - left.length - right.length;
@@ -1309,18 +1362,27 @@ class HomeController extends ChangeNotifier {
   void printDynamicSize({
     required String left,
     required String right,
-    int size = 0,      // Default to small
-    int fontType = 0,  // 0: Normal, 1: Bold (if supported)
+    int size = 0, // Default to small
+    int fontType = 0, // 0: Normal, 1: Bold (if supported)
   }) {
     // 1. Determine max characters based on font size (for 58mm printers)
     // Size 0 = 42 chars | Size 1 = 32 chars | Size 2 = 21 chars | Size 3 = 14 chars
     int maxChars;
     switch (size) {
-      case 0:  maxChars = 42; break;
-      case 1:  maxChars = 32; break;
-      case 2:  maxChars = 21; break;
-      case 3:  maxChars = 14; break;
-      default: maxChars = 32;
+      case 0:
+        maxChars = 42;
+        break;
+      case 1:
+        maxChars = 32;
+        break;
+      case 2:
+        maxChars = 21;
+        break;
+      case 3:
+        maxChars = 14;
+        break;
+      default:
+        maxChars = 32;
     }
 
     // 2. Ensure right side (the value/price) is never cut off

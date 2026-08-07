@@ -8,7 +8,7 @@ class LoaderWidget {
           const CircularProgressIndicator(),
           Container(
               margin: const EdgeInsets.only(left: 7),
-              child: Text(message == null ? "Loading..." : '$message...')),
+              child: Text(message == null ? 'Memuat...' : '$message...')),
         ],
       ),
     );

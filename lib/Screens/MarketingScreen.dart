@@ -8,6 +8,7 @@ import 'package:point_of_sales_app_v3/Services/MemberService.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class MarketingScreen extends StatefulWidget {
   const MarketingScreen({Key? key}) : super(key: key);
@@ -44,10 +45,10 @@ class _MarketingScreenState extends State<MarketingScreen>
     _tabController.addListener(() {
       setState(() {}); // Rebuild FAB on tab change
     });
-    
+
     // Listen for testing mode changes to refresh data
     Col.testingMode.addListener(_onTestingModeChanged);
-    
+
     _initializeData();
   }
 
@@ -85,7 +86,7 @@ class _MarketingScreenState extends State<MarketingScreen>
     setState(() => _isLoadingMembers = true);
     try {
       final members = await _memberService.getCachedMembers();
-      
+
       // Fetch competition points for current month
       final now = DateTime.now();
       final monthDocId = DateFormat('yyyy-MM').format(now);
@@ -103,7 +104,8 @@ class _MarketingScreenState extends State<MarketingScreen>
             recordsMap[key] = {
               'customerPoints': (value['customerPoints'] as num?)?.toInt() ?? 0,
               'amountSpent': (value['amountSpent'] as num?)?.toInt() ?? 0,
-              'numberOfTransaction': (value['numberOfTransaction'] as num?)?.toInt() ?? 0,
+              'numberOfTransaction':
+                  (value['numberOfTransaction'] as num?)?.toInt() ?? 0,
             };
             pointsMap[key] = (value['customerPoints'] as num?)?.toInt() ?? 0;
           }
@@ -113,16 +115,21 @@ class _MarketingScreenState extends State<MarketingScreen>
       // Sort members by competition points descending
       final sortedMembers = List<Member>.from(members);
       sortedMembers.sort((a, b) {
-        final recordA = recordsMap[a.id] ?? {'customerPoints': 0, 'amountSpent': 0, 'numberOfTransaction': 0};
-        final recordB = recordsMap[b.id] ?? {'customerPoints': 0, 'amountSpent': 0, 'numberOfTransaction': 0};
-        
-        int pointsCompare = recordB['customerPoints'].compareTo(recordA['customerPoints']);
+        final recordA = recordsMap[a.id] ??
+            {'customerPoints': 0, 'amountSpent': 0, 'numberOfTransaction': 0};
+        final recordB = recordsMap[b.id] ??
+            {'customerPoints': 0, 'amountSpent': 0, 'numberOfTransaction': 0};
+
+        int pointsCompare =
+            recordB['customerPoints'].compareTo(recordA['customerPoints']);
         if (pointsCompare != 0) return pointsCompare;
-        
-        int amountCompare = recordB['amountSpent'].compareTo(recordA['amountSpent']);
+
+        int amountCompare =
+            recordB['amountSpent'].compareTo(recordA['amountSpent']);
         if (amountCompare != 0) return amountCompare;
-        
-        return recordB['numberOfTransaction'].compareTo(recordA['numberOfTransaction']);
+
+        return recordB['numberOfTransaction']
+            .compareTo(recordA['numberOfTransaction']);
       });
 
       setState(() {
@@ -145,7 +152,10 @@ class _MarketingScreenState extends State<MarketingScreen>
       await _loadMembers();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal memperbarui cache: $e')),
+        SnackBar(
+          content: Text(
+              'Gagal memperbarui data member: ${UserMessageService.fromError(e)}'),
+        ),
       );
     } finally {
       setState(() => _isLoadingMembers = false);
@@ -154,30 +164,30 @@ class _MarketingScreenState extends State<MarketingScreen>
 
   void _onSearchChanged(String query) {
     setState(() => _searchQuery = query);
-    
+
     // Cancel any existing debounce timer
     _searchDebounce?.cancel();
-    
+
     // If query is empty, show all members immediately
     if (query.isEmpty) {
       setState(() => _members = _allMembers);
       return;
     }
-    
+
     // Debounce search by 500ms (optimized for tablet typing speed)
     _searchDebounce = Timer(const Duration(milliseconds: 500), () {
       _executeSearch(query);
     });
   }
-  
+
   void _executeSearch(String query) {
     // Filter locally from cached data (no Firestore call needed)
     final lowerQuery = query.toLowerCase();
     final results = _allMembers.where((member) {
       return member.name.toLowerCase().contains(lowerQuery) ||
-             member.phoneNumber.contains(query);
+          member.phoneNumber.contains(query);
     }).toList();
-    
+
     // Results are already sorted since _allMembers is sorted
     if (mounted) {
       setState(() => _members = results);
@@ -190,13 +200,13 @@ class _MarketingScreenState extends State<MarketingScreen>
       final query = FirebaseFirestore.instance
           .collection(Col.name('voucherGroup'))
           .where('type', isEqualTo: 'cashbackCampaign');
-      
-      final snapshot = forceRefresh 
+
+      final snapshot = forceRefresh
           ? await query.get(const GetOptions(source: Source.server))
           : await query.get();
-          
+
       final docs = snapshot.docs;
-      
+
       // Data Integrity: If forceRefresh is on, verify counts to fix "Data Mismatch"
       if (forceRefresh) {
         for (var doc in docs) {
@@ -205,7 +215,7 @@ class _MarketingScreenState extends State<MarketingScreen>
               .where('voucherGroupId', isEqualTo: doc.id)
               .count()
               .get();
-              
+
           final claimed = await FirebaseFirestore.instance
               .collection(Col.name('vouchers'))
               .where('voucherGroupId', isEqualTo: doc.id)
@@ -214,7 +224,7 @@ class _MarketingScreenState extends State<MarketingScreen>
               .get();
 
           // Sync the document if there's a mismatch
-          if (doc['totalParticipants'] != participants.count || 
+          if (doc['totalParticipants'] != participants.count ||
               doc['totalClaimed'] != claimed.count) {
             await doc.reference.update({
               'totalParticipants': participants.count,
@@ -223,18 +233,18 @@ class _MarketingScreenState extends State<MarketingScreen>
           }
         }
       }
-          
+
       setState(() {
         _campaigns = docs;
         _campaigns.sort((a, b) {
-           final aData = a.data() as Map<String, dynamic>;
-           final bData = b.data() as Map<String, dynamic>;
-           final aTime = aData['createdAt'] as Timestamp?;
-           final bTime = bData['createdAt'] as Timestamp?;
-           if (aTime == null && bTime == null) return 0;
-           if (aTime == null) return 1;
-           if (bTime == null) return -1;
-           return bTime.compareTo(aTime);
+          final aData = a.data() as Map<String, dynamic>;
+          final bData = b.data() as Map<String, dynamic>;
+          final aTime = aData['createdAt'] as Timestamp?;
+          final bTime = bData['createdAt'] as Timestamp?;
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1;
+          if (bTime == null) return -1;
+          return bTime.compareTo(aTime);
         });
       });
     } catch (e) {
@@ -257,7 +267,8 @@ class _MarketingScreenState extends State<MarketingScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(confirmContext),
-            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
+            child:
+                Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -267,7 +278,9 @@ class _MarketingScreenState extends State<MarketingScreen>
               if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Tidak dapat membuka halaman pendaftaran')),
+                    const SnackBar(
+                        content:
+                            Text('Tidak dapat membuka halaman pendaftaran')),
                   );
                 }
               }
@@ -291,7 +304,7 @@ class _MarketingScreenState extends State<MarketingScreen>
 
     DateTime? startDate;
     DateTime? endDate;
-    
+
     // Validation state
     String? nameError;
     String? thresholdError;
@@ -314,7 +327,7 @@ class _MarketingScreenState extends State<MarketingScreen>
               final number = int.tryParse(value.replaceAll('.', '')) ?? 0;
               return NumberFormat('#,###', 'id_ID').format(number);
             }
-            
+
             int parseCurrency(String value) {
               return int.tryParse(value.replaceAll('.', '')) ?? 0;
             }
@@ -322,16 +335,20 @@ class _MarketingScreenState extends State<MarketingScreen>
             Future<void> selectDate(bool isStart) async {
               final date = await showDatePicker(
                 context: context,
-                initialDate: isStart 
-                    ? DateTime.now() 
-                    : (startDate?.add(const Duration(days: 30)) ?? DateTime.now()),
-                firstDate: isStart ? DateTime.now() : (startDate ?? DateTime.now()),
+                initialDate: isStart
+                    ? DateTime.now()
+                    : (startDate?.add(const Duration(days: 30)) ??
+                        DateTime.now()),
+                firstDate:
+                    isStart ? DateTime.now() : (startDate ?? DateTime.now()),
                 lastDate: DateTime(2100),
               );
               if (date != null) {
                 final time = await showTimePicker(
                   context: context,
-                  initialTime: isStart ? TimeOfDay.now() : const TimeOfDay(hour: 23, minute: 59),
+                  initialTime: isStart
+                      ? TimeOfDay.now()
+                      : const TimeOfDay(hour: 23, minute: 59),
                 );
                 if (time != null) {
                   setModalState(() {
@@ -356,7 +373,7 @@ class _MarketingScreenState extends State<MarketingScreen>
                 }
               }
             }
-            
+
             void validateAndSubmit() async {
               // Reset errors
               setModalState(() {
@@ -366,22 +383,24 @@ class _MarketingScreenState extends State<MarketingScreen>
                 requirementsError = null;
                 dateError = null;
               });
-              
+
               bool hasError = false;
-              
+
               if (nameController.text.trim().isEmpty) {
                 setModalState(() => nameError = 'Nama campaign wajib diisi');
                 hasError = true;
               }
-              
+
               if (thresholdController.text.isEmpty) {
                 setModalState(() => thresholdError = 'Target poin wajib diisi');
                 hasError = true;
-              } else if (int.tryParse(thresholdController.text) == null || int.parse(thresholdController.text) <= 0) {
-                setModalState(() => thresholdError = 'Masukkan angka yang valid');
+              } else if (int.tryParse(thresholdController.text) == null ||
+                  int.parse(thresholdController.text) <= 0) {
+                setModalState(
+                    () => thresholdError = 'Masukkan angka yang valid');
                 hasError = true;
               }
-              
+
               if (valueController.text.isEmpty) {
                 setModalState(() => valueError = 'Nilai cashback wajib diisi');
                 hasError = true;
@@ -389,30 +408,35 @@ class _MarketingScreenState extends State<MarketingScreen>
                 setModalState(() => valueError = 'Masukkan nilai yang valid');
                 hasError = true;
               }
-              
+
               if (requirementsController.text.isEmpty) {
-                setModalState(() => requirementsError = 'Syarat transaksi wajib diisi');
+                setModalState(
+                    () => requirementsError = 'Syarat transaksi wajib diisi');
                 hasError = true;
               } else if (parseCurrency(requirementsController.text) <= 0) {
-                setModalState(() => requirementsError = 'Masukkan nilai yang valid');
+                setModalState(
+                    () => requirementsError = 'Masukkan nilai yang valid');
                 hasError = true;
               }
-              
+
               if (startDate == null || endDate == null) {
-                setModalState(() => dateError = 'Pilih tanggal mulai dan berakhir');
+                setModalState(
+                    () => dateError = 'Pilih tanggal mulai dan berakhir');
                 hasError = true;
               } else if (endDate!.isBefore(startDate!)) {
-                setModalState(() => dateError = 'Tanggal berakhir harus setelah tanggal mulai');
+                setModalState(() =>
+                    dateError = 'Tanggal berakhir harus setelah tanggal mulai');
                 hasError = true;
               }
-              
+
               if (hasError) return;
-              
+
               Navigator.pop(modalContext);
               setState(() => _isLoadingCampaigns = true);
 
               try {
-                String safeName = nameController.text.trim().replaceAll(' ', '_');
+                String safeName =
+                    nameController.text.trim().replaceAll(' ', '_');
                 String voucherGroupId =
                     'campaign_${DateFormat('yyyy-MM-dd').format(DateTime.now())}_${safeName}_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -429,7 +453,8 @@ class _MarketingScreenState extends State<MarketingScreen>
                   'totalParticipants': 0,
                   'type': 'cashbackCampaign',
                   'value': parseCurrency(valueController.text),
-                  'transactionRequirement': parseCurrency(requirementsController.text),
+                  'transactionRequirement':
+                      parseCurrency(requirementsController.text),
                   'voucherGroupId': voucherGroupId,
                   'voucherName': nameController.text.trim(),
                 });
@@ -452,7 +477,10 @@ class _MarketingScreenState extends State<MarketingScreen>
               } catch (e) {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Gagal membuat campaign: $e')),
+                  SnackBar(
+                    content: Text(
+                        'Gagal membuat kampanye: ${UserMessageService.fromError(e)}'),
+                  ),
                 );
               } finally {
                 if (mounted) {
@@ -484,7 +512,7 @@ class _MarketingScreenState extends State<MarketingScreen>
                       ],
                     ),
                     const SizedBox(height: 20),
-                    
+
                     // Campaign Name
                     TextField(
                       controller: nameController,
@@ -498,14 +526,15 @@ class _MarketingScreenState extends State<MarketingScreen>
                       onChanged: (_) => setModalState(() => nameError = null),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Target Points
                     TextField(
                       controller: thresholdController,
                       decoration: InputDecoration(
                         labelText: 'Target Poin',
                         hintText: 'Misal: 10',
-                        helperText: 'Member mengumpulkan poin dari transaksi (1 poin per Rp 10.000)',
+                        helperText:
+                            'Member mengumpulkan poin dari transaksi (1 poin per Rp 10.000)',
                         helperMaxLines: 2,
                         border: const OutlineInputBorder(),
                         errorText: thresholdError,
@@ -513,10 +542,11 @@ class _MarketingScreenState extends State<MarketingScreen>
                       ),
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      onChanged: (_) => setModalState(() => thresholdError = null),
+                      onChanged: (_) =>
+                          setModalState(() => thresholdError = null),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Cashback Value (with Rupiah formatting)
                     TextField(
                       controller: valueController,
@@ -536,14 +566,15 @@ class _MarketingScreenState extends State<MarketingScreen>
                           final formatted = formatCurrency(newValue.text);
                           return TextEditingValue(
                             text: formatted,
-                            selection: TextSelection.collapsed(offset: formatted.length),
+                            selection: TextSelection.collapsed(
+                                offset: formatted.length),
                           );
                         }),
                       ],
                       onChanged: (_) => setModalState(() => valueError = null),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Min Transaction Requirement
                     TextField(
                       controller: requirementsController,
@@ -551,7 +582,8 @@ class _MarketingScreenState extends State<MarketingScreen>
                         labelText: 'Syarat Minimum Transaksi untuk Redeem',
                         hintText: '20.000',
                         prefixText: 'Rp ',
-                        helperText: 'Member harus belanja minimal ini saat redeem voucher',
+                        helperText:
+                            'Member harus belanja minimal ini saat redeem voucher',
                         helperMaxLines: 2,
                         border: const OutlineInputBorder(),
                         errorText: requirementsError,
@@ -565,20 +597,22 @@ class _MarketingScreenState extends State<MarketingScreen>
                           final formatted = formatCurrency(newValue.text);
                           return TextEditingValue(
                             text: formatted,
-                            selection: TextSelection.collapsed(offset: formatted.length),
+                            selection: TextSelection.collapsed(
+                                offset: formatted.length),
                           );
                         }),
                       ],
-                      onChanged: (_) => setModalState(() => requirementsError = null),
+                      onChanged: (_) =>
+                          setModalState(() => requirementsError = null),
                     ),
                     const SizedBox(height: 20),
-                    
+
                     // Date Selection
                     Text('Periode Campaign',
                         style: GoogleFonts.poppins(
                             fontWeight: FontWeight.w500, fontSize: 14)),
                     const SizedBox(height: 8),
-                    
+
                     Row(
                       children: [
                         Expanded(
@@ -589,24 +623,31 @@ class _MarketingScreenState extends State<MarketingScreen>
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
                                 border: Border.all(
-                                  color: dateError != null ? Colors.red : Colors.grey.shade400,
+                                  color: dateError != null
+                                      ? Colors.red
+                                      : Colors.grey.shade400,
                                 ),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.calendar_today, 
-                                      size: 18, 
-                                      color: startDate != null ? const Color(0xFF2E7D32) : Colors.grey),
+                                  Icon(Icons.calendar_today,
+                                      size: 18,
+                                      color: startDate != null
+                                          ? const Color(0xFF2E7D32)
+                                          : Colors.grey),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       startDate == null
                                           ? 'Mulai'
-                                          : DateFormat('dd MMM yyyy\nHH:mm').format(startDate!),
+                                          : DateFormat('dd MMM yyyy\nHH:mm')
+                                              .format(startDate!),
                                       style: GoogleFonts.poppins(
                                         fontSize: 12,
-                                        color: startDate != null ? Colors.black87 : Colors.grey,
+                                        color: startDate != null
+                                            ? Colors.black87
+                                            : Colors.grey,
                                       ),
                                     ),
                                   ),
@@ -617,7 +658,8 @@ class _MarketingScreenState extends State<MarketingScreen>
                         ),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Icon(Icons.arrow_forward, color: Colors.grey.shade400),
+                          child: Icon(Icons.arrow_forward,
+                              color: Colors.grey.shade400),
                         ),
                         Expanded(
                           child: InkWell(
@@ -627,24 +669,31 @@ class _MarketingScreenState extends State<MarketingScreen>
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
                                 border: Border.all(
-                                  color: dateError != null ? Colors.red : Colors.grey.shade400,
+                                  color: dateError != null
+                                      ? Colors.red
+                                      : Colors.grey.shade400,
                                 ),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.calendar_today, 
-                                      size: 18, 
-                                      color: endDate != null ? const Color(0xFF2E7D32) : Colors.grey),
+                                  Icon(Icons.calendar_today,
+                                      size: 18,
+                                      color: endDate != null
+                                          ? const Color(0xFF2E7D32)
+                                          : Colors.grey),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       endDate == null
                                           ? 'Berakhir'
-                                          : DateFormat('dd MMM yyyy\nHH:mm').format(endDate!),
+                                          : DateFormat('dd MMM yyyy\nHH:mm')
+                                              .format(endDate!),
                                       style: GoogleFonts.poppins(
                                         fontSize: 12,
-                                        color: endDate != null ? Colors.black87 : Colors.grey,
+                                        color: endDate != null
+                                            ? Colors.black87
+                                            : Colors.grey,
                                       ),
                                     ),
                                   ),
@@ -660,12 +709,13 @@ class _MarketingScreenState extends State<MarketingScreen>
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
                           dateError!,
-                          style: GoogleFonts.poppins(fontSize: 12, color: Colors.red),
+                          style: GoogleFonts.poppins(
+                              fontSize: 12, color: Colors.red),
                         ),
                       ),
-                    
+
                     const SizedBox(height: 24),
-                    
+
                     // Action Buttons
                     Row(
                       children: [
@@ -676,7 +726,9 @@ class _MarketingScreenState extends State<MarketingScreen>
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               side: BorderSide(color: Colors.grey.shade400),
                             ),
-                            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey.shade700)),
+                            child: Text('Batal',
+                                style: GoogleFonts.poppins(
+                                    color: Colors.grey.shade700)),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -689,7 +741,9 @@ class _MarketingScreenState extends State<MarketingScreen>
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                             ),
-                            child: Text('Buat Campaign', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                            child: Text('Buat Campaign',
+                                style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w600)),
                           ),
                         ),
                       ],
@@ -746,7 +800,8 @@ class _MarketingScreenState extends State<MarketingScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2E7D32),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               ),
             ),
           ],
@@ -766,8 +821,8 @@ class _MarketingScreenState extends State<MarketingScreen>
             decoration: InputDecoration(
               hintText: 'Cari member (nama atau telepon)...',
               prefixIcon: const Icon(Icons.search),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               suffixIcon: _searchController.text.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear),
@@ -796,26 +851,29 @@ class _MarketingScreenState extends State<MarketingScreen>
                             margin: const EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 4),
                             child: ListTile(
-                               leading: CircleAvatar(
-                                 backgroundColor: const Color(0xFFE8F5E9),
-                                 child: Text(member.name[0].toUpperCase()),
-                               ),
+                              leading: CircleAvatar(
+                                backgroundColor: const Color(0xFFE8F5E9),
+                                child: Text(member.name[0].toUpperCase()),
+                              ),
                               title: Text(member.name,
                                   style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w500)),
                               subtitle: Text(member.phoneNumber),
-                               trailing: ElevatedButton(
-                                 onPressed: () => _showMemberProgressSheet(member),
-                                 style: ElevatedButton.styleFrom(
-                                   backgroundColor: const Color(0xFFE8F5E9),
-                                   foregroundColor: const Color(0xFF1B5E20),
-                                   elevation: 0,
-                                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                                   shape: RoundedRectangleBorder(
-                                       borderRadius: BorderRadius.circular(8)),
-                                 ),
-                                 child: const Text('Progres', style: TextStyle(fontSize: 12)),
-                               ),
+                              trailing: ElevatedButton(
+                                onPressed: () =>
+                                    _showMemberProgressSheet(member),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFE8F5E9),
+                                  foregroundColor: const Color(0xFF1B5E20),
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8)),
+                                ),
+                                child: const Text('Progres',
+                                    style: TextStyle(fontSize: 12)),
+                              ),
                             ),
                           );
                         },
@@ -879,157 +937,180 @@ class _MarketingScreenState extends State<MarketingScreen>
                 onRefresh: () => _loadCampaigns(forceRefresh: true),
                 color: const Color(0xFF2E7D32),
                 child: ListView.builder(
-                padding: const EdgeInsets.all(16.0),
-                itemCount: _campaigns.length,
-                itemBuilder: (context, index) {
-                  final campaignDoc = _campaigns[index];
-                  final campaign = campaignDoc.data() as Map<String, dynamic>;
-                  final startDate =
-                      (campaign['activeDate'] as Timestamp).toDate();
-                  final endDate =
-                      (campaign['expireDate'] as Timestamp).toDate();
-                  final isActive = campaign['isActive'] ?? false;
-                  
-                  final now = DateTime.now();
-                  final isCurrentlyRunning = isActive && now.isAfter(startDate) && now.isBefore(endDate);
+                  padding: const EdgeInsets.all(16.0),
+                  itemCount: _campaigns.length,
+                  itemBuilder: (context, index) {
+                    final campaignDoc = _campaigns[index];
+                    final campaign = campaignDoc.data() as Map<String, dynamic>;
+                    final startDate =
+                        (campaign['activeDate'] as Timestamp).toDate();
+                    final endDate =
+                        (campaign['expireDate'] as Timestamp).toDate();
+                    final isActive = campaign['isActive'] ?? false;
 
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    clipBehavior: Clip.antiAlias,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(
-                        color: isCurrentlyRunning ? Colors.green.shade200 : Colors.grey.shade200,
-                        width: 1,
-                      ),
-                    ),
-                    child: InkWell(
-                      onTap: () => _showCampaignDetailsSheet(campaignDoc),
-                      onLongPress: () => _showCampaignOptionsMenu(campaignDoc),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Header: Title + Status
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    campaign['voucherName'] ?? 'No Name',
-                                    style: GoogleFonts.poppins(
-                                        fontWeight: FontWeight.w600, fontSize: 16),
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: isCurrentlyRunning ? Colors.green.shade100 : Colors.grey.shade200,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    isCurrentlyRunning ? 'Aktif' : 'Nonaktif',
-                                    style: TextStyle(
-                                      color: isCurrentlyRunning ? Colors.green.shade800 : Colors.grey.shade700,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            
-                            // Key Info Row: Reward + Target
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.card_giftcard, size: 18, color: Colors.orange.shade700),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'Rp ${NumberFormat.decimalPattern().format(campaign['value'] ?? 0)}',
-                                        style: GoogleFonts.poppins(
-                                          color: Colors.orange.shade800,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFE8F5E9),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    '${campaign['threshold'] ?? 0} pts',
-                                    style: GoogleFonts.poppins(
-                                      color: const Color(0xFF1B5E20),
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            
-                            // Date Range (condensed)
-                            Row(
-                              children: [
-                                Icon(Icons.schedule, size: 14, color: Colors.grey.shade600),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '${DateFormat('dd MMM').format(startDate)} - ${DateFormat('dd MMM yyyy').format(endDate)}',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            
-                            // Min Transaction
-                            Row(
-                              children: [
-                                Icon(Icons.receipt_long, size: 14, color: Colors.grey.shade600),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Min. transaksi Rp ${NumberFormat.decimalPattern().format(campaign['transactionRequirement'] ?? 0)}',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            
-                            const Divider(height: 20),
-                            
-                            // Stats Row
-                            Row(
-                              children: [
-                                _buildCampaignStat(Icons.people, '${campaign['totalParticipants'] ?? 0}', 'Peserta'),
-                                const SizedBox(width: 24),
-                                _buildCampaignStat(Icons.check_circle, '${campaign['totalClaimed'] ?? 0}', 'Diklaim'),
-                                const Spacer(),
-                                Icon(Icons.chevron_right, color: Colors.grey.shade400),
-                              ],
-                            ),
-                          ],
+                    final now = DateTime.now();
+                    final isCurrentlyRunning = isActive &&
+                        now.isAfter(startDate) &&
+                        now.isBefore(endDate);
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      clipBehavior: Clip.antiAlias,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(
+                          color: isCurrentlyRunning
+                              ? Colors.green.shade200
+                              : Colors.grey.shade200,
+                          width: 1,
                         ),
                       ),
-                    ),
-                  );
-              },
-            ),
-          );
+                      child: InkWell(
+                        onTap: () => _showCampaignDetailsSheet(campaignDoc),
+                        onLongPress: () =>
+                            _showCampaignOptionsMenu(campaignDoc),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Header: Title + Status
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      campaign['voucherName'] ?? 'No Name',
+                                      style: GoogleFonts.poppins(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 16),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: isCurrentlyRunning
+                                          ? Colors.green.shade100
+                                          : Colors.grey.shade200,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      isCurrentlyRunning ? 'Aktif' : 'Nonaktif',
+                                      style: TextStyle(
+                                        color: isCurrentlyRunning
+                                            ? Colors.green.shade800
+                                            : Colors.grey.shade700,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+
+                              // Key Info Row: Reward + Target
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.card_giftcard,
+                                            size: 18,
+                                            color: Colors.orange.shade700),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Rp ${NumberFormat.decimalPattern().format(campaign['value'] ?? 0)}',
+                                          style: GoogleFonts.poppins(
+                                            color: Colors.orange.shade800,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFE8F5E9),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '${campaign['threshold'] ?? 0} pts',
+                                      style: GoogleFonts.poppins(
+                                        color: const Color(0xFF1B5E20),
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+
+                              // Date Range (condensed)
+                              Row(
+                                children: [
+                                  Icon(Icons.schedule,
+                                      size: 14, color: Colors.grey.shade600),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${DateFormat('dd MMM').format(startDate)} - ${DateFormat('dd MMM yyyy').format(endDate)}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+
+                              // Min Transaction
+                              Row(
+                                children: [
+                                  Icon(Icons.receipt_long,
+                                      size: 14, color: Colors.grey.shade600),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Min. transaksi Rp ${NumberFormat.decimalPattern().format(campaign['transactionRequirement'] ?? 0)}',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              const Divider(height: 20),
+
+                              // Stats Row
+                              Row(
+                                children: [
+                                  _buildCampaignStat(
+                                      Icons.people,
+                                      '${campaign['totalParticipants'] ?? 0}',
+                                      'Peserta'),
+                                  const SizedBox(width: 24),
+                                  _buildCampaignStat(
+                                      Icons.check_circle,
+                                      '${campaign['totalClaimed'] ?? 0}',
+                                      'Diklaim'),
+                                  const Spacer(),
+                                  Icon(Icons.chevron_right,
+                                      color: Colors.grey.shade400),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
   }
 
   Widget _buildCampaignStat(IconData icon, String value, String label) {
@@ -1060,7 +1141,7 @@ class _MarketingScreenState extends State<MarketingScreen>
 
   void _showCampaignOptionsMenu(QueryDocumentSnapshot campaignDoc) {
     final campaign = campaignDoc.data() as Map<String, dynamic>;
-    
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -1100,11 +1181,16 @@ class _MarketingScreenState extends State<MarketingScreen>
             ),
             ListTile(
               leading: Icon(
-                campaign['isActive'] == true ? Icons.pause_circle : Icons.play_circle,
-                color: campaign['isActive'] == true ? Colors.orange : Colors.green,
+                campaign['isActive'] == true
+                    ? Icons.pause_circle
+                    : Icons.play_circle,
+                color:
+                    campaign['isActive'] == true ? Colors.orange : Colors.green,
               ),
               title: Text(
-                campaign['isActive'] == true ? 'Nonaktifkan Campaign' : 'Aktifkan Campaign',
+                campaign['isActive'] == true
+                    ? 'Nonaktifkan Campaign'
+                    : 'Aktifkan Campaign',
                 style: GoogleFonts.poppins(),
               ),
               onTap: () async {
@@ -1114,7 +1200,8 @@ class _MarketingScreenState extends State<MarketingScreen>
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: Text('Hapus Campaign', style: GoogleFonts.poppins(color: Colors.red)),
+              title: Text('Hapus Campaign',
+                  style: GoogleFonts.poppins(color: Colors.red)),
               onTap: () {
                 Navigator.pop(context);
                 _confirmDeleteCampaign(campaignDoc);
@@ -1130,11 +1217,11 @@ class _MarketingScreenState extends State<MarketingScreen>
   Future<void> _toggleCampaignStatus(QueryDocumentSnapshot campaignDoc) async {
     final campaign = campaignDoc.data() as Map<String, dynamic>;
     final currentStatus = campaign['isActive'] ?? false;
-    
+
     try {
       await campaignDoc.reference.update({'isActive': !currentStatus});
       await _loadCampaigns();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1148,7 +1235,10 @@ class _MarketingScreenState extends State<MarketingScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal mengubah status: $e')),
+          SnackBar(
+            content: Text(
+                'Gagal mengubah status: ${UserMessageService.fromError(e)}'),
+          ),
         );
       }
     }
@@ -1156,11 +1246,12 @@ class _MarketingScreenState extends State<MarketingScreen>
 
   void _confirmDeleteCampaign(QueryDocumentSnapshot campaignDoc) {
     final campaign = campaignDoc.data() as Map<String, dynamic>;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Hapus Campaign?', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        title: Text('Hapus Campaign?',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         content: Text(
           'Campaign "${campaign['voucherName']}" akan dihapus permanen. Voucher peserta yang sudah ada akan tetap tersimpan.',
           style: GoogleFonts.poppins(),
@@ -1168,7 +1259,8 @@ class _MarketingScreenState extends State<MarketingScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
+            child:
+                Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -1176,7 +1268,7 @@ class _MarketingScreenState extends State<MarketingScreen>
               try {
                 await campaignDoc.reference.delete();
                 await _loadCampaigns();
-                
+
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -1188,7 +1280,10 @@ class _MarketingScreenState extends State<MarketingScreen>
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Gagal menghapus campaign: $e')),
+                    SnackBar(
+                      content: Text(
+                          'Gagal menghapus kampanye: ${UserMessageService.fromError(e)}'),
+                    ),
                   );
                 }
               }
@@ -1274,7 +1369,8 @@ class _MarketingScreenState extends State<MarketingScreen>
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.people_outline, size: 64, color: Colors.grey.shade300),
+                            Icon(Icons.people_outline,
+                                size: 64, color: Colors.grey.shade300),
                             const SizedBox(height: 16),
                             Text(
                               'Belum ada peserta di campaign ini',
@@ -1296,13 +1392,14 @@ class _MarketingScreenState extends State<MarketingScreen>
                         final points = data['userPoints'] ?? 0;
                         final threshold = data['threshold'] ?? 0;
                         final progress = (points / threshold).clamp(0.0, 1.0);
-                        
+
                         // Fallback: If 'nama' is missing in voucher, find it from our local members list
                         final userId = data['userId'];
                         String participantName = data['nama'] ?? '';
                         if (participantName.trim().isEmpty && userId != null) {
                           try {
-                            participantName = _members.firstWhere((m) => m.id == userId).name;
+                            participantName =
+                                _members.firstWhere((m) => m.id == userId).name;
                           } catch (_) {
                             participantName = 'Member Terhapus';
                           }
@@ -1350,6 +1447,7 @@ class _MarketingScreenState extends State<MarketingScreen>
       ),
     );
   }
+
   void _showMemberProgressSheet(Member member) async {
     showModalBottomSheet(
       context: context,
@@ -1414,7 +1512,8 @@ class _MarketingScreenState extends State<MarketingScreen>
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    List<QueryDocumentSnapshot> vouchers = snapshot.data?.docs ?? [];
+                    List<QueryDocumentSnapshot> vouchers =
+                        snapshot.data?.docs ?? [];
                     // Sort client-side to avoid requiring a Firestore composite index
                     vouchers.sort((a, b) {
                       final aData = a.data() as Map<String, dynamic>;
@@ -1455,8 +1554,9 @@ class _MarketingScreenState extends State<MarketingScreen>
                             final status = data['status'] ?? 'UNKNOWN';
                             final points = data['userPoints'] ?? 0;
                             final threshold = data['threshold'] ?? 0;
-                            final progress = (points / threshold).clamp(0.0, 1.0);
-                            
+                            final progress =
+                                (points / threshold).clamp(0.0, 1.0);
+
                             Color statusColor;
                             IconData statusIcon;
                             switch (status) {
@@ -1631,7 +1731,8 @@ class _MarketingScreenState extends State<MarketingScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text('Marketing & Member',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: const Color(0xFF1A1A1A))),
+            style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600, color: const Color(0xFF1A1A1A))),
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF1A1A1A),
         elevation: 0,
@@ -1666,8 +1767,10 @@ class _MarketingScreenState extends State<MarketingScreen>
                   ),
                 ),
               ),
-              labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
-              unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
+              labelStyle: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600, fontSize: 14),
+              unselectedLabelStyle: GoogleFonts.poppins(
+                  fontWeight: FontWeight.normal, fontSize: 14),
               tabs: const [
                 Tab(text: 'Daftar Member'),
                 Tab(text: 'Periodic Campaign'),
@@ -1690,8 +1793,7 @@ class _MarketingScreenState extends State<MarketingScreen>
         backgroundColor: const Color(0xFF2E7D32),
         icon: Icon(_tabController.index == 0 ? Icons.person_add : Icons.add,
             color: Colors.white),
-        label: Text(
-            _tabController.index == 0 ? 'Member Baru' : 'Buat Campaign',
+        label: Text(_tabController.index == 0 ? 'Member Baru' : 'Buat Campaign',
             style: const TextStyle(color: Colors.white)),
       ),
     );

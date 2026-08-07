@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class EndOfDayService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -48,58 +49,81 @@ class EndOfDayService {
 
           // Ensure data() is not null before checking field
           if (metadataDoc.exists && metadataDoc.data() != null) {
-            final lastResetDate = metadataDoc.data()!['last_reset_date'] as String?;
-            if (lastResetDate == today) {
+            final lastResetDate = metadataDoc.data()!['last_reset_date'];
+            if (_isResetDate(lastResetDate, today)) {
               print('✅ Perishables already reset for today ($today)');
               return; // Abort silently if already reset by another device
             }
           }
 
-          print('🔄 Triggering automated perishable reset for $today via Transaction');
+          print(
+              '🔄 Triggering automated perishable reset for $today via Transaction');
 
-          for (var doc in perishablesSnapshot.docs) {
-            final data = doc.data();
-            final int currentStock = (data['stock'] ?? 0) as int;
-            final itemName = data['name'] ?? '';
+          // Read every current inventory document before queuing any reset
+          // writes. A sale/restock racing this reset therefore causes a
+          // transaction retry instead of an absolute stale-stock overwrite.
+          final currentSnapshots =
+              <String, DocumentSnapshot<Map<String, dynamic>>>{};
+          for (final doc in perishablesSnapshot.docs) {
+            currentSnapshots[doc.id] = await transaction.get(doc.reference);
+          }
+
+          for (final doc in perishablesSnapshot.docs) {
+            final currentSnapshot = currentSnapshots[doc.id];
+            if (currentSnapshot == null || !currentSnapshot.exists) continue;
+            final data = currentSnapshot.data() ?? <String, dynamic>{};
+            final currentStock = InventoryService.toInt(data['stock']);
+            final itemName = data['name']?.toString() ?? '';
 
             if (currentStock > 0) {
-              final logId = '${today}_${doc.id}';
+              final logId = InventoryService.canonicalDailyLogId(today, doc.id);
               final logRef = _firestore
                   .collection(Col.name('Canteens'))
                   .doc(canteenId)
                   .collection('DailyStockLogs')
                   .doc(logId);
 
-              transaction.set(logRef, {
-                'date': today,
-                'inventoryItemId': doc.id,
-                'inventoryItemName': itemName,
-                'isPerishable': true,
-                'stockWasted': currentStock,
-                'endingStock': 0,
-                'lastUpdated': FieldValue.serverTimestamp(),
-                'autoReset': true,
-              }, SetOptions(merge: true));
+              transaction.set(
+                  logRef,
+                  {
+                    'date': today,
+                    'inventoryItemId': doc.id,
+                    'inventoryItemName': itemName,
+                    'isPerishable': true,
+                    'stockWasted': FieldValue.increment(currentStock),
+                    'endingStock': 0,
+                    'lastUpdated': FieldValue.serverTimestamp(),
+                    'autoReset': true,
+                  },
+                  SetOptions(merge: true));
 
-              transaction.update(doc.reference, {'stock': 0});
+              transaction.update(doc.reference, {
+                'stock': 0,
+                'lastUpdated': FieldValue.serverTimestamp(),
+              });
             }
           }
 
-          transaction.set(metadataRef, {
-            'last_reset_date': today,
-            'last_updated': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+          transaction.set(
+              metadataRef,
+              {
+                'last_reset_date': today,
+                'last_updated': FieldValue.serverTimestamp(),
+              },
+              SetOptions(merge: true));
         });
 
         print('✅ Auto-reset perishables completed safely for $today');
         return; // Success, exit the loop
       } catch (e) {
         final errorStr = e.toString();
-        if (errorStr.contains('unavailable') || errorStr.contains('network-error')) {
+        if (errorStr.contains('unavailable') ||
+            errorStr.contains('network-error')) {
           retryCount++;
           if (retryCount < maxRetries) {
             final delay = Duration(seconds: retryCount * 3);
-            print('⚠️ Firestore unavailable in checkAndAutoResetPerishables, retrying in ${delay.inSeconds}s (Attempt $retryCount/$maxRetries)...');
+            print(
+                '⚠️ Firestore unavailable in checkAndAutoResetPerishables, retrying in ${delay.inSeconds}s (Attempt $retryCount/$maxRetries)...');
             await Future.delayed(delay);
             continue;
           }
@@ -151,12 +175,25 @@ class EndOfDayService {
     }
   }
 
-
-
   /// Helper to get today's date as string
   static String _getTodayDateString() {
     final now = DateTime.now();
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  static bool _isResetDate(dynamic value, String today) {
+    if (value is Timestamp) {
+      final date = value.toDate();
+      final formatted =
+          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+      return formatted == today;
+    }
+    if (value is DateTime) {
+      final formatted =
+          '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+      return formatted == today;
+    }
+    return value?.toString() == today;
   }
 }
 
@@ -195,56 +232,82 @@ class _EndOfDayDialogState extends State<_EndOfDayDialog> {
     setState(() => _isProcessing = true);
 
     try {
-      final batch = FirebaseFirestore.instance.batch();
       final today = EndOfDayService._getTodayDateString();
-
-      for (var item in widget.perishables) {
-        final inputWaste = int.tryParse(_controllers[item.id]!.text) ?? 0;
-        final actualWaste = inputWaste < 0 ? 0 : inputWaste; // Prevent negative inputs
-
-        // Log the waste using unique ID
-        final logId = '${today}_${item.id}';
-        final logRef = FirebaseFirestore.instance
-            .collection(Col.name('Canteens'))
-            .doc(EndOfDayService.canteenId)
-            .collection('DailyStockLogs')
-            .doc(logId);
-
-        batch.set(logRef, {
-          'date': today,
-          'inventoryItemId': item.id,
-          'inventoryItemName': item.name,
-          'isPerishable': true,
-          'stockWasted': actualWaste,
-          'endingStock': 0,
-          'lastUpdated': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-
-        // Reset stock to 0
-        final itemRef = FirebaseFirestore.instance
-            .collection(Col.name('Canteens'))
-            .doc(EndOfDayService.canteenId)
-            .collection('Inventory')
-            .doc(item.id);
-
-        batch.update(itemRef, {'stock': 0});
-      }
-
-      await batch.commit();
-      
-      // Refresh inventory cache to trigger UI updates
-      await InventoryService().refreshInventoryCache();
-
-      // Update the last reset date metadata so auto-reset doesn't trigger today
-      await FirebaseFirestore.instance
+      final firestore = FirebaseFirestore.instance;
+      final inventoryCollection = firestore
+          .collection(Col.name('Canteens'))
+          .doc(EndOfDayService.canteenId)
+          .collection('Inventory');
+      final logCollection = firestore
+          .collection(Col.name('Canteens'))
+          .doc(EndOfDayService.canteenId)
+          .collection('DailyStockLogs');
+      final metadataRef = firestore
           .collection(Col.name('Canteens'))
           .doc(EndOfDayService.canteenId)
           .collection('Metadata')
-          .doc('InventoryLogs')
-          .set({
-        'last_reset_date': today,
-        'last_updated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+          .doc('InventoryLogs');
+
+      await firestore.runTransaction((transaction) async {
+        final metadataSnapshot = await transaction.get(metadataRef);
+        final lastResetDate = metadataSnapshot.data()?['last_reset_date'];
+        if (EndOfDayService._isResetDate(lastResetDate, today)) {
+          // Manual and automatic resets share the same day marker. A second
+          // confirmation must not add the same waste to the daily log again.
+          return;
+        }
+        final currentSnapshots =
+            <String, DocumentSnapshot<Map<String, dynamic>>>{};
+        for (final item in widget.perishables) {
+          currentSnapshots[item.id] =
+              await transaction.get(inventoryCollection.doc(item.id));
+        }
+
+        // All reads are above. The reset writes below therefore retry against
+        // the latest stock if a sale or restock races this dialog.
+        for (final item in widget.perishables) {
+          final itemSnapshot = currentSnapshots[item.id];
+          if (itemSnapshot == null || !itemSnapshot.exists) continue;
+          final data = itemSnapshot.data() ?? <String, dynamic>{};
+          final currentStock = InventoryService.toInt(data['stock']);
+          if (currentStock != item.stock) {
+            throw Exception(
+                'Stok ${item.name} berubah dari ${item.stock} menjadi $currentStock. Muat ulang sebelum reset.');
+          }
+          final inputWaste = int.tryParse(_controllers[item.id]!.text) ?? 0;
+          final actualWaste = inputWaste < 0 ? 0 : inputWaste;
+          final itemRef = inventoryCollection.doc(item.id);
+          transaction.set(
+            logCollection
+                .doc(InventoryService.canonicalDailyLogId(today, item.id)),
+            {
+              'date': today,
+              'inventoryItemId': item.id,
+              'inventoryItemName': data['name']?.toString() ?? item.name,
+              'isPerishable': true,
+              'stockWasted': FieldValue.increment(actualWaste),
+              'endingStock': 0,
+              'stockBeforeReset': currentStock,
+              'lastUpdated': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          );
+          transaction.update(itemRef, {
+            'stock': 0,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          });
+        }
+        transaction.set(
+            metadataRef,
+            {
+              'last_reset_date': today,
+              'last_updated': FieldValue.serverTimestamp(),
+              'resetType': 'manual',
+            },
+            SetOptions(merge: true));
+      });
+
+      await InventoryService().refreshInventoryCache();
 
       if (mounted) {
         Navigator.pop(context);
@@ -255,7 +318,7 @@ class _EndOfDayDialogState extends State<_EndOfDayDialog> {
                 const Icon(Icons.check_circle, color: Colors.white),
                 const SizedBox(width: 12),
                 Text(
-                  'End of day completed successfully',
+                  'Penutupan hari berhasil diselesaikan',
                   style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
                 ),
               ],
@@ -269,7 +332,9 @@ class _EndOfDayDialogState extends State<_EndOfDayDialog> {
         setState(() => _isProcessing = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: Text(
+              'Gagal menyelesaikan penutupan hari: ${UserMessageService.fromError(e)}',
+            ),
             backgroundColor: Colors.red,
           ),
         );

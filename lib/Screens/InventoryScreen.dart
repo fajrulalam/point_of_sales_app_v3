@@ -7,8 +7,10 @@ import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
+import 'package:point_of_sales_app_v3/Services/InventoryAuditService.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({Key? key}) : super(key: key);
@@ -22,6 +24,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
   Timer? _debounce;
+  bool _auditRunning = false;
 
   /// inventoryItemId → list of display labels ("Menu: X", "Opsi: Y (Group)")
   Map<String, List<String>> _linkedItemsMap = {};
@@ -95,9 +98,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
           .where((item) => item.name.toLowerCase().contains(_searchQuery))
           .toList();
     }
-    
+
     // Sort items alphabetically by name
-    filtered.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    filtered
+        .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return filtered;
   }
 
@@ -114,7 +118,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
               onChanged: _onSearchChanged,
               decoration: InputDecoration(
                 hintText: 'Cari...',
-                hintStyle: GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 14),
+                hintStyle: GoogleFonts.poppins(
+                    color: Colors.grey.shade400, fontSize: 14),
                 prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
@@ -153,14 +158,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
               icon: const Icon(Icons.add_circle_outline_rounded),
               label: Text(
                 'Tambah',
-                style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15),
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600, fontSize: 15),
                 overflow: TextOverflow.ellipsis,
               ),
               style: FilledButton.styleFrom(
                 backgroundColor: _addGreen,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ),
@@ -178,12 +186,24 @@ class _InventoryScreenState extends State<InventoryScreen> {
           'Manajemen Stok Bahan',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFF1A1A1A)),
+          style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold, color: const Color(0xFF1A1A1A)),
         ),
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF1A1A1A),
         elevation: 0,
         actions: [
+          IconButton(
+            icon: _auditRunning
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.fact_check_outlined),
+            onPressed: _auditRunning ? null : _runInventoryAudit,
+            tooltip: 'Audit integritas inventory',
+          ),
           IconButton(
             icon: const Icon(Icons.nightlight_round),
             onPressed: () => EndOfDayService.showEndOfDayDialog(context),
@@ -213,7 +233,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       physics: const AlwaysScrollableScrollPhysics(),
                       child: SizedBox(
                         height: MediaQuery.of(context).size.height * 0.7,
-                        child: Center(child: Text('Error: ${snapshot.error}')),
+                        child: Center(
+                          child: Text(
+                            'Gagal memuat stok: ${UserMessageService.fromError(snapshot.error)}',
+                          ),
+                        ),
                       ),
                     );
                   }
@@ -233,7 +257,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey.shade400),
+                              Icon(Icons.inventory_2_outlined,
+                                  size: 80, color: Colors.grey.shade400),
                               const SizedBox(height: 16),
                               Text(
                                 'Belum ada bahan',
@@ -270,7 +295,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.search_off, size: 60, color: Colors.grey.shade400),
+                              Icon(Icons.search_off,
+                                  size: 60, color: Colors.grey.shade400),
                               const SizedBox(height: 12),
                               Text(
                                 'Tidak ditemukan "$_searchQuery"',
@@ -302,6 +328,134 @@ class _InventoryScreenState extends State<InventoryScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _runInventoryAudit() async {
+    setState(() => _auditRunning = true);
+    try {
+      final report = await InventoryAuditService().runAudit();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(Icons.fact_check_outlined, color: _addGreen),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Audit Stok',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 680,
+              height: 520,
+              child: report.findings.isEmpty
+                  ? Center(
+                      child: Text(
+                        'Tidak ditemukan masalah integritas data.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(),
+                      ),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '${report.findings.length} temuan • ${report.errors} masalah • ${report.warnings} peringatan',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: ListView.separated(
+                            itemCount: report.findings.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
+                            itemBuilder: (_, index) {
+                              final finding = report.findings[index];
+                              final color = switch (finding.severity) {
+                                InventoryAuditSeverity.error => Colors.red,
+                                InventoryAuditSeverity.warning => Colors.orange,
+                                InventoryAuditSeverity.info => Colors.blue,
+                              };
+                              final icon = switch (finding.severity) {
+                                InventoryAuditSeverity.error =>
+                                  Icons.error_outline,
+                                InventoryAuditSeverity.warning =>
+                                  Icons.warning_amber_outlined,
+                                InventoryAuditSeverity.info =>
+                                  Icons.info_outline,
+                              };
+                              return ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(icon, color: color),
+                                title: Text(
+                                  finding.message,
+                                  style: GoogleFonts.poppins(fontSize: 12),
+                                ),
+                                subtitle: Text(
+                                  _auditFindingSource(finding),
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 10,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Tutup'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Audit gagal dijalankan: ${UserMessageService.fromError(e)}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _auditRunning = false);
+    }
+  }
+
+  String _auditFindingSource(InventoryAuditFinding finding) {
+    const labels = {
+      'inventory': 'stok',
+      'menu': 'menu',
+      'option_group': 'grup opsi',
+      'supplier': 'supplier',
+      'shopping_order': 'pesanan belanja',
+      'sale': 'penjualan',
+      'operation': 'operasi',
+      'open_bill_lock': 'tagihan terbuka',
+      'daily_stock_log': 'log stok harian',
+    };
+    final source = labels[finding.sourceType] ?? 'data';
+    final id = finding.sourceId;
+    return id == null || id.isEmpty
+        ? 'Pemeriksaan integritas data'
+        : 'Sumber: $source ($id)';
   }
 
   Widget _buildStockCard(InventoryItem item) {
@@ -365,8 +519,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             decoration: BoxDecoration(
                               color: Colors.orange.shade100,
                               borderRadius: BorderRadius.circular(4),
-                              border:
-                                  Border.all(color: Colors.orange.shade300),
+                              border: Border.all(color: Colors.orange.shade300),
                             ),
                             child: Text(
                               'PERISHABLE',
@@ -448,8 +601,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           style: GoogleFonts.poppins(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
-                            color:
-                                item.stock <= 0 ? Colors.red : Colors.black,
+                            color: item.stock <= 0 ? Colors.red : Colors.black,
                           ),
                         ),
                         Text(
@@ -475,108 +627,161 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final controller = TextEditingController(text: item.stock.toString());
     int currentStock = item.stock;
     int newStock = item.stock;
+    bool isSaving = false;
 
     await showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Tetapkan Stok', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 20)),
-              Text(item.name, style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey.shade600)),
+              Text('Tetapkan Stok',
+                  style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold, fontSize: 20)),
+              Text(item.name,
+                  style: GoogleFonts.poppins(
+                      fontSize: 14, color: Colors.grey.shade600)),
             ],
           ),
           content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          'Stok saat ini',
-                          style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 16),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '$currentStock ${item.unit}',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 20,
-                          color: Colors.indigo.shade900,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Stok baru', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14)),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: controller,
-                    keyboardType: const TextInputType.numberWithOptions(signed: true),
-                    autofocus: true,
-                    style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
-                    onChanged: (value) {
-                      setDialogState(() {
-                        newStock = int.tryParse(value) ?? 0;
-                      });
-                    },
-                    decoration: InputDecoration(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.orange.shade300, width: 2)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.orange.shade300, width: 2)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.orange, width: 2)),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  if (newStock != currentStock)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        color: newStock > currentStock ? Colors.green.shade50 : Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
                       child: Text(
-                        '${newStock > currentStock ? "+" : ""}${newStock - currentStock} ${item.unit}',
-                        textAlign: TextAlign.center,
+                        'Stok saat ini',
                         style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: newStock > currentStock ? Colors.green.shade700 : Colors.red.shade700,
-                        ),
+                            color: Colors.grey.shade600, fontSize: 16),
                       ),
                     ),
-                ],
-              ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$currentStock ${item.unit}',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                        color: Colors.indigo.shade900,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Stok baru',
+                      style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w600, fontSize: 14)),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: controller,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(signed: true),
+                  autofocus: true,
+                  style: GoogleFonts.poppins(
+                      fontSize: 28, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      newStock = int.tryParse(value) ?? 0;
+                    });
+                  },
+                  decoration: InputDecoration(
+                    contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                            color: Colors.orange.shade300, width: 2)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                            color: Colors.orange.shade300, width: 2)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide:
+                            const BorderSide(color: Colors.orange, width: 2)),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                if (newStock != currentStock)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: newStock > currentStock
+                          ? Colors.green.shade50
+                          : Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${newStock > currentStock ? "+" : ""}${newStock - currentStock} ${item.unit}',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: newStock > currentStock
+                            ? Colors.green.shade700
+                            : Colors.red.shade700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
           actionsAlignment: MainAxisAlignment.center,
           actions: [
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
               child: ElevatedButton(
-                onPressed: () async {
-                  await _inventoryService.updateInventoryStock(item.id, newStock);
-                  if (context.mounted) Navigator.pop(context);
-                },
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        setDialogState(() => isSaving = true);
+                        try {
+                          await _inventoryService.updateInventoryStock(
+                            item.id,
+                            newStock,
+                            expectedStock: currentStock,
+                          );
+                          if (context.mounted) Navigator.pop(context);
+                        } catch (e) {
+                          if (context.mounted) {
+                            setDialogState(() => isSaving = false);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                  content: Text(
+                                      'Gagal memperbarui stok: ${UserMessageService.fromError(e)}')),
+                            );
+                          }
+                        }
+                      },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF2E7D32),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
-                child: Text('Perbarui Stok', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                child: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text('Perbarui Stok',
+                        style:
+                            GoogleFonts.poppins(fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -596,7 +801,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Tambah Bahan Baru', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          title: Text('Tambah Bahan Baru',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -630,7 +836,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 const SizedBox(height: 12),
                 CheckboxListTile(
                   title: Text('Mudah Rusak', style: GoogleFonts.poppins()),
-                  subtitle: Text('Stok akan reset ke 0 setiap hari', style: GoogleFonts.poppins(fontSize: 12)),
+                  subtitle: Text('Stok akan reset ke 0 setiap hari',
+                      style: GoogleFonts.poppins(fontSize: 12)),
                   value: isPerishable,
                   onChanged: (value) {
                     setDialogState(() {
@@ -654,7 +861,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   : () async {
                       if (nameController.text.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Nama bahan tidak boleh kosong')),
+                          const SnackBar(
+                              content: Text('Nama bahan tidak boleh kosong')),
                         );
                         return;
                       }
@@ -671,7 +879,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       } catch (e) {
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error: $e')),
+                            SnackBar(
+                              content: Text(
+                                  'Gagal menambahkan bahan: ${UserMessageService.fromError(e)}'),
+                            ),
                           );
                           setDialogState(() => isSaving = false);
                         }
@@ -682,7 +893,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 foregroundColor: Colors.white,
               ),
               child: isSaving
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
                   : const Text('Tambah'),
             ),
           ],
@@ -733,8 +948,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
             final ing = opt.ingredients.where(
               (i) => i.inventoryItemId == item.id,
             );
-            optionLinks[key] =
-                ing.isNotEmpty ? ing.first.quantityNeeded : 0;
+            optionLinks[key] = ing.isNotEmpty ? ing.first.quantityNeeded : 0;
           }
         }
       } catch (_) {}
@@ -770,9 +984,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     TextField(
                       controller: stockController,
                       keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(
                         labelText: 'Stok',
                         border: OutlineInputBorder(),
@@ -788,10 +1000,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     ),
                     const SizedBox(height: 8),
                     CheckboxListTile(
-                      title: Text('Mudah Rusak',
-                          style: GoogleFonts.poppins()),
-                      subtitle: Text(
-                          'Stok akan reset ke 0 setiap hari',
+                      title: Text('Mudah Rusak', style: GoogleFonts.poppins()),
+                      subtitle: Text('Stok akan reset ke 0 setiap hari',
                           style: GoogleFonts.poppins(fontSize: 12)),
                       value: isPerishable,
                       onChanged: (value) {
@@ -809,15 +1019,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     const SizedBox(height: 8),
                     Text('Hubungkan ke Menu',
                         style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600)),
+                            fontSize: 14, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 6),
                     if (isLoadingLinks)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 12),
                         child: Center(
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2)),
+                            child: CircularProgressIndicator(strokeWidth: 2)),
                       )
                     else ...[
                       ...allMenus.map((menu) {
@@ -839,13 +1047,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           },
                         );
                       }),
-                      if (allOptionGroups
-                          .any((g) => g.options.isNotEmpty)) ...[
+                      if (allOptionGroups.any((g) => g.options.isNotEmpty)) ...[
                         const SizedBox(height: 12),
                         Text('Hubungkan ke Opsi',
                             style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600)),
+                                fontSize: 14, fontWeight: FontWeight.w600)),
                         const SizedBox(height: 6),
                         ...allOptionGroups.expand((group) {
                           return group.options.map((opt) {
@@ -885,14 +1091,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             Navigator.pop(context);
                             _showDeleteConfirmation(item);
                           },
-                    style: TextButton.styleFrom(
-                        foregroundColor: Colors.red),
+                    style: TextButton.styleFrom(foregroundColor: Colors.red),
                     child: const Text('Hapus'),
                   ),
                   const Spacer(),
                   TextButton(
-                    onPressed:
-                        isSaving ? null : () => Navigator.pop(context),
+                    onPressed: isSaving ? null : () => Navigator.pop(context),
                     child: const Text('Batal'),
                   ),
                   const SizedBox(width: 8),
@@ -903,29 +1107,25 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             if (nameController.text.isEmpty) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                    content: Text(
-                                        'Nama bahan tidak boleh kosong')),
+                                    content:
+                                        Text('Nama bahan tidak boleh kosong')),
                               );
                               return;
                             }
 
                             setDialogState(() => isSaving = true);
                             try {
+                              final newStock =
+                                  int.tryParse(stockController.text) ??
+                                      item.stock;
                               await _inventoryService.updateInventoryItem(
                                 item.id,
                                 nameController.text,
                                 unitController.text,
                                 isPerishable,
+                                newStock: newStock,
+                                expectedStock: item.stock,
                               );
-
-                              final newStock =
-                                  int.tryParse(stockController.text) ??
-                                      item.stock;
-                              if (newStock != item.stock) {
-                                await _inventoryService
-                                    .updateInventoryStock(
-                                        item.id, newStock);
-                              }
 
                               // Persist link changes
                               await _saveLinks(
@@ -944,13 +1144,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                               }
                             } catch (e) {
                               if (context.mounted) {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(
+                                ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                      content: Text('Error: $e')),
+                                    content: Text(
+                                        'Gagal memperbarui bahan: ${UserMessageService.fromError(e)}'),
+                                  ),
                                 );
-                                setDialogState(
-                                    () => isSaving = false);
+                                setDialogState(() => isSaving = false);
                               }
                             }
                           },
@@ -963,8 +1163,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white))
+                                strokeWidth: 2, color: Colors.white))
                         : const Text('Simpan'),
                   ),
                 ],
@@ -1016,8 +1215,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(fontSize: 13),
                 decoration: InputDecoration(
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 4),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(6)),
                   isDense: true,
@@ -1050,15 +1249,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     for (final menu in allMenus) {
       final desiredQty = menuLinks[menu.id] ?? 0;
-      final existingIdx = menu.ingredients
-          .indexWhere((i) => i.inventoryItemId == item.id);
+      final existingIdx =
+          menu.ingredients.indexWhere((i) => i.inventoryItemId == item.id);
       final wasLinked = existingIdx != -1;
       final shouldBeLinked = desiredQty > 0;
 
       if (!wasLinked && !shouldBeLinked) continue;
 
-      final updatedIngredients =
-          List<MenuIngredient>.from(menu.ingredients);
+      final updatedIngredients = List<MenuIngredient>.from(menu.ingredients);
 
       if (shouldBeLinked && !wasLinked) {
         updatedIngredients.add(MenuIngredient(
@@ -1077,8 +1275,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       }
 
       batch.update(menuCol.doc(menu.id), {
-        'ingredients':
-            updatedIngredients.map((i) => i.toMap()).toList(),
+        'ingredients': updatedIngredients.map((i) => i.toMap()).toList(),
       });
     }
 
@@ -1090,16 +1287,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
       final updatedOptions = group.options.map((opt) {
         final key = '${group.id}::${opt.id}';
         final desiredQty = optionLinks[key] ?? 0;
-        final existingIdx = opt.ingredients
-            .indexWhere((i) => i.inventoryItemId == item.id);
+        final existingIdx =
+            opt.ingredients.indexWhere((i) => i.inventoryItemId == item.id);
         final wasLinked = existingIdx != -1;
         final shouldBeLinked = desiredQty > 0;
 
         if (!wasLinked && !shouldBeLinked) return opt;
 
         changed = true;
-        final updatedIngredients =
-            List<MenuIngredient>.from(opt.ingredients);
+        final updatedIngredients = List<MenuIngredient>.from(opt.ingredients);
 
         if (shouldBeLinked && !wasLinked) {
           updatedIngredients.add(MenuIngredient(
@@ -1149,7 +1345,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Hapus Bahan?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Hapus Bahan?',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
         content: Text('Apakah Anda yakin ingin menghapus ${item.name}?'),
         actions: [
           TextButton(
@@ -1168,7 +1365,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(e.toString().replaceAll('Exception: ', '')),
+                      content: Text(UserMessageService.fromError(
+                        e,
+                        fallback: 'Gagal menghapus bahan. Silakan coba lagi.',
+                      )),
                       backgroundColor: Colors.red,
                       duration: const Duration(seconds: 4),
                     ),

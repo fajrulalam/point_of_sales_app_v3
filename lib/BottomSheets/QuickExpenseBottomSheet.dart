@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class QuickExpenseBottomSheet extends StatefulWidget {
   const QuickExpenseBottomSheet({Key? key}) : super(key: key);
@@ -78,7 +79,8 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
       final snap = await FirebaseFirestore.instance
           .collection(Col.name('Expenses'))
           .where('addedFromDashboardWeb', isEqualTo: false)
-          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+          .where('timestamp',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
           .where('timestamp', isLessThan: Timestamp.fromDate(endOfDay))
           .orderBy('timestamp', descending: true)
           .get();
@@ -162,7 +164,9 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Gagal menyimpan: $e'),
+            content: Text(
+              'Gagal menyimpan pengeluaran: ${UserMessageService.fromError(e)}',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -175,18 +179,21 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: Text('Hapus Pengeluaran?', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        title: Text('Hapus Pengeluaran?',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         content: Text('Data yang sudah dihapus tidak bisa dikembalikan.',
             style: GoogleFonts.poppins(fontSize: 14)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
+            child:
+                Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: Text('Hapus', style: GoogleFonts.poppins(color: Colors.white)),
+            child:
+                Text('Hapus', style: GoogleFonts.poppins(color: Colors.white)),
           ),
         ],
       ),
@@ -228,7 +235,8 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: Row(
               children: [
-                Icon(Icons.receipt_long, color: Colors.orange.shade700, size: 28),
+                Icon(Icons.receipt_long,
+                    color: Colors.orange.shade700, size: 28),
                 const SizedBox(width: 12),
                 Text(
                   'Catat Pengeluaran',
@@ -240,7 +248,8 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
                 ),
                 const Spacer(),
                 IconButton(
-                  onPressed: () => Navigator.pop(context, _todayExpenses.isNotEmpty),
+                  onPressed: () =>
+                      Navigator.pop(context, _todayExpenses.isNotEmpty),
                   icon: const Icon(Icons.close),
                 ),
               ],
@@ -297,8 +306,10 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
             decoration: InputDecoration(
               labelText: 'Kategori (mis. Kerupuk, Es Batu)',
               labelStyle: GoogleFonts.poppins(fontSize: 13),
-              prefixIcon: Icon(Icons.category_outlined, color: Colors.orange.shade600),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              prefixIcon:
+                  Icon(Icons.category_outlined, color: Colors.orange.shade600),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide(color: Colors.orange.shade600, width: 2),
@@ -320,11 +331,14 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
                   decoration: InputDecoration(
                     labelText: 'Jumlah (Rp)',
                     labelStyle: GoogleFonts.poppins(fontSize: 13),
-                    prefixIcon: Icon(Icons.payments_outlined, color: Colors.orange.shade600),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    prefixIcon: Icon(Icons.payments_outlined,
+                        color: Colors.orange.shade600),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: Colors.orange.shade600, width: 2),
+                      borderSide:
+                          BorderSide(color: Colors.orange.shade600, width: 2),
                     ),
                     filled: true,
                     fillColor: Colors.white,
@@ -340,17 +354,19 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
                   decoration: InputDecoration(
                     labelText: 'Sumber Dana',
                     labelStyle: GoogleFonts.poppins(fontSize: 13),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
                     isDense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 14),
                     filled: true,
                     fillColor: Colors.white,
                   ),
                   items: ['Cash', 'QRIS', 'Online']
                       .map((acc) => DropdownMenuItem(
                             value: acc,
-                            child: Text(acc, style: GoogleFonts.poppins(fontSize: 13)),
+                            child: Text(acc,
+                                style: GoogleFonts.poppins(fontSize: 13)),
                           ))
                       .toList(),
                   onChanged: (val) {
@@ -370,17 +386,20 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
                     )
                   : const Icon(Icons.add_circle_outline),
               label: Text(
                 _isSaving ? 'Menyimpan...' : 'Simpan Pengeluaran',
-                style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
+                style: GoogleFonts.poppins(
+                    fontSize: 14, fontWeight: FontWeight.w600),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.orange.shade700,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ),
@@ -409,7 +428,8 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
             const Spacer(),
             if (!_isLoadingExpenses && _todayExpenses.isNotEmpty)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.orange.shade100,
                   borderRadius: BorderRadius.circular(8),
@@ -444,7 +464,8 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
             ),
             child: Column(
               children: [
-                Icon(Icons.receipt_long_outlined, size: 40, color: Colors.grey.shade400),
+                Icon(Icons.receipt_long_outlined,
+                    size: 40, color: Colors.grey.shade400),
                 const SizedBox(height: 8),
                 Text(
                   'Belum ada pengeluaran hari ini',
@@ -460,7 +481,8 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
           ...List.generate(_todayExpenses.length, (i) {
             final expense = _todayExpenses[i];
             final sourceIcon = _sourceIcon(expense['sourceAccount'] ?? 'Cash');
-            final sourceColor = _sourceColor(expense['sourceAccount'] ?? 'Cash');
+            final sourceColor =
+                _sourceColor(expense['sourceAccount'] ?? 'Cash');
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(12),
@@ -513,9 +535,11 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
                   const SizedBox(width: 4),
                   IconButton(
                     onPressed: () => _deleteExpense(expense['docId']),
-                    icon: Icon(Icons.delete_outline, size: 20, color: Colors.red.shade300),
+                    icon: Icon(Icons.delete_outline,
+                        size: 20, color: Colors.red.shade300),
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    constraints:
+                        const BoxConstraints(minWidth: 32, minHeight: 32),
                   ),
                 ],
               ),

@@ -17,12 +17,14 @@ class InventoryItem {
 
   factory InventoryItem.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final rawStock = data['stock'];
     return InventoryItem(
       id: doc.id,
-      name: data['name'] ?? '',
-      stock: data['stock'] ?? 0,
-      unit: data['unit'] ?? 'pcs',
-      isPerishable: data['isPerishable'] ?? false,
+      name: data['name']?.toString() ?? '',
+      stock:
+          rawStock is num ? rawStock.toInt() : int.tryParse('$rawStock') ?? 0,
+      unit: data['unit']?.toString() ?? 'pcs',
+      isPerishable: data['isPerishable'] == true,
     );
   }
 
@@ -48,10 +50,13 @@ class MenuIngredient {
   });
 
   factory MenuIngredient.fromMap(Map<String, dynamic> map) {
+    final rawQuantity = map['quantityNeeded'];
     return MenuIngredient(
-      inventoryItemId: map['inventoryItemId'] ?? '',
-      inventoryItemName: map['inventoryItemName'] ?? '',
-      quantityNeeded: map['quantityNeeded'] ?? 1,
+      inventoryItemId: map['inventoryItemId']?.toString() ?? '',
+      inventoryItemName: map['inventoryItemName']?.toString() ?? '',
+      quantityNeeded: rawQuantity is num
+          ? rawQuantity.toInt()
+          : int.tryParse('$rawQuantity') ?? 0,
     );
   }
 
@@ -71,13 +76,13 @@ class DailyStockLog {
   String inventoryItemId;
   String inventoryItemName;
   bool isPerishable;
-  
+
   int startingStock; // Stock at beginning of day
   int stockAdded; // Total added during the day
   int stockUsed; // Total used in orders
   int stockWasted; // Perishables left at end of day
   int endingStock; // Stock at end of day
-  
+
   Timestamp? lastUpdated;
 
   DailyStockLog({

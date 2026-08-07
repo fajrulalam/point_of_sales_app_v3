@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:point_of_sales_app_v3/Models/RecommendationModels.dart';
 import 'package:point_of_sales_app_v3/Services/DatabaseHelper.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class RulesTableDialog extends StatefulWidget {
   const RulesTableDialog({Key? key}) : super(key: key);
@@ -45,7 +46,10 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
       });
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = UserMessageService.fromError(
+          e,
+          fallback: 'Gagal memuat aturan rekomendasi.',
+        );
         _isLoading = false;
       });
     }
@@ -77,7 +81,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Association Rules',
+                  'Aturan Rekomendasi',
                   style: GoogleFonts.poppins(
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
@@ -106,7 +110,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                     Icon(Icons.rule, size: 18, color: const Color(0xFF2E7D32)),
                     const SizedBox(width: 8),
                     Text(
-                      'Total rules: ${_rules.length}',
+                      'Total aturan: ${_rules.length}',
                       style: GoogleFonts.poppins(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
@@ -116,7 +120,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                     if (_searchQuery.isNotEmpty) ...[
                       const SizedBox(width: 12),
                       Text(
-                        '(Showing ${_filteredRules.length})',
+                        '(Menampilkan ${_filteredRules.length})',
                         style: GoogleFonts.poppins(
                           fontSize: 14,
                           color: const Color(0xFF1B5E20),
@@ -136,7 +140,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                 });
               },
               decoration: InputDecoration(
-                hintText: 'Search rules by item name...',
+                hintText: 'Cari aturan berdasarkan nama barang...',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
@@ -177,7 +181,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
           children: [
             CircularProgressIndicator(),
             SizedBox(height: 16),
-            Text('Loading rules...'),
+            Text('Memuat aturan...'),
           ],
         ),
       );
@@ -191,7 +195,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
             Icon(Icons.error_outline, size: 48, color: Colors.red.shade400),
             const SizedBox(height: 16),
             Text(
-              'Error loading rules',
+              'Gagal memuat aturan',
               style: GoogleFonts.poppins(
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
@@ -217,7 +221,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                 _loadRules();
               },
               icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
+              label: const Text('Coba Lagi'),
             ),
           ],
         ),
@@ -232,7 +236,9 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
             Icon(Icons.inbox_outlined, size: 48, color: Colors.grey.shade400),
             const SizedBox(height: 16),
             Text(
-              _searchQuery.isEmpty ? 'No rules found' : 'No matching rules',
+              _searchQuery.isEmpty
+                  ? 'Belum ada aturan'
+                  : 'Tidak ada aturan yang cocok',
               style: GoogleFonts.poppins(
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
@@ -247,7 +253,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                     _searchQuery = '';
                   });
                 },
-                child: const Text('Clear search'),
+                child: const Text('Hapus pencarian'),
               ),
           ],
         ),
@@ -290,7 +296,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                 Expanded(
                   flex: 3,
                   child: Text(
-                    'If customer orders (Antecedents)',
+                    'Jika pelanggan memesan',
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w600,
                       color: Colors.grey.shade700,
@@ -301,7 +307,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                 Expanded(
                   flex: 3,
                   child: Text(
-                    'Recommend (Consequents)',
+                    'Rekomendasi',
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w600,
                       color: Colors.grey.shade700,
@@ -312,7 +318,7 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
                 SizedBox(
                   width: 100,
                   child: Text(
-                    'Confidence',
+                    'Tingkat keyakinan',
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w600,
                       color: Colors.grey.shade700,
@@ -417,11 +423,11 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
       ),
       child: Text(
         item,
-          style: GoogleFonts.poppins(
-            fontSize: 12,
-            color: color.withOpacity(0.8),
-            fontWeight: FontWeight.w500,
-          ),
+        style: GoogleFonts.poppins(
+          fontSize: 12,
+          color: color.withOpacity(0.8),
+          fontWeight: FontWeight.w500,
+        ),
       ),
     );
   }
@@ -433,4 +439,3 @@ class _RulesTableDialogState extends State<RulesTableDialog> {
     return Colors.grey.shade500;
   }
 }
-

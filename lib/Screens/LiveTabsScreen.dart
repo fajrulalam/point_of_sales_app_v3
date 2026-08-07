@@ -8,6 +8,7 @@ import 'package:point_of_sales_app_v3/Services/OpenBillService.dart';
 import 'package:point_of_sales_app_v3/Controllers/HomeController.dart';
 import 'package:point_of_sales_app_v3/Services/OrderConfirmationService.dart';
 import 'package:point_of_sales_app_v3/Screens/VoucherProgramScreen.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class LiveTabsScreen extends StatefulWidget {
   final Function(SelfOrder order)? onAcceptOrder;
@@ -49,7 +50,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
       appBar: AppBar(
         title: Text(
           'Tagihan Berjalan',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFF1A1A1A)),
+          style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold, color: const Color(0xFF1A1A1A)),
         ),
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF1A1A1A),
@@ -75,8 +77,10 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                   ),
                 ),
               ),
-              labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
-              unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
+              labelStyle: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600, fontSize: 14),
+              unselectedLabelStyle: GoogleFonts.poppins(
+                  fontWeight: FontWeight.normal, fontSize: 14),
               tabs: const [
                 Tab(text: 'Voucher B2B'),
                 Tab(text: 'Pesanan Mandiri (Menunggu)'),
@@ -106,7 +110,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
       },
       child: StreamBuilder<List<SelfOrder>>(
         key: ValueKey('orders_$_refreshKey'),
-        stream: _selfOrderService.getSelfOrdersStream(statusFilter: statusFilter),
+        stream:
+            _selfOrderService.getSelfOrdersStream(statusFilter: statusFilter),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -121,7 +126,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                      const Icon(Icons.error_outline,
+                          size: 48, color: Colors.red),
                       const SizedBox(height: 16),
                       Text(
                         'Terjadi kesalahan',
@@ -130,8 +136,9 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '${snapshot.error}',
-                        style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey),
+                        UserMessageService.fromError(snapshot.error),
+                        style: GoogleFonts.poppins(
+                            fontSize: 12, color: Colors.grey),
                         textAlign: TextAlign.center,
                       ),
                     ],
@@ -216,7 +223,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                      const Icon(Icons.error_outline,
+                          size: 48, color: Colors.red),
                       const SizedBox(height: 16),
                       Text(
                         'Terjadi kesalahan',
@@ -225,8 +233,9 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '${snapshot.error}',
-                        style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey),
+                        UserMessageService.fromError(snapshot.error),
+                        style: GoogleFonts.poppins(
+                            fontSize: 12, color: Colors.grey),
                         textAlign: TextAlign.center,
                       ),
                     ],
@@ -295,8 +304,9 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
     for (var order in bill.orders) {
       for (var item in order.items) {
         if (item.takeAwayQuantity > 0) {
-          takeAwayQuantities[item.namaPesanan] = 
-              (takeAwayQuantities[item.namaPesanan] ?? 0) + item.takeAwayQuantity;
+          takeAwayQuantities[item.namaPesanan] =
+              (takeAwayQuantities[item.namaPesanan] ?? 0) +
+                  item.takeAwayQuantity;
         }
       }
     }
@@ -356,7 +366,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                         color: Colors.orange,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.person, color: Colors.white, size: 20),
+                      child: const Icon(Icons.person,
+                          color: Colors.white, size: 20),
                     ),
                     const SizedBox(width: 12),
                     Column(
@@ -381,7 +392,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: bill.isFlagged ? Colors.red : Colors.orange,
                     borderRadius: BorderRadius.circular(12),
@@ -417,68 +429,78 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                 if (orders.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text('Belum ada pesanan.', style: GoogleFonts.poppins(color: Colors.grey)),
+                    child: Text('Belum ada pesanan.',
+                        style: GoogleFonts.poppins(color: Colors.grey)),
                   )
                 else
-                  ...orders.expand((order) => order.items.map((item) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6, left: 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  item.namaPesanan,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
+                  ...orders
+                      .expand((order) => order.items.map((item) {
+                            return Padding(
+                              padding:
+                                  const EdgeInsets.only(bottom: 6, left: 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          item.namaPesanan,
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        'x${item.totalQuantity}',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        _currencyFormat.format(item.itemTotal),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
+                                  if (item.selectedOptions.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                          top: 1, bottom: 2),
+                                      child: Text(
+                                        item.selectedOptions
+                                            .map((o) => o.optionName)
+                                            .join(', '),
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 11,
+                                          color: const Color(0xFF2E7D32)
+                                              .withOpacity(0.8),
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  if (item.dineInQuantity > 0 &&
+                                      item.takeAwayQuantity > 0)
+                                    Text(
+                                      'Dine In x${item.dineInQuantity} | Take Away x${item.takeAwayQuantity}',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 11,
+                                        color: Colors.grey.shade500,
+                                      ),
+                                    ),
+                                ],
                               ),
-                              Text(
-                                'x${item.totalQuantity}',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                _currencyFormat.format(item.itemTotal),
-                                style: GoogleFonts.poppins(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (item.selectedOptions.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 1, bottom: 2),
-                              child: Text(
-                                item.selectedOptions.map((o) => o.optionName).join(', '),
-                                style: GoogleFonts.poppins(
-                                  fontSize: 11,
-                                  color: const Color(0xFF2E7D32).withOpacity(0.8),
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          if (item.dineInQuantity > 0 && item.takeAwayQuantity > 0)
-                            Text(
-                              'Dine In x${item.dineInQuantity} | Take Away x${item.takeAwayQuantity}',
-                              style: GoogleFonts.poppins(
-                                fontSize: 11,
-                                color: Colors.grey.shade500,
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  })).toList(),
+                            );
+                          }))
+                      .toList(),
                 const Divider(height: 16),
                 if (takeAwayFee > 0) ...[
                   _buildPriceRow('Subtotal Makanan', bill.totalAmount),
@@ -529,7 +551,7 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
   Future<void> _handleSettleOpenBill(OpenBill bill) async {
     if (widget.homeController == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error: HomeController not found')),
+        const SnackBar(content: Text('Pengendali utama tidak ditemukan')),
       );
       return;
     }
@@ -685,7 +707,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.qr_code, color: Colors.blue, size: 18),
+                          const Icon(Icons.qr_code,
+                              color: Colors.blue, size: 18),
                           const SizedBox(width: 8),
                           Text(
                             'Metode: QRIS',
@@ -698,7 +721,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                         ],
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: order.paymentStatus == 'PENDING_VERIFICATION'
                               ? Colors.orange.shade100
@@ -726,7 +750,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
                         onPressed: () => _viewPaymentProof(order.paymentProof),
-                        icon: const Icon(Icons.image_search, size: 18, color: Colors.blue),
+                        icon: const Icon(Icons.image_search,
+                            size: 18, color: Colors.blue),
                         label: Text(
                           'Lihat Bukti Transfer',
                           style: GoogleFonts.poppins(
@@ -736,9 +761,11 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                           ),
                         ),
                         style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
                           backgroundColor: Colors.blue.shade50,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
                         ),
                       ),
                     ),
@@ -1055,14 +1082,14 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child:
-                    Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
+                child: Text('Batal',
+                    style: GoogleFonts.poppins(color: Colors.grey)),
               ),
               ElevatedButton(
                 onPressed: selectedReason == null
                     ? null
-                    : () => _declineOrder(order, selectedReason!,
-                        customReasonController.text),
+                    : () => _declineOrder(
+                        order, selectedReason!, customReasonController.text),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
                   foregroundColor: Colors.white,
@@ -1116,7 +1143,7 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Gagal menolak pesanan: $e',
+              'Gagal menolak pesanan: ${UserMessageService.fromError(e)}',
               style: GoogleFonts.poppins(),
             ),
             backgroundColor: Colors.red,
@@ -1133,8 +1160,11 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Bukti Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-            IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+            Text('Bukti Pembayaran',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context)),
           ],
         ),
         content: Container(
@@ -1144,9 +1174,11 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (url.toLowerCase().endsWith('.pdf')) ...[
-                  const Icon(Icons.picture_as_pdf, size: 100, color: Colors.red),
+                  const Icon(Icons.picture_as_pdf,
+                      size: 100, color: Colors.red),
                   const SizedBox(height: 12),
-                  Text('Dokumen Bukti Transfer (PDF)', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+                  Text('Dokumen Bukti Transfer (PDF)',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
                   const SizedBox(height: 12),
                   ElevatedButton.icon(
                     onPressed: () {
@@ -1167,7 +1199,8 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
                       return const Center(
                         child: Column(
                           children: [
-                            Icon(Icons.broken_image, size: 48, color: Colors.grey),
+                            Icon(Icons.broken_image,
+                                size: 48, color: Colors.grey),
                             SizedBox(height: 8),
                             Text('Gagal memuat gambar bukti transfer'),
                           ],

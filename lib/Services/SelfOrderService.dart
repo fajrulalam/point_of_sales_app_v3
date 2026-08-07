@@ -20,19 +20,20 @@ class SelfOrderService {
   /// Get a real-time stream of self-orders
   /// Optionally filter by status (e.g., 'Unpaid', 'Paid', 'Declined')
   Stream<List<SelfOrder>> getSelfOrdersStream({String? statusFilter}) {
-    print('DEBUG: Fetching SelfOrders for canteenId: canteen375_plazaUnipdu, status: $statusFilter');
-    Query<Map<String, dynamic>> query = _selfOrdersCollection
-        .where('canteenId', isEqualTo: 'canteen375_plazaUnipdu');
+    print(
+        'DEBUG: Fetching SelfOrders for canteenId: canteen375_plazaUnipdu, status: $statusFilter');
+    Query<Map<String, dynamic>> query = _selfOrdersCollection.where('canteenId',
+        isEqualTo: 'canteen375_plazaUnipdu');
 
     if (statusFilter != null && statusFilter.isNotEmpty) {
       query = query.where('status', isEqualTo: statusFilter);
     }
 
     return query.snapshots().map((snapshot) {
-      print('DEBUG: Received ${snapshot.docs.length} documents from Firestore for SelfOrders');
-      final list = snapshot.docs
-          .map((doc) => SelfOrder.fromFirestore(doc))
-          .toList();
+      print(
+          'DEBUG: Received ${snapshot.docs.length} documents from Firestore for SelfOrders');
+      final list =
+          snapshot.docs.map((doc) => SelfOrder.fromFirestore(doc)).toList();
       list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       return list;
     });
@@ -108,6 +109,13 @@ class SelfOrderService {
     });
 
     // Delayed deletion to allow member's client app to catch the 'Paid' status update
+    scheduleDeletion(orderId);
+  }
+
+  /// Removes a paid order after the member app has had time to observe it.
+  /// The payment/status transition itself is owned by the checkout transaction;
+  /// this helper is only the non-critical cleanup step.
+  void scheduleDeletion(String orderId) {
     Future.delayed(const Duration(seconds: 20), () async {
       try {
         await deleteSelfOrder(orderId);
@@ -119,7 +127,8 @@ class SelfOrderService {
 
   /// Decline an order with a reason
   Future<void> declineOrder(String orderId, String reason) async {
-    await updateStatus(orderId, SelfOrderStatus.declined, declineReason: reason);
+    await updateStatus(orderId, SelfOrderStatus.declined,
+        declineReason: reason);
   }
 
   /// Convert a SelfOrder to a list of PesananObject for order processing
@@ -127,6 +136,7 @@ class SelfOrderService {
   List<PesananObject> convertToPesananList(SelfOrder selfOrder) {
     return selfOrder.orderItems.map((item) {
       return PesananObject(
+        menuItemId: item.menuItemId,
         namaPesanan: item.namaPesanan,
         harga: item.harga,
         dineInQuantity: item.dineInQuantity,
@@ -160,7 +170,8 @@ class SelfOrderService {
     return _selfOrdersCollection
         .where('waktuPesan',
             isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
-        .where('waktuPesan', isLessThanOrEqualTo: Timestamp.fromDate(endOfToday))
+        .where('waktuPesan',
+            isLessThanOrEqualTo: Timestamp.fromDate(endOfToday))
         .orderBy('waktuPesan', descending: true)
         .snapshots()
         .map((snapshot) =>

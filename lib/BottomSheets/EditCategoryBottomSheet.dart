@@ -7,14 +7,17 @@ import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'dart:io';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class EditCategoryBottomSheet extends StatefulWidget {
   final String categoryName;
 
-  const EditCategoryBottomSheet({Key? key, required this.categoryName}) : super(key: key);
+  const EditCategoryBottomSheet({Key? key, required this.categoryName})
+      : super(key: key);
 
   @override
-  State<EditCategoryBottomSheet> createState() => _EditCategoryBottomSheetState();
+  State<EditCategoryBottomSheet> createState() =>
+      _EditCategoryBottomSheetState();
 }
 
 class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
@@ -34,7 +37,10 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
 
   Future<void> _fetchCategoryImage() async {
     try {
-      final doc = await FirebaseFirestore.instance.collection(Col.name('Categories')).doc(widget.categoryName).get();
+      final doc = await FirebaseFirestore.instance
+          .collection(Col.name('Categories'))
+          .doc(widget.categoryName)
+          .get();
       if (doc.exists && doc.data()!.containsKey('imagePath')) {
         setState(() {
           currentImagePath = doc['imagePath'];
@@ -57,7 +63,8 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
               const Spacer(),
               Text(
                 'Edit Kategori',
-                style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.bold),
+                style: GoogleFonts.poppins(
+                    fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
               if (isUploading)
@@ -90,21 +97,27 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
               child: selectedLocalFile != null
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.file(File(selectedLocalFile!.path), fit: BoxFit.cover),
+                      child: Image.file(File(selectedLocalFile!.path),
+                          fit: BoxFit.cover),
                     )
                   : (!_imageDeleted && currentImagePath != null
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child: Image.network(currentImagePath!, fit: BoxFit.cover),
+                          child: Image.network(currentImagePath!,
+                              fit: BoxFit.cover),
                         )
-                      : const Icon(Icons.add_a_photo, size: 50, color: Colors.grey)),
+                      : const Icon(Icons.add_a_photo,
+                          size: 50, color: Colors.grey)),
             ),
           ),
-          if ((selectedLocalFile != null) || (!_imageDeleted && currentImagePath != null))
+          if ((selectedLocalFile != null) ||
+              (!_imageDeleted && currentImagePath != null))
             TextButton.icon(
               onPressed: _deleteImage,
-              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-              label: const Text('Hapus Foto', style: TextStyle(color: Colors.red)),
+              icon:
+                  const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+              label:
+                  const Text('Hapus Foto', style: TextStyle(color: Colors.red)),
             ),
         ],
       ),
@@ -165,28 +178,30 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
 
       // 1. Upload new image if selected
       if (selectedLocalFile != null) {
-         // Read file as bytes to avoid path/permission issues during upload
-         final fileBytes = await File(selectedLocalFile!.path).readAsBytes();
-         
-         final storageRef = FirebaseStorage.instance.ref();
-         final fileName = "category_${DateTime.now().millisecondsSinceEpoch}.jpg";
-         final imageRef = storageRef.child("category_images/$fileName");
-         
-         await imageRef.putData(
-           fileBytes, 
-           SettableMetadata(contentType: 'image/jpeg')
-         ).timeout(const Duration(seconds: 30));
-         
-         imageUrl = await imageRef.getDownloadURL();
+        // Read file as bytes to avoid path/permission issues during upload
+        final fileBytes = await File(selectedLocalFile!.path).readAsBytes();
+
+        final storageRef = FirebaseStorage.instance.ref();
+        final fileName =
+            "category_${DateTime.now().millisecondsSinceEpoch}.jpg";
+        final imageRef = storageRef.child("category_images/$fileName");
+
+        await imageRef
+            .putData(fileBytes, SettableMetadata(contentType: 'image/jpeg'))
+            .timeout(const Duration(seconds: 30));
+
+        imageUrl = await imageRef.getDownloadURL();
       }
 
       final firestore = FirebaseFirestore.instance;
-      final oldDocRef = firestore.collection(Col.name('Categories')).doc(widget.categoryName);
-      final newDocRef = firestore.collection(Col.name('Categories')).doc(newName);
+      final oldDocRef =
+          firestore.collection(Col.name('Categories')).doc(widget.categoryName);
+      final newDocRef =
+          firestore.collection(Col.name('Categories')).doc(newName);
 
       // 2. Update Image Path in Categories Collection for the OLD name first (in case name didn't change)
       // Actually, if name changed, we make a new doc. If name logic is confusing, handle separate cases.
-      
+
       if (widget.categoryName != newName) {
         // Name Changed:
         // A. Create new category doc
@@ -196,8 +211,12 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
         });
 
         // B. Update ALL menu items
-        final menuQuery = await firestore.collection(Col.name('Canteens')).doc('canteen375').collection('MenuCollection')
-            .where('category', isEqualTo: widget.categoryName).get();
+        final menuQuery = await firestore
+            .collection(Col.name('Canteens'))
+            .doc('canteen375')
+            .collection('MenuCollection')
+            .where('category', isEqualTo: widget.categoryName)
+            .get();
 
         final batch = firestore.batch();
         for (var doc in menuQuery.docs) {
@@ -207,7 +226,6 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
 
         // C. Delete old category doc
         await oldDocRef.delete();
-
       } else {
         // Name NOT Changed — update or remove image
         if (imageUrl != null) {
@@ -224,10 +242,15 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
       }
 
       if (mounted) Navigator.pop(context);
-
     } catch (e) {
       print("Error saving category: $e");
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Gagal menyimpan kategori: ${UserMessageService.fromError(e)}',
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => isUploading = false);
     }

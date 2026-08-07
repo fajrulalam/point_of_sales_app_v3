@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+
 class VoucherProgramService {
   static final _fs = FirebaseFirestore.instance;
 
@@ -12,9 +13,8 @@ class VoucherProgramService {
         .where('status', isEqualTo: 'active')
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) => snap.docs
-            .map((d) => {'id': d.id, ...d.data()})
-            .toList());
+        .map(
+            (snap) => snap.docs.map((d) => {'id': d.id, ...d.data()}).toList());
   }
 
   static Future<List<Map<String, dynamic>>> getActivePrograms() async {
@@ -59,10 +59,7 @@ class VoucherProgramService {
 
   static Future<void> updateProgram(
       String id, Map<String, dynamic> updates) async {
-    await _fs
-        .collection(Col.name('voucherPrograms'))
-        .doc(id)
-        .update(updates);
+    await _fs.collection(Col.name('voucherPrograms')).doc(id).update(updates);
   }
 
   static Future<void> closeProgram(String id) async {
@@ -97,8 +94,7 @@ class VoucherProgramService {
 
     final batch = _fs.batch();
 
-    final dailyRef =
-        _fs.collection(Col.name('DailyTransaction')).doc(dayKey);
+    final dailyRef = _fs.collection(Col.name('DailyTransaction')).doc(dayKey);
     batch.set(dailyRef, {field: FieldValue.increment(settledAmount)},
         SetOptions(merge: true));
 
@@ -116,10 +112,8 @@ class VoucherProgramService {
         _fs.collection(Col.name('voucherPrograms')).doc(programId);
 
     final programSnap = await programRef.get();
-    final currentRedeemed =
-        (programSnap.data()?['totalRedeemed'] ?? 0) as int;
-    final currentSettled =
-        (programSnap.data()?['totalSettled'] ?? 0) as int;
+    final currentRedeemed = (programSnap.data()?['totalRedeemed'] ?? 0) as int;
+    final currentSettled = (programSnap.data()?['totalSettled'] ?? 0) as int;
     final newSettled = currentSettled + settledAmount;
     final newStatus = newSettled >= currentRedeemed ? 'paid' : 'active';
 
@@ -145,9 +139,23 @@ class VoucherProgramService {
     });
   }
 
+  /// Transaction equivalent used by idempotent checkout commits.
+  static void addRedemptionToTransaction({
+    required Transaction transaction,
+    required String programId,
+    required int amount,
+  }) {
+    final programRef =
+        _fs.collection(Col.name('voucherPrograms')).doc(programId);
+    transaction.update(programRef, {
+      'totalRedeemed': FieldValue.increment(amount),
+    });
+  }
+
   /// Checks for active voucher programs from previous days and prompts the user
   /// if they have been settled. If settled, records the payment to yesterday's account.
-  static Future<void> checkAndPromptPendingVouchers(BuildContext context) async {
+  static Future<void> checkAndPromptPendingVouchers(
+      BuildContext context) async {
     final activePrograms = await getActivePrograms();
     final now = DateTime.now();
     final today = DateFormat('yyyy-MM-dd').format(now);
@@ -173,20 +181,26 @@ class VoucherProgramService {
 
       if (!context.mounted) return;
 
-      await _showSettlementPrompt(context, program, outstanding, today, yesterday);
+      await _showSettlementPrompt(
+          context, program, outstanding, today, yesterday);
     }
   }
 
   static Future<void> _showSettlementPrompt(
-      BuildContext context, Map<String, dynamic> program, int outstanding, String today, DateTime yesterday) async {
+      BuildContext context,
+      Map<String, dynamic> program,
+      int outstanding,
+      String today,
+      DateTime yesterday) async {
     final name = program['programName'] ?? 'Program Voucher';
     final formatter = NumberFormat.decimalPattern('id_ID');
-    
+
     final bool? isSettled = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: Text('Voucher Belum Lunas', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Voucher Belum Lunas',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
         content: Text(
           'Program "$name" masih memiliki piutang sebesar Rp ${formatter.format(outstanding)} dari hari sebelumnya.\n\nApakah tagihan ini sudah dilunasi?',
           style: GoogleFonts.poppins(),
@@ -197,9 +211,11 @@ class VoucherProgramService {
             child: Text('Belum', style: GoogleFonts.poppins(color: Colors.red)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green, foregroundColor: Colors.white),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Sudah Lunas', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+            child: Text('Sudah Lunas',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -215,12 +231,15 @@ class VoucherProgramService {
         barrierDismissible: false,
         builder: (ctx) => StatefulBuilder(
           builder: (ctx, setStateDialog) => AlertDialog(
-            title: Text('Metode Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            title: Text('Metode Pembayaran',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Pilih metode pembayaran untuk pelunasan Rp ${formatter.format(outstanding)}:', style: GoogleFonts.poppins()),
+                Text(
+                    'Pilih metode pembayaran untuk pelunasan Rp ${formatter.format(outstanding)}:',
+                    style: GoogleFonts.poppins()),
                 const SizedBox(height: 16),
                 Wrap(
                   spacing: 8,
@@ -230,10 +249,15 @@ class VoucherProgramService {
                       selected: selectedMethod == m,
                       selectedColor: const Color(0xFFC8E6C9),
                       labelStyle: GoogleFonts.poppins(
-                        fontWeight: selectedMethod == m ? FontWeight.w600 : FontWeight.w400,
-                        color: selectedMethod == m ? const Color(0xFF2E7D32) : Colors.black87,
+                        fontWeight: selectedMethod == m
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                        color: selectedMethod == m
+                            ? const Color(0xFF2E7D32)
+                            : Colors.black87,
                       ),
-                      onSelected: (_) => setStateDialog(() => selectedMethod = m),
+                      onSelected: (_) =>
+                          setStateDialog(() => selectedMethod = m),
                     );
                   }).toList(),
                 ),
@@ -245,9 +269,12 @@ class VoucherProgramService {
                 child: Text('Batal', style: GoogleFonts.poppins()),
               ),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF069494), foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF069494),
+                    foregroundColor: Colors.white),
                 onPressed: () => Navigator.pop(ctx, true),
-                child: Text('Simpan', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                child: Text('Simpan',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -267,7 +294,10 @@ class VoucherProgramService {
       }
     }
 
-    await _fs.collection(Col.name('voucherPrograms')).doc(program['id']).update({
+    await _fs
+        .collection(Col.name('voucherPrograms'))
+        .doc(program['id'])
+        .update({
       'lastPromptedDate': today,
     });
   }

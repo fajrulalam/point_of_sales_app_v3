@@ -48,7 +48,7 @@ class MenuClass {
         menus.add(
           MenuObject(
             id: element.id,
-            namaMenu: data['namaMenu']?.toString() ?? 'Unnamed Item',
+            namaMenu: data['namaMenu']?.toString() ?? 'Menu tanpa nama',
             harga: parseInt(data['harga'], 0),
             isMakanan: data['isMakanan'] ?? true,
             imagePath: data['imagePath'] ?? 'tidak ada',
@@ -58,11 +58,13 @@ class MenuClass {
             menuDescription: data['menuDescription']?.toString() ?? '',
             sortOrder: parseInt(data['sortOrder'], 0),
             imageAspectRatio: data['imageAspectRatio']?.toString() ?? '1:1',
-            ingredients: data.containsKey('ingredients') && data['ingredients'] != null
-                ? (data['ingredients'] as List<dynamic>)
-                    .map((ing) => MenuIngredient.fromMap(ing as Map<String, dynamic>))
-                    .toList()
-                : [],
+            ingredients:
+                data.containsKey('ingredients') && data['ingredients'] != null
+                    ? (data['ingredients'] as List<dynamic>)
+                        .map((ing) =>
+                            MenuIngredient.fromMap(ing as Map<String, dynamic>))
+                        .toList()
+                    : [],
           ),
         );
       } catch (e) {

@@ -25,10 +25,10 @@ class SupplierItem {
 
   factory SupplierItem.fromMap(Map<String, dynamic> map) {
     return SupplierItem(
-      name: map['name'] ?? '',
-      unit: map['unit'] ?? 'pcs',
-      isPerishable: map['isPerishable'] ?? false,
-      inventoryItemId: map['inventoryItemId'] as String?,
+      name: map['name']?.toString() ?? '',
+      unit: map['unit']?.toString() ?? 'pcs',
+      isPerishable: map['isPerishable'] == true,
+      inventoryItemId: map['inventoryItemId']?.toString(),
     );
   }
 
@@ -88,12 +88,15 @@ class ShoppingOrderItem {
   });
 
   factory ShoppingOrderItem.fromMap(Map<String, dynamic> map) {
+    final rawQuantity = map['quantity'];
     return ShoppingOrderItem(
-      name: map['name'] ?? '',
-      quantity: map['quantity'] ?? 0,
-      unit: map['unit'] ?? 'pcs',
-      isPerishable: map['isPerishable'] ?? false,
-      inventoryItemId: map['inventoryItemId'] as String?,
+      name: map['name']?.toString() ?? '',
+      quantity: rawQuantity is num
+          ? rawQuantity.toInt()
+          : int.tryParse('$rawQuantity') ?? 0,
+      unit: map['unit']?.toString() ?? 'pcs',
+      isPerishable: map['isPerishable'] == true,
+      inventoryItemId: map['inventoryItemId']?.toString(),
     );
   }
 
@@ -127,15 +130,16 @@ class ShoppingOrder {
 
   factory ShoppingOrder.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+    final rawDate = data['date'];
     return ShoppingOrder(
       id: doc.id,
-      supplierId: data['supplierId'] ?? '',
-      supplierName: data['supplierName'] ?? '',
-      date: (data['date'] as Timestamp).toDate(),
+      supplierId: data['supplierId']?.toString() ?? '',
+      supplierName: data['supplierName']?.toString() ?? '',
+      date: rawDate is Timestamp ? rawDate.toDate() : DateTime.now(),
       items: (data['items'] as List<dynamic>? ?? [])
           .map((i) => ShoppingOrderItem.fromMap(i))
           .toList(),
-      status: data['status'] ?? 'pending',
+      status: data['status']?.toString().toLowerCase() ?? 'pending',
     );
   }
 
@@ -193,7 +197,8 @@ class ShoppingService {
     });
   }
 
-  static Future<void> updateSupplier(String id, String name, List<SupplierItem> items) async {
+  static Future<void> updateSupplier(
+      String id, String name, List<SupplierItem> items) async {
     await _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
@@ -214,7 +219,8 @@ class ShoppingService {
         .delete();
   }
 
-  static Stream<List<ShoppingOrder>> getOrdersStream({DateTime? startDate, DateTime? endDate}) {
+  static Stream<List<ShoppingOrder>> getOrdersStream(
+      {DateTime? startDate, DateTime? endDate}) {
     var query = _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
@@ -232,27 +238,46 @@ class ShoppingService {
       final endOfToday = DateTime(now.year, now.month, now.day, 23, 59, 59);
 
       query = query
-          .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
+          .where('date',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
           .where('date', isLessThanOrEqualTo: Timestamp.fromDate(endOfToday));
     }
 
-    return query.snapshots()
-        .map((snapshot) =>
-            snapshot.docs.map((doc) => ShoppingOrder.fromFirestore(doc)).toList());
+    return query.snapshots().map((snapshot) =>
+        snapshot.docs.map((doc) => ShoppingOrder.fromFirestore(doc)).toList());
   }
 
-  static Future<void> updateOrderItems(String orderId, List<ShoppingOrderItem> items) async {
-    await _firestore
+  static Future<void> updateOrderItems(
+      String orderId, List<ShoppingOrderItem> items) async {
+    if (items.any((item) => item.quantity < 0)) {
+      throw Exception('Jumlah belanja tidak boleh negatif.');
+    }
+    final orderRef = _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('shoppingOrders')
-        .doc(orderId)
-        .update({
-      'items': items.map((i) => i.toMap()).toList(),
+        .doc(orderId);
+
+    await _firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(orderRef);
+      if (!snapshot.exists) throw Exception('Pesanan tidak ditemukan.');
+      final status =
+          (snapshot.data()?['status']?.toString() ?? 'pending').toLowerCase();
+      if (status != 'pending') {
+        throw Exception('Pesanan yang sudah dikonfirmasi tidak dapat diubah.');
+      }
+      transaction.update(orderRef, {
+        'items': items.map((i) => i.toMap()).toList(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     });
   }
 
-  static Future<ShoppingOrder> createOrder(String supplierId, String supplierName, List<ShoppingOrderItem> items) async {
+  static Future<ShoppingOrder> createOrder(String supplierId,
+      String supplierName, List<ShoppingOrderItem> items) async {
+    if (items.any((item) => item.quantity < 0)) {
+      throw Exception('Jumlah belanja tidak boleh negatif.');
+    }
     final docRef = await _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
@@ -263,6 +288,7 @@ class ShoppingService {
       'date': FieldValue.serverTimestamp(),
       'items': items.map((i) => i.toMap()).toList(),
       'status': 'pending',
+      'updatedAt': FieldValue.serverTimestamp(),
     });
     return ShoppingOrder(
       id: docRef.id,
@@ -274,133 +300,152 @@ class ShoppingService {
     );
   }
 
-  static Future<void> completeOrder(ShoppingOrder order) async {
+  static Future<InventoryOperationResult> completeOrder(
+      ShoppingOrder order) async {
     final orderRef = _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('shoppingOrders')
         .doc(order.id);
 
-    // Guard: re-fetch current status to avoid double-increment on rapid double-tap
-    // or concurrent completion from another device.
-    final orderSnap = await orderRef.get();
-    if (!orderSnap.exists) {
-      throw Exception('Pesanan tidak ditemukan.');
-    }
-    if ((orderSnap.data()?['status'] as String?) == 'completed') {
-      return;
-    }
-
-    // Decode the latest items from the database snapshot to avoid race conditions
-    // where the UI passes an outdated ShoppingOrder object right after a correction.
-    final latestData = orderSnap.data() as Map<String, dynamic>;
-    final List<ShoppingOrderItem> latestItems = (latestData['items'] as List<dynamic>? ?? [])
-        .map((i) => ShoppingOrderItem.fromMap(i))
-        .toList();
-
     final inventoryCol = _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('Inventory');
-    final dailyLogsCol = _firestore
+
+    // Name fallback is prepared outside the transaction. Stable IDs are still
+    // preferred, and duplicate names are treated as ambiguous.
+    final inventorySnapshot = await inventoryCol.get();
+    final idsByName = <String, List<String>>{};
+    for (final doc in inventorySnapshot.docs) {
+      final name = doc.data()['name']?.toString().trim() ?? '';
+      if (name.isNotEmpty) idsByName.putIfAbsent(name, () => []).add(doc.id);
+    }
+    String? resolveId(ShoppingOrderItem item) {
+      final stableId = item.inventoryItemId?.trim() ?? '';
+      if (stableId.isNotEmpty) return stableId;
+      final nameMatches = idsByName[item.name.trim()] ?? const <String>[];
+      return nameMatches.length == 1 ? nameMatches.single : null;
+    }
+
+    final operationRef = _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
-        .collection('DailyStockLogs');
+        .collection('Orders')
+        .doc('shopping_${order.id}');
 
-    // Aggregate quantities in memory, keyed by the inventory doc id we resolve to.
-    // `_StockTarget.exists` tells us whether we can update() or must create/merge-set().
-    final Map<String, _StockTarget> targets = {};
-    // Names pending creation inside this order (no id, no name match in DB) —
-    // reused so duplicate names within one order coalesce into one new inventory doc.
-    final Map<String, String> pendingDocIdsByName = {};
-
-    for (final item in latestItems) {
-      if (item.quantity <= 0) continue;
-
-      String? docId = item.inventoryItemId;
-      bool existsInDb = false;
-
-      if (docId != null && docId.isNotEmpty) {
-        final snap = await inventoryCol.doc(docId).get();
-        existsInDb = snap.exists;
+    final result = await _firestore
+        .runTransaction<InventoryOperationResult>((transaction) async {
+      final operationSnapshot = await transaction.get(operationRef);
+      if (operationSnapshot.exists &&
+          operationSnapshot.data()?['status']?.toString().toLowerCase() ==
+              'completed') {
+        return const InventoryOperationResult.alreadyApplied();
       }
 
-      // Fallback: no id OR the linked doc was deleted — try matching by name
-      if (docId == null || docId.isEmpty || !existsInDb) {
-        final nameMatch = await inventoryCol
-            .where('name', isEqualTo: item.name)
-            .limit(1)
-            .get();
+      final orderSnapshot = await transaction.get(orderRef);
+      if (!orderSnapshot.exists) throw Exception('Pesanan tidak ditemukan.');
+      final data = orderSnapshot.data() ?? <String, dynamic>{};
+      final status = (data['status']?.toString() ?? 'pending').toLowerCase();
+      if (status == 'completed')
+        return const InventoryOperationResult.alreadyApplied();
+      if (status != 'pending') {
+        throw Exception('Status pesanan tidak dapat dikonfirmasi: $status');
+      }
 
-        if (nameMatch.docs.isNotEmpty) {
-          docId = nameMatch.docs.first.id;
-          existsInDb = true;
-        } else if (pendingDocIdsByName.containsKey(item.name)) {
-          // Same name already queued for creation in this order — reuse the id
-          docId = pendingDocIdsByName[item.name]!;
-          existsInDb = false;
-        } else {
-          final epoch = DateTime.now().millisecondsSinceEpoch;
-          final encodedName = item.name.replaceAll(' ', '_');
-          docId = '${encodedName}_$epoch';
-          pendingDocIdsByName[item.name] = docId;
-          existsInDb = false;
+      final rawItems = data['items'] is List
+          ? data['items'] as List<dynamic>
+          : const <dynamic>[];
+      final flags = <InventoryAuditFlag>[];
+      if (data['items'] != null && data['items'] is! List) {
+        flags.add(InventoryAuditFlag(
+          code: 'invalid_shopping_items',
+          message:
+              'Daftar barang pesanan belanja tidak tersimpan dengan benar dan dilewati.',
+          sourceType: 'shopping_order',
+          sourceId: order.id,
+        ));
+      }
+      final mapItems = rawItems.whereType<Map>().toList();
+      if (mapItems.length != rawItems.length) {
+        flags.add(InventoryAuditFlag(
+          code: 'invalid_shopping_item_entry',
+          message: 'One or more malformed shopping items were skipped.',
+          sourceType: 'shopping_order',
+          sourceId: order.id,
+        ));
+      }
+      final latestItems = mapItems
+          .map((item) =>
+              ShoppingOrderItem.fromMap(Map<String, dynamic>.from(item)))
+          .toList();
+      final deltas = <StockDelta>[];
+      for (final item in latestItems) {
+        if (item.quantity <= 0) {
+          if (item.quantity < 0) {
+            flags.add(InventoryAuditFlag(
+              code: 'invalid_shopping_quantity',
+              message:
+                  'Shopping item "${item.name}" has a negative quantity and was skipped.',
+              inventoryItemName: item.name,
+              sourceType: 'shopping_order',
+              sourceId: order.id,
+            ));
+          }
+          continue;
+        }
+        final resolvedId = resolveId(item);
+        deltas.add(StockDelta(
+          inventoryItemId: resolvedId ?? '',
+          inventoryItemName: item.name,
+          stockChange: item.quantity,
+          stockAddedChange: item.quantity,
+        ));
+        if (resolvedId == null) {
+          flags.add(InventoryAuditFlag(
+            code: 'missing_shopping_inventory_link',
+            message:
+                'Shopping item "${item.name}" has no stable or unique exact-name inventory link.',
+            inventoryItemId: item.inventoryItemId,
+            inventoryItemName: item.name,
+            sourceType: 'shopping_order',
+            sourceId: order.id,
+            requiredQuantity: item.quantity,
+          ));
         }
       }
 
-      final existing = targets[docId];
-      if (existing != null) {
-        existing.qty += item.quantity;
-      } else {
-        targets[docId] = _StockTarget(
-          item: item,
-          qty: item.quantity,
-          exists: existsInDb,
-        );
-      }
-    }
+      final stockResult =
+          await InventoryService().applyStockDeltasInTransaction(
+        transaction,
+        deltas,
+        sourceType: 'shopping_order',
+        sourceId: order.id,
+        additionalAuditFlags: flags,
+      );
+      final auditFlags = stockResult.auditFlags;
+      transaction.update(orderRef, {
+        'status': 'completed',
+        'completedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'inventoryOperationId': 'shopping_${order.id}',
+        'inventoryAuditFlags': auditFlags.map((flag) => flag.toMap()).toList(),
+      });
+      transaction.set(
+          operationRef,
+          {
+            'status': 'completed',
+            'type': 'shopping_completion',
+            'sourceId': order.id,
+            'completedAt': FieldValue.serverTimestamp(),
+            'auditFlags': auditFlags.map((flag) => flag.toMap()).toList(),
+          },
+          SetOptions(merge: true));
+      return InventoryOperationResult.applied(flags: auditFlags);
+    });
 
-    // Single batch so order-status update + all inventory writes commit atomically.
-    // Each item contributes at most 2 writes (inventory + daily log) plus the
-    // order update, so a realistic shopping order stays well under the 500-op limit.
-    final batch = _firestore.batch();
-    batch.update(orderRef, {'status': 'completed'});
-
-    final today = _getTodayDateString();
-
-    for (final entry in targets.entries) {
-      final docId = entry.key;
-      final target = entry.value;
-      final invRef = inventoryCol.doc(docId);
-
-      if (target.exists) {
-        batch.update(invRef, {'stock': FieldValue.increment(target.qty)});
-      } else {
-        // Either the linked doc was deleted post-order, or the item has no id and
-        // no name match — create/merge the doc so stock is not lost.
-        batch.set(invRef, {
-          'name': target.item.name,
-          'stock': FieldValue.increment(target.qty),
-          'unit': target.item.unit.isEmpty ? 'pcs' : target.item.unit,
-          'isPerishable': target.item.isPerishable,
-        }, SetOptions(merge: true));
-      }
-
-      // Audit trail — keep parity with InventoryService._logStockAdded so daily
-      // reports reflect stock received from shopping orders.
-      final logRef = dailyLogsCol.doc('${today}_$docId');
-      batch.set(logRef, {
-        'date': today,
-        'inventoryItemId': docId,
-        'inventoryItemName': displayName(docId, target.item.name),
-        'isPerishable': target.item.isPerishable,
-        'stockAdded': FieldValue.increment(target.qty),
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
-
-    await batch.commit();
     await InventoryService().refreshInventoryCache();
+    return result;
   }
 
   static String _getTodayDateString() {
@@ -417,7 +462,8 @@ class ShoppingService {
         build: (pw.Context context) {
           return [
             pw.Text('Pesanan Belanja (Shopping Order)',
-                style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                style:
+                    pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 20),
             pw.Text('Supplier: ${order.supplierName}',
                 style: pw.TextStyle(fontSize: 18)),
@@ -464,7 +510,9 @@ class ShoppingService {
     final calculatedHeight = 250.0 + (order.items.length + 1) * 35.0;
     final pageFormat = PdfPageFormat(
       PdfPageFormat.a4.width,
-      calculatedHeight > PdfPageFormat.a4.height ? calculatedHeight : PdfPageFormat.a4.height,
+      calculatedHeight > PdfPageFormat.a4.height
+          ? calculatedHeight
+          : PdfPageFormat.a4.height,
     );
 
     doc.addPage(
@@ -475,7 +523,8 @@ class ShoppingService {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text('Pesanan Belanja (Shopping Order)',
-                  style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+                  style: pw.TextStyle(
+                      fontSize: 24, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 20),
               pw.Text('Supplier: ${order.supplierName}',
                   style: pw.TextStyle(fontSize: 18)),
@@ -485,7 +534,8 @@ class ShoppingService {
               pw.SizedBox(height: 30),
               pw.Table.fromTextArray(
                 context: context,
-                border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+                border:
+                    pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
                 headerAlignment: pw.Alignment.centerLeft,
                 headerStyle: pw.TextStyle(
                   color: PdfColors.white,
@@ -515,8 +565,10 @@ class ShoppingService {
 
     final pdfBytes = await doc.save();
     final tempDir = await getTemporaryDirectory();
-    final sanitizedName = order.supplierName.replaceAll(RegExp(r'[^\w\s]'), '_');
-    final fileName = 'pesanan_${sanitizedName}_${order.date.year}${order.date.month.toString().padLeft(2, '0')}${order.date.day.toString().padLeft(2, '0')}.jpg';
+    final sanitizedName =
+        order.supplierName.replaceAll(RegExp(r'[^\w\s]'), '_');
+    final fileName =
+        'pesanan_${sanitizedName}_${order.date.year}${order.date.month.toString().padLeft(2, '0')}${order.date.day.toString().padLeft(2, '0')}.jpg';
     final filePath = p.join(tempDir.path, fileName);
 
     // Rasterise the first page of the PDF into raw PNG bytes
@@ -526,9 +578,11 @@ class ShoppingService {
     // Decode PNG and composite onto white background, then encode as JPEG
     // This fixes the transparent-background-turns-black issue on Android
     final decoded = img.decodePng(pngBytes);
-    if (decoded == null) throw Exception('Failed to decode rasterized PDF page');
-    final whiteBackground = img.Image(width: decoded.width, height: decoded.height)
-      ..clear(img.ColorRgb8(255, 255, 255));
+    if (decoded == null)
+      throw Exception('Failed to decode rasterized PDF page');
+    final whiteBackground =
+        img.Image(width: decoded.width, height: decoded.height)
+          ..clear(img.ColorRgb8(255, 255, 255));
     img.compositeImage(whiteBackground, decoded);
     final jpegBytes = img.encodeJpg(whiteBackground, quality: 90);
 
@@ -539,12 +593,21 @@ class ShoppingService {
 
   /// Deletes a pending shopping order.
   static Future<void> deleteOrder(String orderId) async {
-    await _firestore
+    final orderRef = _firestore
         .collection(Col.name('Canteens'))
         .doc(canteenId)
         .collection('shoppingOrders')
-        .doc(orderId)
-        .delete();
+        .doc(orderId);
+    await _firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(orderRef);
+      if (!snapshot.exists) return;
+      final status =
+          (snapshot.data()?['status']?.toString() ?? 'pending').toLowerCase();
+      if (status != 'pending') {
+        throw Exception('Pesanan yang sudah dikonfirmasi tidak dapat dihapus.');
+      }
+      transaction.delete(orderRef);
+    });
   }
 
   /// Generates the order image and opens it with the device's native image viewer.
@@ -552,16 +615,4 @@ class ShoppingService {
     final imagePath = await saveOrderAsImage(order);
     await OpenFile.open(imagePath);
   }
-}
-
-class _StockTarget {
-  final ShoppingOrderItem item;
-  int qty;
-  final bool exists;
-
-  _StockTarget({
-    required this.item,
-    required this.qty,
-    required this.exists,
-  });
 }

@@ -51,7 +51,7 @@ class _HomeState extends State<Home> {
   Member? selectedMember;
   String _activeRoute = 'pos_order';
   bool _sidebarMinimized = false;
-  
+
   // Self-orders & Open Bills
   final SelfOrderService _selfOrderService = SelfOrderService.instance;
   final OpenBillService _openBillService = OpenBillService.instance;
@@ -65,7 +65,7 @@ class _HomeState extends State<Home> {
     super.initState();
     controller = HomeController();
     controller.addListener(_onControllerUpdate);
-    
+
     // Set up message callback for showing snackbars
     controller.onShowMessage = (message, {bool isError = false}) {
       if (!mounted) return;
@@ -86,7 +86,8 @@ class _HomeState extends State<Home> {
               ),
             ],
           ),
-          backgroundColor: isError ? Colors.red.shade700 : Colors.orange.shade700,
+          backgroundColor:
+              isError ? Colors.red.shade700 : Colors.orange.shade700,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 4),
           shape: RoundedRectangleBorder(
@@ -95,15 +96,15 @@ class _HomeState extends State<Home> {
         ),
       );
     };
-    
+
     controller.initialize();
-    
+
     // Initialize members cache
     MemberService.instance.initializeCache();
 
     // Initialize recommendation service and show snackbar
     _initializeRecommendationService();
-    
+
     _initBadgeSubscriptions();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -125,7 +126,8 @@ class _HomeState extends State<Home> {
     });
 
     // Subscribe to self-orders count stream for badge
-    _selfOrdersCountSubscription = _selfOrderService.getUnpaidOrderCountStream().listen(
+    _selfOrdersCountSubscription =
+        _selfOrderService.getUnpaidOrderCountStream().listen(
       (count) {
         if (mounted) {
           setState(() {
@@ -207,7 +209,8 @@ class _HomeState extends State<Home> {
                 // 2. Sidebar (on top)
                 SidebarWidget(
                   printerIsConnected: controller.printerIsConnected,
-                  liveTabsCount: _pendingSelfOrdersCount + _pendingOpenBillsCount,
+                  liveTabsCount:
+                      _pendingSelfOrdersCount + _pendingOpenBillsCount,
                   activeRoute: _activeRoute,
                   isExpanded: true,
                   isMinimized: _sidebarMinimized,
@@ -217,8 +220,10 @@ class _HomeState extends State<Home> {
                   onMinimizeToggled: () => setState(() {
                     _sidebarMinimized = !_sidebarMinimized;
                   }),
-                  onOrderPressed: () => setState(() => _activeRoute = 'pos_order'),
-                  onMenuPressed: () => setState(() => _activeRoute = 'pos_menu'),
+                  onOrderPressed: () =>
+                      setState(() => _activeRoute = 'pos_order'),
+                  onMenuPressed: () =>
+                      setState(() => _activeRoute = 'pos_menu'),
                   onPrintPressed: () => _handlePrintPressed(),
                   onPrintLongPress: () => _handlePrintLongPress(),
                   onResetPressed: () => controller.resetCustomerNumber(),
@@ -227,7 +232,8 @@ class _HomeState extends State<Home> {
                   onShoppingPressed: () => _navigateToShopping(),
                   onSelfOrdersPressed: () => _navigateToSelfOrders(),
                   onMembersPressed: () => _navigateToMembers(),
-                  onEditOrderPressed: () => setState(() => _activeRoute = 'edit_order'),
+                  onEditOrderPressed: () =>
+                      setState(() => _activeRoute = 'edit_order'),
                   onQuickExpensePressed: () => _showQuickExpense(),
                   onFinancialReportPressed: () => _showFinancialReport(),
                   onTestingModeToggled: _handleTestingModeToggle,
@@ -266,96 +272,95 @@ class _HomeState extends State<Home> {
           },
         ),
       ),
-);
-}
+    );
+  }
 
-Widget _buildFloatingBubble() {
-  return InkWell(
-    onTap: () => setState(() {
-      _sidebarMinimized = false;
-    }),
-    child: Container(
-      width: 56,
-      height: 56,
-      decoration: BoxDecoration(
-        color: const Color(0xFF069494), // kDarkTeal
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF069494).withOpacity(0.3),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          const Icon(
-            Icons.restaurant_menu_rounded,
-            color: Color(0xFFF5C518), // kWarmYellow
-            size: 28,
-          ),
-          if (_pendingSelfOrdersCount + _pendingOpenBillsCount > 0)
-            Positioned(
-              right: 8,
-              top: 8,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: const BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                ),
-                constraints: const BoxConstraints(
-                  minWidth: 16,
-                  minHeight: 16,
-                ),
-                child: Center(
-                  child: Text(
-                    '${_pendingSelfOrdersCount + _pendingOpenBillsCount}',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
+  Widget _buildFloatingBubble() {
+    return InkWell(
+      onTap: () => setState(() {
+        _sidebarMinimized = false;
+      }),
+      child: Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: const Color(0xFF069494), // kDarkTeal
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF069494).withOpacity(0.3),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            const Icon(
+              Icons.restaurant_menu_rounded,
+              color: Color(0xFFF5C518), // kWarmYellow
+              size: 28,
+            ),
+            if (_pendingSelfOrdersCount + _pendingOpenBillsCount > 0)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                  constraints: const BoxConstraints(
+                    minWidth: 16,
+                    minHeight: 16,
+                  ),
+                  child: Center(
+                    child: Text(
+                      '${_pendingSelfOrdersCount + _pendingOpenBillsCount}',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
-}
-
-Widget _buildMainContent() {
-  if (_activeRoute == 'pos_order') {
-    return Row(children: _buildOrderingView());
-  } else if (_activeRoute == 'pos_menu') {
-    return _buildMenuManagementView();
-  } else if (_activeRoute == 'inventory') {
-    return const InventoryScreen();
-  } else if (_activeRoute == 'shopping') {
-    return const ShoppingScreen();
-  } else if (_activeRoute == 'selforders') {
-    return LiveTabsScreen(
-      onAcceptOrder: _handleAcceptSelfOrder,
-      homeController: controller,
-    );
-  } else if (_activeRoute == 'members') {
-    return const MarketingScreen();
-
-  } else if (_activeRoute == 'edit_order') {
-    return EditOrderScreen(
-      isEmbedded: true,
-      onOrderSelected: (result) {
-        controller.loadOrderForEdit(result['data'], result['id']);
-        setState(() => _activeRoute = 'pos_order');
-      },
     );
   }
-  return const SizedBox.shrink();
-}
+
+  Widget _buildMainContent() {
+    if (_activeRoute == 'pos_order') {
+      return Row(children: _buildOrderingView());
+    } else if (_activeRoute == 'pos_menu') {
+      return _buildMenuManagementView();
+    } else if (_activeRoute == 'inventory') {
+      return const InventoryScreen();
+    } else if (_activeRoute == 'shopping') {
+      return const ShoppingScreen();
+    } else if (_activeRoute == 'selforders') {
+      return LiveTabsScreen(
+        onAcceptOrder: _handleAcceptSelfOrder,
+        homeController: controller,
+      );
+    } else if (_activeRoute == 'members') {
+      return const MarketingScreen();
+    } else if (_activeRoute == 'edit_order') {
+      return EditOrderScreen(
+        isEmbedded: true,
+        onOrderSelected: (result) {
+          controller.loadOrderForEdit(result['data'], result['id']);
+          setState(() => _activeRoute = 'pos_order');
+        },
+      );
+    }
+    return const SizedBox.shrink();
+  }
 
   List<Widget> _buildOrderingView() {
     return [
@@ -393,14 +398,18 @@ Widget _buildMainContent() {
                 flex: 1,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: controller.isEditMode 
-                        ? Colors.orange.shade50 
-                        : (controller.isSelfOrderMode ? Colors.green.shade50 : const Color(0xFFF5F5F0)),
+                    color: controller.isEditMode
+                        ? Colors.orange.shade50
+                        : (controller.isSelfOrderMode
+                            ? Colors.green.shade50
+                            : const Color(0xFFF5F5F0)),
                     border: Border(
                       bottom: BorderSide(
-                        color: controller.isEditMode 
-                            ? Colors.orange.shade300 
-                            : (controller.isSelfOrderMode ? Colors.green.shade300 : Colors.grey.shade300),
+                        color: controller.isEditMode
+                            ? Colors.orange.shade300
+                            : (controller.isSelfOrderMode
+                                ? Colors.green.shade300
+                                : Colors.grey.shade300),
                         width: 1,
                       ),
                     ),
@@ -431,7 +440,8 @@ Widget _buildMainContent() {
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.orange.shade900,
                                 backgroundColor: Colors.orange.shade100,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 4),
                                 minimumSize: Size.zero,
                               ),
                             ),
@@ -453,7 +463,7 @@ Widget _buildMainContent() {
                               onPressed: () {
                                 if (controller.currentSelfOrder != null) {
                                   _selfOrderService.updateStatus(
-                                      controller.currentSelfOrder!.id, 
+                                      controller.currentSelfOrder!.id,
                                       SelfOrderStatus.unpaid);
                                 }
                                 controller.clearSelfOrderMode();
@@ -464,9 +474,11 @@ Widget _buildMainContent() {
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.green.shade900,
                                 backgroundColor: Colors.green.shade100,
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
                                 minimumSize: Size.zero,
-                                textStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600),
+                                textStyle: GoogleFonts.poppins(
+                                    fontSize: 12, fontWeight: FontWeight.w600),
                               ),
                             ),
                           ] else ...[
@@ -481,7 +493,8 @@ Widget _buildMainContent() {
                             ),
                             const SizedBox(width: 16),
                             IconButton(
-                              onPressed: () => setState(() => _activeRoute = 'edit_order'),
+                              onPressed: () =>
+                                  setState(() => _activeRoute = 'edit_order'),
                               icon: const Icon(Icons.edit_document),
                               color: Colors.blue.shade700,
                               tooltip: 'Edit Pesanan Hari Ini',
@@ -518,8 +531,7 @@ Widget _buildMainContent() {
                         controller.incrementTakeAway(index),
                     onDecrementTakeAway: (index) =>
                         controller.decrementTakeAway(index),
-                    onRemoveItem: (index) =>
-                        controller.removeItem(index),
+                    onRemoveItem: (index) => controller.removeItem(index),
                     onNoteChanged: (index, note) {
                       setState(() {
                         controller.pesananList[index].customerNote = note;
@@ -614,7 +626,8 @@ Widget _buildMainContent() {
     );
 
     if (results != null && results.isNotEmpty) {
-      await controller.updateOrderOptions(index, results[0].options, results[0].quantity);
+      await controller.updateOrderOptions(
+          index, results[0].options, results[0].quantity);
     }
   }
 
@@ -656,9 +669,8 @@ Widget _buildMainContent() {
     }
 
     // Get all available menu item names for filtering recommendations
-    final menuItemNames = controller.menuObjectList
-        .map((menu) => menu.namaMenu)
-        .toList();
+    final menuItemNames =
+        controller.menuObjectList.map((menu) => menu.namaMenu).toList();
 
     if (controller.isSelfOrderMode && controller.currentSelfOrder != null) {
       OrderConfirmationService.showSelfOrderConfirmationDialog(
@@ -749,75 +761,116 @@ Widget _buildMainContent() {
 
   void _showEditConfirmationDialog() {
     showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(
-          'Simpan Perubahan Pesanan?',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-        ),
-        content: Text(
-          'Aksi ini akan menimpa pesanan sebelumnya dan menyesuaikan stok serta laporan keuangan. Apakah Anda yakin?',
-          style: GoogleFonts.poppins(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey.shade700)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue.shade700, 
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () async {
-               Navigator.pop(dialogContext); // close dialog
-               
-               // build lookups
-               final optionGroupLookup = <String, Map<String, OptionItem>>{};
-               for (var g in controller.optionGroups) {
-                 final m = <String, OptionItem>{};
-                 for (var o in g.options) { m[o.id] = o; }
-                 optionGroupLookup[g.id] = m;
-               }
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+                title: Text(
+                  'Simpan Perubahan Pesanan?',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                ),
+                content: Text(
+                  'Aksi ini akan menimpa pesanan sebelumnya dan menyesuaikan stok serta laporan keuangan. Apakah Anda yakin?',
+                  style: GoogleFonts.poppins(),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: Text('Batal',
+                        style:
+                            GoogleFonts.poppins(color: Colors.grey.shade700)),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade700,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () async {
+                      Navigator.pop(dialogContext); // close dialog
 
-               final menuMap = <String, MenuObject>{};
-               for (var m in controller.menuObjectList) { menuMap[m.namaMenu] = m; }
+                      // build lookups
+                      final optionGroupLookup =
+                          <String, Map<String, OptionItem>>{};
+                      final optionGroupNames = <String, List<OptionGroup>>{};
+                      for (var g in controller.optionGroups) {
+                        final m = <String, OptionItem>{};
+                        final optionNames = <String, List<OptionItem>>{};
+                        for (var o in g.options) {
+                          m[o.id] = o;
+                          optionNames
+                              .putIfAbsent(o.name.trim(), () => [])
+                              .add(o);
+                        }
+                        for (final entry in optionNames.entries) {
+                          if (entry.key.isNotEmpty && entry.value.length == 1) {
+                            m['__name__${entry.key}'] = entry.value.single;
+                          }
+                        }
+                        optionGroupLookup[g.id] = m;
+                        optionGroupNames
+                            .putIfAbsent(g.name.trim(), () => [])
+                            .add(g);
+                      }
+                      for (final entry in optionGroupNames.entries) {
+                        if (entry.key.isNotEmpty && entry.value.length == 1) {
+                          optionGroupLookup['__name__${entry.key}'] =
+                              optionGroupLookup[entry.value.single.id]!;
+                        }
+                      }
 
-               if (!context.mounted) return;
+                      final menuMap = <String, MenuObject>{};
+                      final menusByName = <String, List<MenuObject>>{};
+                      for (var m in controller.menuObjectList) {
+                        menuMap['__id__${m.id}'] = m;
+                        menusByName
+                            .putIfAbsent(m.namaMenu.trim(), () => [])
+                            .add(m);
+                      }
+                      for (final entry in menusByName.entries) {
+                        if (entry.key.isNotEmpty && entry.value.length == 1) {
+                          menuMap['__name__${entry.key}'] = entry.value.single;
+                          menuMap[entry.key] = entry.value.single;
+                        }
+                      }
 
-               await EditOrderService.processEditOrder(
-                 context: context, // Use the outer Home.dart context!
-                 statusDocId: controller.editDocumentId!,
-                 originalStatusData: controller.editOriginalData!,
-                 newPesananList: controller.pesananList,
-                 newTotalHarga: controller.totalHarga,
-                 newBiayaBungkus: controller.biayaBungkus,
-                 menuMap: menuMap,
-                 optionGroupLookup: optionGroupLookup,
-                 getYear: controller.getYear,
-                 getMonth: controller.getMonth,
-                 getDate: controller.getDate,
-                 printReceipt: ({String? customerName, List<PesananObject>? activePesananList}) async {
-                    await controller.printReceipt(
-                      overrideNomorBerikutnya: controller.editOriginalData?['customerNumber'],
-                      customPesananList: activePesananList ?? controller.pesananList,
-                      overrideTotalHarga: controller.totalHarga,
-                      customerName: customerName,
-                    );
-                    controller.clearEditMode();
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Pesanan berhasil diubah')),
+                      if (!context.mounted) return;
+
+                      await EditOrderService.processEditOrder(
+                        context: context, // Use the outer Home.dart context!
+                        statusDocId: controller.editDocumentId!,
+                        originalStatusData: controller.editOriginalData!,
+                        newPesananList: controller.pesananList,
+                        newTotalHarga: controller.totalHarga,
+                        newBiayaBungkus: controller.biayaBungkus,
+                        menuMap: menuMap,
+                        optionGroupLookup: optionGroupLookup,
+                        getYear: controller.getYear,
+                        getMonth: controller.getMonth,
+                        getDate: controller.getDate,
+                        printReceipt: (
+                            {String? customerName,
+                            List<PesananObject>? activePesananList}) async {
+                          await controller.printReceipt(
+                            overrideNomorBerikutnya:
+                                controller.editOriginalData?['customerNumber'],
+                            customPesananList:
+                                activePesananList ?? controller.pesananList,
+                            overrideTotalHarga: controller.totalHarga,
+                            customerName: customerName,
+                          );
+                          controller.clearEditMode();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Pesanan berhasil diubah')),
+                            );
+                          }
+                        },
                       );
-                    }
-                  },
-               );
-            },
-            child: Text('Simpan Perubahan', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-          ),
-        ]
-      )
-    );
+                    },
+                    child: Text('Simpan Perubahan',
+                        style:
+                            GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                  ),
+                ]));
   }
 
   void _navigateToInventory() {
@@ -836,23 +889,23 @@ Widget _buildMainContent() {
     setState(() => _activeRoute = 'selforders');
   }
 
-
   void _handleAcceptSelfOrder(SelfOrder order) {
     // Mark order as serving in Firestore so other cashiers know it's being handled
     _selfOrderService.markAsProcessing(order.id);
-    
+
     // Load self-order into the main ordering view
     controller.loadSelfOrder(order);
-    
+
     // Pre-fill customer name
     customerNameController.text = order.memberName;
-    
+
     // Switch to POS view
     setState(() => _activeRoute = 'pos_order');
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Pesanan ${order.displayShortCode} dimuat ke daftar pesanan'),
+        content:
+            Text('Pesanan ${order.displayShortCode} dimuat ke daftar pesanan'),
         backgroundColor: Colors.green.shade700,
         behavior: SnackBarBehavior.floating,
       ),
@@ -896,7 +949,7 @@ Widget _buildMainContent() {
           Col.testingMode.value
               ? 'Beralih kembali ke data produksi.'
               : 'Semua proses baca/tulis akan diarahkan ke koleksi testing. '
-                'Data akan dimigrasikan pada aktivasi pertama.',
+                  'Data akan dimigrasikan pada aktivasi pertama.',
         ),
         actions: [
           TextButton(
@@ -906,7 +959,8 @@ Widget _buildMainContent() {
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Col.testingMode.value ? Colors.teal : Colors.orange,
+              backgroundColor:
+                  Col.testingMode.value ? Colors.teal : Colors.orange,
             ),
             child: Text(turning),
           ),
@@ -957,10 +1011,8 @@ Widget _buildMainContent() {
     if (confirm == true) {
       await FirebaseAuth.instance.signOut();
       if (mounted) {
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          LoginScreen.id, 
-          (route) => false
-        );
+        Navigator.of(context)
+            .pushNamedAndRemoveUntil(LoginScreen.id, (route) => false);
       }
     }
   }

@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Controllers/HomeController.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class ConnectPrinterDialog extends StatefulWidget {
   final HomeController controller;
@@ -139,7 +140,8 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
                                 const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
@@ -162,14 +164,16 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
                                 isExpanded: true,
                                 items: devices
                                     .map((e) => DropdownMenuItem(
-                                        child: Text(e.name ?? 'Perangkat Tidak Dikenal'),
+                                        child: Text(e.name ??
+                                            'Perangkat Tidak Dikenal'),
                                         value: e))
                                     .toList(),
                                 onChanged: devices.isEmpty
                                     ? null
                                     : (device) async {
                                         if (device != null) {
-                                          setState(() => selectedDevice = device);
+                                          setState(
+                                              () => selectedDevice = device);
                                           await _handleNewConnection(device);
                                         }
                                       },
@@ -247,9 +251,8 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
 
   Widget _buildReprintSection() {
     final bool isToday = DateUtils.isSameDay(_selectedDate, DateTime.now());
-    final String dateLabel = isToday
-        ? 'Hari Ini'
-        : DateFormat('dd MMM yyyy').format(_selectedDate);
+    final String dateLabel =
+        isToday ? 'Hari Ini' : DateFormat('dd MMM yyyy').format(_selectedDate);
 
     return Expanded(
       child: Column(
@@ -279,7 +282,8 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFF2E7D32),
                   side: const BorderSide(color: Color(0xFF2E7D32)),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -317,14 +321,18 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
   }
 
   Widget _buildActiveList() {
-    final startOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
-    final endOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, 23, 59, 59);
+    final startOfDay =
+        DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    final endOfDay = DateTime(
+        _selectedDate.year, _selectedDate.month, _selectedDate.day, 23, 59, 59);
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection(Col.name('Status'))
-          .where('waktuPesan', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-          .where('waktuPesan', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
+          .where('waktuPesan',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+          .where('waktuPesan',
+              isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
           .orderBy('waktuPesan', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
@@ -339,7 +347,8 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.hourglass_empty, size: 48, color: Colors.grey.shade300),
+                Icon(Icons.hourglass_empty,
+                    size: 48, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
                 Text(
                   'Tidak ada pesanan aktif',
@@ -364,14 +373,18 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
   }
 
   Widget _buildCompletedList() {
-    final startOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
-    final endOfDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, 23, 59, 59);
+    final startOfDay =
+        DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    final endOfDay = DateTime(
+        _selectedDate.year, _selectedDate.month, _selectedDate.day, 23, 59, 59);
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection(Col.name('RecentlyServed'))
-          .where('timestampServe', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-          .where('timestampServe', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
+          .where('timestampServe',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+          .where('timestampServe',
+              isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
           .orderBy('timestampServe', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
@@ -527,9 +540,8 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
                   : const Icon(Icons.print, size: 16),
               label: Text(isReprinting ? '' : 'Cetak'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: printerIsConnected
-                    ? const Color(0xFF2E7D32)
-                    : Colors.grey,
+                backgroundColor:
+                    printerIsConnected ? const Color(0xFF2E7D32) : Colors.grey,
                 foregroundColor: Colors.white,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -662,9 +674,8 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
                   : const Icon(Icons.print, size: 16),
               label: Text(isReprinting ? '' : 'Cetak'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: printerIsConnected
-                    ? const Color(0xFF2E7D32)
-                    : Colors.grey,
+                backgroundColor:
+                    printerIsConnected ? const Color(0xFF2E7D32) : Colors.grey,
                 foregroundColor: Colors.white,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -715,7 +726,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Gagal mencetak: $e',
+                    'Gagal mencetak: ${UserMessageService.fromError(e)}',
                     style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
                   ),
                 ),
@@ -753,7 +764,8 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
     try {
       // If already connected to this device, just verify and skip reconnect
       final alreadyConnected = (await printer.isConnected) ?? false;
-      if (alreadyConnected && widget.controller.selectedDevice?.address == device.address) {
+      if (alreadyConnected &&
+          widget.controller.selectedDevice?.address == device.address) {
         await checkIfPrinterIsConnected();
         return;
       }
@@ -762,7 +774,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
         await printer.disconnect();
       } catch (_) {}
       await Future.delayed(const Duration(milliseconds: 500));
-      
+
       await printer.connect(device);
       await checkIfPrinterIsConnected();
     } catch (e) {
@@ -772,7 +784,8 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Gagal menghubungkan: $e'),
+            content: Text(
+                'Gagal menghubungkan printer: ${UserMessageService.fromError(e)}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -805,7 +818,7 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
   Future<void> testPrinter(String invoice) async {
     // Check the real device connection status first
     await checkIfPrinterIsConnected();
-    
+
     if (printerIsConnected) {
       try {
         await widget.controller.testPrinter(invoice);
@@ -818,7 +831,8 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Koneksi printer terputus: $e'),
+              content: Text(
+                  'Koneksi printer terputus: ${UserMessageService.fromError(e)}'),
               backgroundColor: Colors.red,
             ),
           );
@@ -847,9 +861,9 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
       // since getPrinters() returns new BluetoothDevice object instances.
       if (selectedDevice != null && devices.isNotEmpty) {
         final match = devices.cast<BluetoothDevice?>().firstWhere(
-          (d) => d?.address == selectedDevice!.address,
-          orElse: () => null,
-        );
+              (d) => d?.address == selectedDevice!.address,
+              orElse: () => null,
+            );
         if (match != null) {
           selectedDevice = match;
         }

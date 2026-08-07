@@ -97,11 +97,8 @@ class Col {
     }
 
     // 2. Fetch production data
-    final prodSnap = await fs
-        .collection('Canteens')
-        .doc(docId)
-        .collection(sub)
-        .get();
+    final prodSnap =
+        await fs.collection('Canteens').doc(docId).collection(sub).get();
 
     // 3. Copy to test
     if (prodSnap.docs.isNotEmpty) {
@@ -110,7 +107,8 @@ class Col {
         final batch = fs.batch();
         for (final doc in chunk) {
           batch.set(
-            fs.collection('zTesting_Canteens')
+            fs
+                .collection('zTesting_Canteens')
                 .doc(docId)
                 .collection(sub)
                 .doc(doc.id),
@@ -126,10 +124,8 @@ class Col {
     final fs = FirebaseFirestore.instance;
 
     // Check if already migrated by looking for the canteen doc
-    final check = await fs
-        .collection('zTesting_Canteens')
-        .doc('canteen375')
-        .get();
+    final check =
+        await fs.collection('zTesting_Canteens').doc('canteen375').get();
     if (check.exists) return; // already migrated
 
     debugPrint('[TestingMode] Migrating seed data …');
@@ -147,8 +143,7 @@ class Col {
   }
 
   /// Copy every document from [source] → zTesting_[source].
-  static Future<void> _migrateFlat(
-      FirebaseFirestore fs, String source) async {
+  static Future<void> _migrateFlat(FirebaseFirestore fs, String source) async {
     final snap = await fs.collection(source).get();
     final batch = fs.batch();
     for (final doc in snap.docs) {
@@ -170,6 +165,8 @@ class Col {
       'MenuCollection',
       'Metadata',
       'OptionGroups',
+      'OpenBillLocks',
+      'Orders',
       'SelfOrders',
       'StockCollection',
       'shoppingOrders',
@@ -177,8 +174,7 @@ class Col {
     ];
 
     // Copy the canteen document itself
-    final canteenDoc =
-        await fs.collection('Canteens').doc(docId).get();
+    final canteenDoc = await fs.collection('Canteens').doc(docId).get();
     if (canteenDoc.exists) {
       await fs
           .collection('zTesting_Canteens')
@@ -188,11 +184,8 @@ class Col {
 
     // Copy each subcollection
     for (final sub in subcollections) {
-      final snap = await fs
-          .collection('Canteens')
-          .doc(docId)
-          .collection(sub)
-          .get();
+      final snap =
+          await fs.collection('Canteens').doc(docId).collection(sub).get();
 
       // Firestore batch limit is 500 — chunk if needed
       final chunks = _chunkList(snap.docs, 400);
@@ -200,7 +193,8 @@ class Col {
         final batch = fs.batch();
         for (final doc in chunk) {
           batch.set(
-            fs.collection('zTesting_Canteens')
+            fs
+                .collection('zTesting_Canteens')
                 .doc(docId)
                 .collection(sub)
                 .doc(doc.id),
@@ -217,7 +211,8 @@ class Col {
   static List<List<T>> _chunkList<T>(List<T> list, int size) {
     final chunks = <List<T>>[];
     for (var i = 0; i < list.length; i += size) {
-      chunks.add(list.sublist(i, i + size > list.length ? list.length : i + size));
+      chunks.add(
+          list.sublist(i, i + size > list.length ? list.length : i + size));
     }
     return chunks;
   }

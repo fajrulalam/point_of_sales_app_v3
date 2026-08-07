@@ -16,10 +16,12 @@ class OptionItem {
   });
 
   factory OptionItem.fromMap(Map<String, dynamic> map, {String? id}) {
+    final rawPrice = map['priceAdjustment'];
     return OptionItem(
-      id: id ?? map['id'] ?? '',
-      name: map['name'] ?? '',
-      priceAdjustment: map['priceAdjustment'] ?? 0,
+      id: id ?? map['id']?.toString() ?? '',
+      name: map['name']?.toString() ?? '',
+      priceAdjustment:
+          rawPrice is num ? rawPrice.toInt() : int.tryParse('$rawPrice') ?? 0,
       ingredients: map.containsKey('ingredients')
           ? (map['ingredients'] as List<dynamic>)
               .map((ing) => MenuIngredient.fromMap(ing as Map<String, dynamic>))
@@ -67,12 +69,14 @@ class OptionGroup {
 
   factory OptionGroup.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    int asInt(dynamic value) =>
+        value is num ? value.toInt() : int.tryParse('$value') ?? 0;
     return OptionGroup(
       id: doc.id,
-      name: data['name'] ?? '',
+      name: data['name']?.toString() ?? '',
       isRequired: data['isRequired'] ?? false,
-      minSelection: data['minSelection'] ?? 0,
-      maxSelection: data['maxSelection'] ?? 0,
+      minSelection: asInt(data['minSelection']),
+      maxSelection: asInt(data['maxSelection']),
       options: (data['options'] as List<dynamic>?)
               ?.map((o) => OptionItem.fromMap(o as Map<String, dynamic>))
               .toList() ??
@@ -103,7 +107,7 @@ class OptionGroupService {
   OptionGroupService._internal();
 
   final _firestore = FirebaseFirestore.instance;
-  
+
   CollectionReference get _collection => _firestore
       .collection(Col.name('Canteens'))
       .doc('canteen375')
@@ -111,7 +115,9 @@ class OptionGroupService {
 
   Stream<List<OptionGroup>> getOptionGroupsStream() {
     return _collection.orderBy('name').snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) => OptionGroup.fromFirestore(doc)).toList();
+      return snapshot.docs
+          .map((doc) => OptionGroup.fromFirestore(doc))
+          .toList();
     });
   }
 
@@ -130,5 +136,4 @@ class OptionGroupService {
   Future<void> linkMenuItems(String groupId, List<String> menuItemIds) async {
     await _collection.doc(groupId).update({'linkedMenuItems': menuItemIds});
   }
-
 }

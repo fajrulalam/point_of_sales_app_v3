@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class EditOrderScreen extends StatefulWidget {
   final bool isEmbedded;
@@ -44,9 +45,13 @@ class _EditOrderScreenState extends State<EditOrderScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
+          return Center(
+            child: Text(
+              'Gagal memuat pesanan: ${UserMessageService.fromError(snapshot.error)}',
+            ),
+          );
         }
-        
+
         final docs = snapshot.data?.docs ?? [];
         if (docs.isEmpty) {
           return Center(
@@ -79,7 +84,8 @@ class _EditOrderScreenState extends State<EditOrderScreen> {
 
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -102,9 +108,12 @@ class _EditOrderScreenState extends State<EditOrderScreen> {
                         ),
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: isCancelled ? Colors.red.shade50 : Colors.green.shade50,
+                            color: isCancelled
+                                ? Colors.red.shade50
+                                : Colors.green.shade50,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -112,7 +121,9 @@ class _EditOrderScreenState extends State<EditOrderScreen> {
                             style: GoogleFonts.poppins(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: isCancelled ? Colors.red.shade700 : Colors.green.shade700,
+                              color: isCancelled
+                                  ? Colors.red.shade700
+                                  : Colors.green.shade700,
                             ),
                           ),
                         ),
@@ -128,27 +139,31 @@ class _EditOrderScreenState extends State<EditOrderScreen> {
                     const SizedBox(height: 8),
                     ...orderItems.map((item) {
                       final name = item['namaPesanan'] ?? '';
-                      final qty = (item['dineInQuantity'] as int? ?? 0) + (item['takeAwayQuantity'] as int? ?? 0);
+                      final qty = (item['dineInQuantity'] as int? ?? 0) +
+                          (item['takeAwayQuantity'] as int? ?? 0);
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 4),
-                        child: Text('- $qty x $name', style: GoogleFonts.poppins(fontSize: 13)),
+                        child: Text('- $qty x $name',
+                            style: GoogleFonts.poppins(fontSize: 13)),
                       );
                     }).toList(),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: isCancelled ? null : () {
-                          final result = {
-                            'id': doc.id,
-                            'data': data,
-                          };
-                          if (widget.isEmbedded) {
-                            widget.onOrderSelected?.call(result);
-                          } else {
-                            Navigator.pop(context, result);
-                          }
-                        },
+                        onPressed: isCancelled
+                            ? null
+                            : () {
+                                final result = {
+                                  'id': doc.id,
+                                  'data': data,
+                                };
+                                if (widget.isEmbedded) {
+                                  widget.onOrderSelected?.call(result);
+                                } else {
+                                  Navigator.pop(context, result);
+                                }
+                              },
                         icon: const Icon(Icons.edit, size: 18),
                         label: const Text('Rubah Pesanan'),
                         style: ElevatedButton.styleFrom(

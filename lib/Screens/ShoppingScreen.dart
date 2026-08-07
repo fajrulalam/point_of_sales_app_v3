@@ -4,6 +4,7 @@ import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Screens/InventoryScreen.dart';
 import 'package:point_of_sales_app_v3/Services/ShoppingService.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,7 +16,8 @@ class ShoppingScreen extends StatefulWidget {
   State<ShoppingScreen> createState() => _ShoppingScreenState();
 }
 
-class _ShoppingScreenState extends State<ShoppingScreen> with SingleTickerProviderStateMixin {
+class _ShoppingScreenState extends State<ShoppingScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
   @override
@@ -35,7 +37,8 @@ class _ShoppingScreenState extends State<ShoppingScreen> with SingleTickerProvid
       appBar: AppBar(
         title: Text(
           'Belanja',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFF1A1A1A)),
+          style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold, color: const Color(0xFF1A1A1A)),
         ),
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF1A1A1A),
@@ -61,8 +64,10 @@ class _ShoppingScreenState extends State<ShoppingScreen> with SingleTickerProvid
                   ),
                 ),
               ),
-              labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
-              unselectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.normal, fontSize: 14),
+              labelStyle: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w600, fontSize: 14),
+              unselectedLabelStyle: GoogleFonts.poppins(
+                  fontWeight: FontWeight.normal, fontSize: 14),
               tabs: const [
                 Tab(text: 'Daftar Supplier'),
                 Tab(text: 'Pesanan Belanja'),
@@ -80,11 +85,13 @@ class _ShoppingScreenState extends State<ShoppingScreen> with SingleTickerProvid
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
-          final url = Uri.parse('https://sentra-distribusi-rejoso-gemilang.vercel.app/pos');
+          final url = Uri.parse(
+              'https://sentra-distribusi-rejoso-gemilang.vercel.app/pos');
           if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Could not launch Sentra Distribusi')),
+                const SnackBar(
+                    content: Text('Could not launch Sentra Distribusi')),
               );
             }
           }
@@ -181,10 +188,12 @@ class _SuppliersViewState extends State<SuppliersView> {
       padding: const EdgeInsets.all(12),
       child: TextField(
         controller: _searchController,
-        onChanged: (value) => setState(() => _searchQuery = value.toLowerCase()),
+        onChanged: (value) =>
+            setState(() => _searchQuery = value.toLowerCase()),
         decoration: InputDecoration(
           hintText: 'Cari nama barang...',
-          hintStyle: GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 14),
+          hintStyle:
+              GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 14),
           prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
           filled: true,
           fillColor: Colors.grey.shade50,
@@ -192,7 +201,8 @@ class _SuppliersViewState extends State<SuppliersView> {
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide.none,
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
       ),
     );
@@ -249,10 +259,12 @@ class _SuppliersViewState extends State<SuppliersView> {
           return const Center(child: CircularProgressIndicator());
         }
         final suppliers = snapshot.data ?? [];
-        suppliers.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        suppliers.sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
         if (suppliers.isEmpty) {
           return Center(
-            child: Text('Belum ada supplier.', style: GoogleFonts.poppins(color: Colors.grey.shade500)),
+            child: Text('Belum ada supplier.',
+                style: GoogleFonts.poppins(color: Colors.grey.shade500)),
           );
         }
 
@@ -266,12 +278,16 @@ class _SuppliersViewState extends State<SuppliersView> {
             return InkWell(
               onTap: () => setState(() => _selectedSupplierId = supplier.id),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFE8F5E9) : Colors.transparent,
+                  color:
+                      isSelected ? const Color(0xFFE8F5E9) : Colors.transparent,
                   border: Border(
                     left: BorderSide(
-                      color: isSelected ? const Color(0xFF2E7D32) : Colors.transparent,
+                      color: isSelected
+                          ? const Color(0xFF2E7D32)
+                          : Colors.transparent,
                       width: 3,
                     ),
                   ),
@@ -283,15 +299,21 @@ class _SuppliersViewState extends State<SuppliersView> {
                         supplier.name,
                         style: GoogleFonts.poppins(
                           fontSize: 14,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                          color: isSelected ? const Color(0xFF1B5E20) : Colors.black87,
+                          fontWeight:
+                              isSelected ? FontWeight.w600 : FontWeight.normal,
+                          color: isSelected
+                              ? const Color(0xFF1B5E20)
+                              : Colors.black87,
                         ),
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFF2E7D32) : Colors.grey.shade200,
+                        color: isSelected
+                            ? const Color(0xFF2E7D32)
+                            : Colors.grey.shade200,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
@@ -299,7 +321,8 @@ class _SuppliersViewState extends State<SuppliersView> {
                         style: GoogleFonts.poppins(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: isSelected ? Colors.white : Colors.grey.shade700,
+                          color:
+                              isSelected ? Colors.white : Colors.grey.shade700,
                         ),
                       ),
                     ),
@@ -370,13 +393,17 @@ class _SuppliersViewState extends State<SuppliersView> {
 
         List<SupplierItem> items = List.from(supplier.items);
         if (_searchQuery.isNotEmpty) {
-          items = items.where((item) => item.name.toLowerCase().contains(_searchQuery)).toList();
+          items = items
+              .where((item) => item.name.toLowerCase().contains(_searchQuery))
+              .toList();
         }
-        
+
         // Sort items alphabetically by display name
         items.sort((a, b) {
-          final nameA = ShoppingService.displayName(a.inventoryItemId, a.name).toLowerCase();
-          final nameB = ShoppingService.displayName(b.inventoryItemId, b.name).toLowerCase();
+          final nameA = ShoppingService.displayName(a.inventoryItemId, a.name)
+              .toLowerCase();
+          final nameB = ShoppingService.displayName(b.inventoryItemId, b.name)
+              .toLowerCase();
           return nameA.compareTo(nameB);
         });
 
@@ -424,19 +451,35 @@ class _SuppliersViewState extends State<SuppliersView> {
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: 'add_item',
-                child: Row(children: [Icon(Icons.add_box, size: 20), SizedBox(width: 8), Text('Tambah Barang')]),
+                child: Row(children: [
+                  Icon(Icons.add_box, size: 20),
+                  SizedBox(width: 8),
+                  Text('Tambah Barang')
+                ]),
               ),
               const PopupMenuItem(
                 value: 'create_order',
-                child: Row(children: [Icon(Icons.shopping_cart, size: 20), SizedBox(width: 8), Text('Buat Pesanan')]),
+                child: Row(children: [
+                  Icon(Icons.shopping_cart, size: 20),
+                  SizedBox(width: 8),
+                  Text('Buat Pesanan')
+                ]),
               ),
               const PopupMenuItem(
                 value: 'edit_supplier',
-                child: Row(children: [Icon(Icons.edit, size: 20), SizedBox(width: 8), Text('Edit Nama Supplier')]),
+                child: Row(children: [
+                  Icon(Icons.edit, size: 20),
+                  SizedBox(width: 8),
+                  Text('Edit Nama Supplier')
+                ]),
               ),
               PopupMenuItem(
                 value: 'delete_supplier',
-                child: Row(children: [Icon(Icons.delete, size: 20, color: Colors.red), SizedBox(width: 8), Text('Hapus Supplier', style: TextStyle(color: Colors.red))]),
+                child: Row(children: [
+                  Icon(Icons.delete, size: 20, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('Hapus Supplier', style: TextStyle(color: Colors.red))
+                ]),
               ),
             ],
           )
@@ -454,7 +497,9 @@ class _SuppliersViewState extends State<SuppliersView> {
             Icon(Icons.inventory, size: 64, color: Colors.grey.shade300),
             const SizedBox(height: 16),
             Text(
-              _searchQuery.isNotEmpty ? 'Barang tidak ditemukan' : 'Belum ada barang di supplier ini',
+              _searchQuery.isNotEmpty
+                  ? 'Barang tidak ditemukan'
+                  : 'Belum ada barang di supplier ini',
               style: GoogleFonts.poppins(color: Colors.grey.shade500),
             ),
           ],
@@ -477,7 +522,8 @@ class _SuppliersViewState extends State<SuppliersView> {
     final inventoryService = InventoryService();
     int currentStock = 0;
     if (item.inventoryItemId != null && item.inventoryItemId!.isNotEmpty) {
-      currentStock = inventoryService.allInventoryItems[item.inventoryItemId]?.stock ?? 0;
+      currentStock =
+          inventoryService.allInventoryItems[item.inventoryItemId]?.stock ?? 0;
     }
 
     return Container(
@@ -527,19 +573,23 @@ class _SuppliersViewState extends State<SuppliersView> {
                     ),
                     if (item.isPerishable)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.orange.shade100,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
                           'Perishable',
-                          style: GoogleFonts.poppins(fontSize: 10, color: Colors.deepOrange),
+                          style: GoogleFonts.poppins(
+                              fontSize: 10, color: Colors.deepOrange),
                         ),
                       ),
-                    if (item.inventoryItemId != null && item.inventoryItemId!.isNotEmpty)
+                    if (item.inventoryItemId != null &&
+                        item.inventoryItemId!.isNotEmpty)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.green.shade50,
                           borderRadius: BorderRadius.circular(12),
@@ -548,11 +598,15 @@ class _SuppliersViewState extends State<SuppliersView> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.link, size: 12, color: Colors.green.shade700),
+                            Icon(Icons.link,
+                                size: 12, color: Colors.green.shade700),
                             const SizedBox(width: 4),
                             Text(
                               'Linked to Inventory',
-                              style: GoogleFonts.poppins(fontSize: 10, color: Colors.green.shade700, fontWeight: FontWeight.w500),
+                              style: GoogleFonts.poppins(
+                                  fontSize: 10,
+                                  color: Colors.green.shade700,
+                                  fontWeight: FontWeight.w500),
                             ),
                           ],
                         ),
@@ -563,12 +617,14 @@ class _SuppliersViewState extends State<SuppliersView> {
             ),
           ),
           OutlinedButton(
-            onPressed: () => _showAddOrEditItemDialog(context, supplier, editItem: item, itemIndex: originalIndex),
+            onPressed: () => _showAddOrEditItemDialog(context, supplier,
+                editItem: item, itemIndex: originalIndex),
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFF2E7D32),
               side: const BorderSide(color: Color(0xFF2E7D32)),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
             child: const Text('Edit'),
           ),
@@ -579,7 +635,8 @@ class _SuppliersViewState extends State<SuppliersView> {
             onPressed: () {
               List<SupplierItem> updatedItems = List.from(supplier.items);
               updatedItems.removeAt(originalIndex);
-              ShoppingService.updateSupplier(supplier.id, supplier.name, updatedItems);
+              ShoppingService.updateSupplier(
+                  supplier.id, supplier.name, updatedItems);
             },
           ),
         ],
@@ -593,13 +650,17 @@ class _SuppliersViewState extends State<SuppliersView> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Tambah Supplier', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Tambah Supplier',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
         content: TextField(
           controller: nameController,
-          decoration: const InputDecoration(labelText: 'Nama Supplier', border: OutlineInputBorder()),
+          decoration: const InputDecoration(
+              labelText: 'Nama Supplier', border: OutlineInputBorder()),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () async {
               if (nameController.text.isNotEmpty) {
@@ -607,7 +668,9 @@ class _SuppliersViewState extends State<SuppliersView> {
                 if (context.mounted) Navigator.pop(context);
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white),
             child: const Text('Simpan'),
           ),
         ],
@@ -621,21 +684,28 @@ class _SuppliersViewState extends State<SuppliersView> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Edit Nama Supplier', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Edit Nama Supplier',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
         content: TextField(
           controller: nameController,
-          decoration: const InputDecoration(labelText: 'Nama Supplier', border: OutlineInputBorder()),
+          decoration: const InputDecoration(
+              labelText: 'Nama Supplier', border: OutlineInputBorder()),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () async {
               if (nameController.text.isNotEmpty) {
-                await ShoppingService.updateSupplier(supplier.id, nameController.text, supplier.items);
+                await ShoppingService.updateSupplier(
+                    supplier.id, nameController.text, supplier.items);
                 if (context.mounted) Navigator.pop(context);
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white),
             child: const Text('Simpan'),
           ),
         ],
@@ -647,10 +717,14 @@ class _SuppliersViewState extends State<SuppliersView> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Hapus Supplier', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: Text('Apakah Anda yakin ingin menghapus supplier ${supplier.name}?'),
+        title: Text('Hapus Supplier',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: Text(
+            'Apakah Anda yakin ingin menghapus supplier ${supplier.name}?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () async {
               await ShoppingService.deleteSupplier(supplier.id);
@@ -659,7 +733,8 @@ class _SuppliersViewState extends State<SuppliersView> {
                 Navigator.pop(context);
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red, foregroundColor: Colors.white),
             child: const Text('Hapus'),
           ),
         ],
@@ -667,7 +742,8 @@ class _SuppliersViewState extends State<SuppliersView> {
     );
   }
 
-  Future<void> _showAddOrEditItemDialog(BuildContext context, Supplier supplier, {SupplierItem? editItem, int? itemIndex}) async {
+  Future<void> _showAddOrEditItemDialog(BuildContext context, Supplier supplier,
+      {SupplierItem? editItem, int? itemIndex}) async {
     final service = InventoryService();
     if (service.allInventoryItems.isEmpty) {
       await service.refreshInventoryCache();
@@ -712,7 +788,9 @@ class _SuppliersViewState extends State<SuppliersView> {
         builder: (dialogContext, setDialogState) {
           return AlertDialog(
             title: Text(
-              editItem == null ? 'Tambah Barang dari Inventory' : 'Ganti Barang dari Inventory',
+              editItem == null
+                  ? 'Tambah Barang dari Inventory'
+                  : 'Ganti Barang dari Inventory',
               style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
             ),
             content: SizedBox(
@@ -723,7 +801,8 @@ class _SuppliersViewState extends State<SuppliersView> {
                 children: [
                   Text(
                     'Pilih bahan yang sudah terdaftar di Inventory.',
-                    style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                    style: GoogleFonts.poppins(
+                        fontSize: 12, color: Colors.grey.shade600),
                   ),
                   const SizedBox(height: 12),
                   Autocomplete<InventoryItem>(
@@ -765,7 +844,8 @@ class _SuppliersViewState extends State<SuppliersView> {
                           elevation: 4,
                           borderRadius: BorderRadius.circular(8),
                           child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 240, maxWidth: 400),
+                            constraints: const BoxConstraints(
+                                maxHeight: 240, maxWidth: 400),
                             child: ListView.builder(
                               shrinkWrap: true,
                               padding: EdgeInsets.zero,
@@ -775,7 +855,8 @@ class _SuppliersViewState extends State<SuppliersView> {
                                 return ListTile(
                                   dense: true,
                                   title: Text(inv.name),
-                                  subtitle: Text('Unit: ${inv.unit}${inv.isPerishable ? " • Perishable" : ""}'),
+                                  subtitle: Text(
+                                      'Unit: ${inv.unit}${inv.isPerishable ? " • Perishable" : ""}'),
                                   onTap: () => onSelected(inv),
                                 );
                               },
@@ -798,19 +879,24 @@ class _SuppliersViewState extends State<SuppliersView> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(children: [
-                            const Icon(Icons.check_circle, color: Color(0xFF2E7D32), size: 18),
+                            const Icon(Icons.check_circle,
+                                color: Color(0xFF2E7D32), size: 18),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
                                 selected!.name,
-                                style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                                style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w600),
                               ),
                             ),
                           ]),
                           const SizedBox(height: 4),
-                          Text('Unit: ${selected!.unit}', style: GoogleFonts.poppins(fontSize: 12)),
+                          Text('Unit: ${selected!.unit}',
+                              style: GoogleFonts.poppins(fontSize: 12)),
                           if (selected!.isPerishable)
-                            Text('Perishable', style: GoogleFonts.poppins(fontSize: 12, color: Colors.deepOrange)),
+                            Text('Perishable',
+                                style: GoogleFonts.poppins(
+                                    fontSize: 12, color: Colors.deepOrange)),
                         ],
                       ),
                     ),
@@ -821,7 +907,8 @@ class _SuppliersViewState extends State<SuppliersView> {
                       Expanded(
                         child: Text(
                           'Bahan belum ada di Inventory?',
-                          style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700),
+                          style: GoogleFonts.poppins(
+                              fontSize: 12, color: Colors.grey.shade700),
                         ),
                       ),
                       TextButton.icon(
@@ -829,7 +916,8 @@ class _SuppliersViewState extends State<SuppliersView> {
                           Navigator.pop(dialogContext);
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const InventoryScreen()),
+                            MaterialPageRoute(
+                                builder: (_) => const InventoryScreen()),
                           );
                         },
                         icon: const Icon(Icons.add_circle_outline, size: 16),
@@ -841,13 +929,16 @@ class _SuppliersViewState extends State<SuppliersView> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Batal')),
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Batal')),
               ElevatedButton(
                 onPressed: selected == null
                     ? null
                     : () async {
                         final inv = selected!;
-                        final updatedItems = List<SupplierItem>.from(supplier.items);
+                        final updatedItems =
+                            List<SupplierItem>.from(supplier.items);
                         final newItem = SupplierItem(
                           name: inv.name,
                           unit: inv.unit.isEmpty ? 'pcs' : inv.unit,
@@ -881,7 +972,8 @@ class _SuppliersViewState extends State<SuppliersView> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('Inventory Kosong', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Inventory Kosong',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
         content: Text(message, style: GoogleFonts.poppins(fontSize: 14)),
         actions: [
           TextButton(
@@ -899,16 +991,19 @@ class _SuppliersViewState extends State<SuppliersView> {
             icon: const Icon(Icons.inventory_2),
             label: const Text('Ke Inventory'),
             style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _showCreateOrderDialog(BuildContext context, Supplier supplier) async {
+  Future<void> _showCreateOrderDialog(
+      BuildContext context, Supplier supplier) async {
     if (supplier.items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier tidak mempunyai barang.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Supplier tidak mempunyai barang.')));
       return;
     }
 
@@ -920,8 +1015,10 @@ class _SuppliersViewState extends State<SuppliersView> {
 
     final List<SupplierItem> sortedItems = List.from(supplier.items);
     sortedItems.sort((a, b) {
-      final nameA = ShoppingService.displayName(a.inventoryItemId, a.name).toLowerCase();
-      final nameB = ShoppingService.displayName(b.inventoryItemId, b.name).toLowerCase();
+      final nameA =
+          ShoppingService.displayName(a.inventoryItemId, a.name).toLowerCase();
+      final nameB =
+          ShoppingService.displayName(b.inventoryItemId, b.name).toLowerCase();
       return nameA.compareTo(nameB);
     });
 
@@ -933,13 +1030,16 @@ class _SuppliersViewState extends State<SuppliersView> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Buat Pesanan ke ${supplier.name}', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        title: Text('Buat Pesanan ke ${supplier.name}',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
         content: SizedBox(
           width: 500,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Masukkan jumlah yang akan dipesan. Angka 0 tidak akan dimasukkan ke order.', style: GoogleFonts.poppins(fontSize: 12)),
+              Text(
+                  'Masukkan jumlah yang akan dipesan. Angka 0 tidak akan dimasukkan ke order.',
+                  style: GoogleFonts.poppins(fontSize: 12)),
               const SizedBox(height: 12),
               Expanded(
                 child: ListView.builder(
@@ -948,18 +1048,23 @@ class _SuppliersViewState extends State<SuppliersView> {
                   itemBuilder: (context, index) {
                     final item = sortedItems[index];
                     int currentStock = 0;
-                    if (item.inventoryItemId != null && item.inventoryItemId!.isNotEmpty) {
-                      currentStock = inventoryService.allInventoryItems[item.inventoryItemId]?.stock ?? 0;
+                    if (item.inventoryItemId != null &&
+                        item.inventoryItemId!.isNotEmpty) {
+                      currentStock = inventoryService
+                              .allInventoryItems[item.inventoryItemId]?.stock ??
+                          0;
                     }
                     return ListTile(
-                      title: Text(ShoppingService.displayName(item.inventoryItemId, item.name)),
+                      title: Text(ShoppingService.displayName(
+                          item.inventoryItemId, item.name)),
                       subtitle: Text('${item.unit} • Stok: $currentStock'),
                       trailing: SizedBox(
                         width: 100,
                         child: TextField(
                           controller: controllers[index],
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                          decoration: const InputDecoration(
+                              border: OutlineInputBorder(), isDense: true),
                         ),
                       ),
                     );
@@ -970,7 +1075,9 @@ class _SuppliersViewState extends State<SuppliersView> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () async {
               List<ShoppingOrderItem> borderItems = [];
@@ -979,7 +1086,8 @@ class _SuppliersViewState extends State<SuppliersView> {
                 if (qty > 0) {
                   final src = sortedItems[i];
                   borderItems.add(ShoppingOrderItem(
-                    name: ShoppingService.displayName(src.inventoryItemId, src.name),
+                    name: ShoppingService.displayName(
+                        src.inventoryItemId, src.name),
                     quantity: qty,
                     unit: src.unit,
                     isPerishable: src.isPerishable,
@@ -989,22 +1097,28 @@ class _SuppliersViewState extends State<SuppliersView> {
               }
 
               if (borderItems.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tidak ada item yang dipesan')));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Tidak ada item yang dipesan')));
                 return;
               }
 
-              final ShoppingOrder newOrder = await ShoppingService.createOrder(supplier.id, supplier.name, borderItems);
+              final ShoppingOrder newOrder = await ShoppingService.createOrder(
+                  supplier.id, supplier.name, borderItems);
               if (context.mounted) {
                 Navigator.pop(context);
                 showDialog(
                   context: context,
                   builder: (ctx) => AlertDialog(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                     title: Row(
                       children: [
-                        const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+                        const Icon(Icons.check_circle,
+                            color: Color(0xFF2E7D32)),
                         const SizedBox(width: 8),
-                        Text('Order Berhasil Dibuat', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text('Order Berhasil Dibuat',
+                            style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.bold, fontSize: 16)),
                       ],
                     ),
                     content: Text(
@@ -1014,22 +1128,29 @@ class _SuppliersViewState extends State<SuppliersView> {
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx),
-                        child: Text('Lewati', style: GoogleFonts.poppins(color: Colors.grey)),
+                        child: Text('Lewati',
+                            style: GoogleFonts.poppins(color: Colors.grey)),
                       ),
                       ElevatedButton.icon(
                         icon: const Icon(Icons.send, size: 18),
-                        label: Text('Kirim ke WhatsApp', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                        label: Text('Kirim ke WhatsApp',
+                            style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w600)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF25D366),
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
                         ),
                         onPressed: () async {
                           Navigator.pop(ctx);
                           try {
-                            final pdfPath = await ShoppingService.saveOrderAsImage(newOrder);
+                            final pdfPath =
+                                await ShoppingService.saveOrderAsImage(
+                                    newOrder);
                             final orderMessage = newOrder.items
-                                .map((item) => '(${item.quantity}${item.unit}) ${ShoppingService.displayName(item.inventoryItemId, item.name)}')
+                                .map((item) =>
+                                    '(${item.quantity}${item.unit}) ${ShoppingService.displayName(item.inventoryItemId, item.name)}')
                                 .join('\n');
                             await Share.shareXFiles(
                               [XFile(pdfPath, mimeType: 'image/jpeg')],
@@ -1038,7 +1159,9 @@ class _SuppliersViewState extends State<SuppliersView> {
                           } catch (e) {
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Gagal membagikan PDF: $e')),
+                                SnackBar(
+                                    content: Text(
+                                        'Gagal membagikan gambar: ${UserMessageService.fromError(e)}')),
                               );
                             }
                           }
@@ -1049,7 +1172,9 @@ class _SuppliersViewState extends State<SuppliersView> {
                 );
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white),
             child: const Text('Buat & Simpan'),
           ),
         ],
@@ -1074,14 +1199,15 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
       context: context,
       firstDate: DateTime(2020),
       lastDate: DateTime(2100),
-      initialDateRange: _startDate != null && _endDate != null 
-          ? DateTimeRange(start: _startDate!, end: _endDate!) 
+      initialDateRange: _startDate != null && _endDate != null
+          ? DateTimeRange(start: _startDate!, end: _endDate!)
           : null,
     );
     if (picked != null) {
       setState(() {
         _startDate = picked.start;
-        _endDate = DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
+        _endDate = DateTime(
+            picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
       });
     }
   }
@@ -1106,7 +1232,9 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                 _startDate != null && _endDate != null
                     ? '${DateFormat('dd MMM yyyy').format(_startDate!)} - ${DateFormat('dd MMM yyyy').format(_endDate!)}'
                     : 'Hari Ini (${DateFormat('dd MMM yyyy').format(DateTime.now())})',
-                style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: const Color(0xFF2E7D32)),
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF2E7D32)),
               ),
               const SizedBox(width: 8),
               if (_startDate != null)
@@ -1125,18 +1253,24 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
         ),
         Expanded(
           child: StreamBuilder<List<ShoppingOrder>>(
-            stream: ShoppingService.getOrdersStream(startDate: _startDate, endDate: _endDate),
+            stream: ShoppingService.getOrdersStream(
+                startDate: _startDate, endDate: _endDate),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
               if (snapshot.hasError) {
-                return Center(child: Text('Error: ${snapshot.error}'));
+                return Center(
+                  child: Text(
+                    'Gagal memuat riwayat pesanan: ${UserMessageService.fromError(snapshot.error)}',
+                  ),
+                );
               }
-              
+
               final orders = snapshot.data ?? [];
               if (orders.isEmpty) {
-                return const Center(child: Text('Belum ada riwayat pesanan shopping.'));
+                return const Center(
+                    child: Text('Belum ada riwayat pesanan shopping.'));
               }
 
               return ListView.builder(
@@ -1144,101 +1278,128 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                 itemCount: orders.length,
                 itemBuilder: (context, index) {
                   final order = orders[index];
-                  final dateStr = DateFormat('dd MMM yyyy HH:mm').format(order.date);
-                  
+                  final dateStr =
+                      DateFormat('dd MMM yyyy HH:mm').format(order.date);
+
                   return GestureDetector(
                     onLongPress: order.status != 'completed'
                         ? () => _showDeleteOrderDialog(context, order)
                         : null,
                     child: Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    color: order.status == 'completed' ? Colors.green.shade50 : Colors.white,
-                    child: ExpansionTile(
-                      title: Text(
-                        'Order - ${order.supplierName}',
-                        style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text('Tanggal: $dateStr | Status: ${order.status.toUpperCase()}'),
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey.shade300),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Table(
-                                columnWidths: const {
-                                  0: FlexColumnWidth(3),
-                                  1: FlexColumnWidth(1),
-                                  2: FlexColumnWidth(1.2),
-                                },
-                                children: [
-                                  TableRow(
-                                    decoration: const BoxDecoration(color: Color(0xFF2E7D32)),
-                                    children: [
-                                      _buildTableCell('Nama Item', isHeader: true),
-                                      _buildTableCell('Unit', isHeader: true),
-                                      _buildTableCell('Jumlah', isHeader: true),
-                                    ],
-                                  ),
-                                  ...order.items.asMap().entries.map((entry) {
-                                    int i = entry.key;
-                                    var item = entry.value;
-                                    return TableRow(
-                                      decoration: BoxDecoration(
-                                        color: i % 2 == 0 ? Colors.white : Colors.grey.shade50,
-                                      ),
-                                      children: [
-                                        _buildTableCell(ShoppingService.displayName(item.inventoryItemId, item.name)),
-                                        _buildTableCell(item.unit),
-                                        _buildTableCell(item.quantity.toString(), isBold: true),
-                                      ],
-                                    );
-                                  }).toList(),
-                                ],
-                              ),
-                            ),
-                          ),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      color: order.status == 'completed'
+                          ? Colors.green.shade50
+                          : Colors.white,
+                      child: ExpansionTile(
+                        title: Text(
+                          'Order - ${order.supplierName}',
+                          style:
+                              GoogleFonts.poppins(fontWeight: FontWeight.bold),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              ElevatedButton.icon(
-                                onPressed: () => ShoppingService.openOrderAsImage(order),
-                                icon: const Icon(Icons.image),
-                                label: const Text('Gambar'),
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white),
+                        subtitle: Text(
+                            'Tanggal: $dateStr | Status: ${order.status.toUpperCase()}'),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey.shade300),
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                              ElevatedButton.icon(
-                                onPressed: () => _shareOrder(context, order),
-                                icon: const Icon(Icons.send),
-                                label: const Text('Share'),
-                                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366), foregroundColor: Colors.white),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Table(
+                                  columnWidths: const {
+                                    0: FlexColumnWidth(3),
+                                    1: FlexColumnWidth(1),
+                                    2: FlexColumnWidth(1.2),
+                                  },
+                                  children: [
+                                    TableRow(
+                                      decoration: const BoxDecoration(
+                                          color: Color(0xFF2E7D32)),
+                                      children: [
+                                        _buildTableCell('Nama Item',
+                                            isHeader: true),
+                                        _buildTableCell('Unit', isHeader: true),
+                                        _buildTableCell('Jumlah',
+                                            isHeader: true),
+                                      ],
+                                    ),
+                                    ...order.items.asMap().entries.map((entry) {
+                                      int i = entry.key;
+                                      var item = entry.value;
+                                      return TableRow(
+                                        decoration: BoxDecoration(
+                                          color: i % 2 == 0
+                                              ? Colors.white
+                                              : Colors.grey.shade50,
+                                        ),
+                                        children: [
+                                          _buildTableCell(
+                                              ShoppingService.displayName(
+                                                  item.inventoryItemId,
+                                                  item.name)),
+                                          _buildTableCell(item.unit),
+                                          _buildTableCell(
+                                              item.quantity.toString(),
+                                              isBold: true),
+                                        ],
+                                      );
+                                    }).toList(),
+                                  ],
+                                ),
                               ),
-                              if (order.status != 'completed') ...[
-                                ElevatedButton.icon(
-                                  onPressed: () => _showCorrectionDialog(context, order),
-                                  icon: const Icon(Icons.edit),
-                                  label: const Text('Correction'),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-                                ),
-                                ElevatedButton.icon(
-                                  onPressed: () => _showCompleteOrderDialog(context, order),
-                                  icon: const Icon(Icons.check_circle),
-                                  label: const Text('Complete Shopping'),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                                ),
-                              ]
-                            ],
+                            ),
                           ),
-                        )
-                      ],
-                    ),
+                          Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                ElevatedButton.icon(
+                                  onPressed: () =>
+                                      ShoppingService.openOrderAsImage(order),
+                                  icon: const Icon(Icons.image),
+                                  label: const Text('Gambar'),
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.blueAccent,
+                                      foregroundColor: Colors.white),
+                                ),
+                                ElevatedButton.icon(
+                                  onPressed: () => _shareOrder(context, order),
+                                  icon: const Icon(Icons.send),
+                                  label: const Text('Share'),
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF25D366),
+                                      foregroundColor: Colors.white),
+                                ),
+                                if (order.status != 'completed') ...[
+                                  ElevatedButton.icon(
+                                    onPressed: () =>
+                                        _showCorrectionDialog(context, order),
+                                    icon: const Icon(Icons.edit),
+                                    label: const Text('Correction'),
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.orange,
+                                        foregroundColor: Colors.white),
+                                  ),
+                                  ElevatedButton.icon(
+                                    onPressed: () => _showCompleteOrderDialog(
+                                        context, order),
+                                    icon: const Icon(Icons.check_circle),
+                                    label: const Text('Complete Shopping'),
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.green,
+                                        foregroundColor: Colors.white),
+                                  ),
+                                ]
+                              ],
+                            ),
+                          )
+                        ],
+                      ),
                     ),
                   );
                 },
@@ -1250,7 +1411,8 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
     );
   }
 
-  Widget _buildTableCell(String text, {bool isHeader = false, bool isBold = false}) {
+  Widget _buildTableCell(String text,
+      {bool isHeader = false, bool isBold = false}) {
     return Padding(
       padding: const EdgeInsets.all(8.0),
       child: Text(
@@ -1273,7 +1435,8 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
           children: [
             const Icon(Icons.delete_outline, color: Colors.red),
             const SizedBox(width: 8),
-            Text('Hapus Pesanan?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            Text('Hapus Pesanan?',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
           ],
         ),
         content: Text(
@@ -1283,23 +1446,37 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
+            child:
+                Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
           ),
           ElevatedButton.icon(
             icon: const Icon(Icons.delete, size: 18),
-            label: Text('Hapus', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+            label: Text('Hapus',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () async {
               Navigator.pop(ctx);
-              await ShoppingService.deleteOrder(order.id);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Pesanan berhasil dihapus')),
-                );
+              try {
+                await ShoppingService.deleteOrder(order.id);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Pesanan berhasil dihapus')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text(
+                            'Gagal menghapus pesanan: ${UserMessageService.fromError(e)}'),
+                        backgroundColor: Colors.red),
+                  );
+                }
               }
             },
           ),
@@ -1312,7 +1489,8 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
     try {
       final pdfPath = await ShoppingService.saveOrderAsImage(order);
       final orderMessage = order.items
-          .map((item) => '(${item.quantity}${item.unit}) ${ShoppingService.displayName(item.inventoryItemId, item.name)}')
+          .map((item) =>
+              '(${item.quantity}${item.unit}) ${ShoppingService.displayName(item.inventoryItemId, item.name)}')
           .join('\n');
       await Share.shareXFiles(
         [XFile(pdfPath, mimeType: 'image/jpeg')],
@@ -1321,7 +1499,9 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal membagikan PDF: $e')),
+          SnackBar(
+              content: Text(
+                  'Gagal membagikan gambar: ${UserMessageService.fromError(e)}')),
         );
       }
     }
@@ -1329,73 +1509,115 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
 
   void _showCorrectionDialog(BuildContext context, ShoppingOrder order) {
     if (order.items.isEmpty) return;
+    bool isSaving = false;
 
     final Map<int, TextEditingController> controllers = {};
     for (int i = 0; i < order.items.length; i++) {
-      controllers[i] = TextEditingController(text: order.items[i].quantity.toString());
+      controllers[i] =
+          TextEditingController(text: order.items[i].quantity.toString());
     }
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Koreksi Pesanan', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        content: SizedBox(
-          width: 500,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Ubah jumlah barang yang datang. Jika tidak datang, ubah menjadi 0.', style: GoogleFonts.poppins(fontSize: 12)),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: order.items.length,
-                  itemBuilder: (context, index) {
-                    final item = order.items[index];
-                    return ListTile(
-                      title: Text(ShoppingService.displayName(item.inventoryItemId, item.name)),
-                      subtitle: Text(item.unit),
-                      trailing: SizedBox(
-                        width: 100,
-                        child: TextField(
-                          controller: controllers[index],
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Koreksi Pesanan',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: 500,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                    'Ubah jumlah barang yang datang. Jika tidak datang, ubah menjadi 0.',
+                    style: GoogleFonts.poppins(fontSize: 12)),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: order.items.length,
+                    itemBuilder: (context, index) {
+                      final item = order.items[index];
+                      return ListTile(
+                        title: Text(ShoppingService.displayName(
+                            item.inventoryItemId, item.name)),
+                        subtitle: Text(item.unit),
+                        trailing: SizedBox(
+                          width: 100,
+                          child: TextField(
+                            controller: controllers[index],
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                                border: OutlineInputBorder(), isDense: true),
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
-          ElevatedButton(
-            onPressed: () async {
-              List<ShoppingOrderItem> correctedItems = [];
-              for (int i = 0; i < order.items.length; i++) {
-                int qty = int.tryParse(controllers[i]?.text ?? '0') ?? 0;
-                correctedItems.add(ShoppingOrderItem(
-                  name: ShoppingService.displayName(order.items[i].inventoryItemId, order.items[i].name),
-                  quantity: qty,
-                  unit: order.items[i].unit,
-                  isPerishable: order.items[i].isPerishable,
-                  inventoryItemId: order.items[i].inventoryItemId,
-                ));
-              }
+          actions: [
+            TextButton(
+              onPressed: isSaving ? null : () => Navigator.pop(context),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      setDialogState(() => isSaving = true);
+                      List<ShoppingOrderItem> correctedItems = [];
+                      for (int i = 0; i < order.items.length; i++) {
+                        int qty =
+                            int.tryParse(controllers[i]?.text ?? '0') ?? 0;
+                        correctedItems.add(ShoppingOrderItem(
+                          name: ShoppingService.displayName(
+                              order.items[i].inventoryItemId,
+                              order.items[i].name),
+                          quantity: qty,
+                          unit: order.items[i].unit,
+                          isPerishable: order.items[i].isPerishable,
+                          inventoryItemId: order.items[i].inventoryItemId,
+                        ));
+                      }
 
-              await ShoppingService.updateOrderItems(order.id, correctedItems);
-              if (context.mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pesanan berhasil dikoreksi')));
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-            child: const Text('Simpan Koreksi'),
-          ),
-        ],
+                      try {
+                        await ShoppingService.updateOrderItems(
+                            order.id, correctedItems);
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Pesanan berhasil dikoreksi')));
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          setDialogState(() => isSaving = false);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                                content: Text(
+                                    'Gagal mengoreksi pesanan: ${UserMessageService.fromError(e)}'),
+                                backgroundColor: Colors.red),
+                          );
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white),
+              child: isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Simpan Koreksi'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1407,8 +1629,10 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
           return AlertDialog(
-            title: Text('Selesaikan Order?', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-            content: const Text('Pastikan barang yang datang sudah sesuai. Jika belum sesuai, Anda dapat melakukan Koreksi (Correction). Setelah diselesaikan, barang akan ditambahkan ke Inventory stok sesuai dengan jumlah yang tercatat.'),
+            title: Text('Selesaikan Order?',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+            content: const Text(
+                'Pastikan barang yang datang sudah sesuai. Jika belum sesuai, Anda dapat melakukan Koreksi (Correction). Setelah diselesaikan, barang akan ditambahkan ke Inventory stok sesuai dengan jumlah yang tercatat.'),
             actions: [
               TextButton(
                 onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
@@ -1420,11 +1644,16 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                     : () async {
                         setDialogState(() => isSaving = true);
                         try {
-                          await ShoppingService.completeOrder(order);
+                          final result =
+                              await ShoppingService.completeOrder(order);
                           if (dialogContext.mounted) {
                             Navigator.pop(dialogContext);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Stok berhasil ditambahkan ke Inventory')),
+                              SnackBar(
+                                content: Text(result.wasAlreadyApplied
+                                    ? 'Pesanan ini sudah pernah diselesaikan'
+                                    : 'Stok berhasil ditambahkan ke Inventory'),
+                              ),
                             );
                           }
                         } catch (e) {
@@ -1432,19 +1661,23 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                             setDialogState(() => isSaving = false);
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('Gagal menyelesaikan pesanan: $e'),
+                                content: Text(
+                                    'Gagal menyelesaikan pesanan: ${UserMessageService.fromError(e)}'),
                                 backgroundColor: Colors.red,
                               ),
                             );
                           }
                         }
                       },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white),
                 child: isSaving
                     ? const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
                       )
                     : const Text('Ya, Selesai'),
               ),

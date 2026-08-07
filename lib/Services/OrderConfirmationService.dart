@@ -24,6 +24,7 @@ import 'package:dropdown_search/dropdown_search.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Services/MemberService.dart';
 import 'package:point_of_sales_app_v3/Services/VoucherProgramService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class OrderConfirmationService {
   static Future<void> showOrderConfirmationDialog({
@@ -52,12 +53,14 @@ class OrderConfirmationService {
     required Function(int) setJumlahItem,
     required Function(String, int)
         addRecommendedItem, // Add callback to add item
-    List<String> menuItems = const [], // Available menu items for filtering recommendations
+    List<String> menuItems =
+        const [], // Available menu items for filtering recommendations
     bool printerIsConnected = false,
     Member? initialSelectedMember,
     void Function(Member?)? onSelectedMemberChanged,
   }) async {
-    final activePesananList = pesananList.where((p) => p.totalQuantity > 0).toList();
+    final activePesananList =
+        pesananList.where((p) => p.totalQuantity > 0).toList();
     if (activePesananList.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -114,6 +117,16 @@ class OrderConfirmationService {
         memberName: result['memberName'],
         memberPhone: result['memberPhone'],
         onSelectedMemberChanged: onSelectedMemberChanged,
+        operationId: _buildOperationId('open_bill', [
+          nomorBerikutnya.toString(),
+          result['memberId']?.toString() ?? '',
+          getDate(),
+          totalHarga.toString(),
+          activePesananList
+              .map((item) =>
+                  '${item.orderKey}:${item.dineInQuantity}:${item.takeAwayQuantity}:${item.harga}')
+              .join('|'),
+        ]),
       );
     } else if (result != null && result['confirmed'] == true) {
       int finalTotal = result['finalTotal'] ?? totalHarga;
@@ -155,6 +168,23 @@ class OrderConfirmationService {
         programExtraPaymentMethod: result['programExtraPaymentMethod'],
         programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
         onSelectedMemberChanged: onSelectedMemberChanged,
+        operationId: _buildOperationId('sale', [
+          nomorBerikutnya.toString(),
+          memberId ?? '',
+          getDate(),
+          finalTotal.toString(),
+          paymentMethod ?? '',
+          appliedVoucherCode ?? '',
+          (result['isSplitPayment'] ?? false).toString(),
+          (result['splitCashAmount'] ?? 0).toString(),
+          (result['splitQrisAmount'] ?? 0).toString(),
+          result['voucherProgramId']?.toString() ?? '',
+          (result['programNominal'] ?? 0).toString(),
+          activePesananList
+              .map((item) =>
+                  '${item.orderKey}:${item.dineInQuantity}:${item.takeAwayQuantity}:${item.harga}')
+              .join('|'),
+        ]),
       );
     } else {
       uangYangDiterimaController.clear();
@@ -192,7 +222,8 @@ class OrderConfirmationService {
     List<String> menuItems = const [],
     VoidCallback? onOrderCompleted,
   }) async {
-    final activePesananList = pesananList.where((p) => p.totalQuantity > 0).toList();
+    final activePesananList =
+        pesananList.where((p) => p.totalQuantity > 0).toList();
     if (activePesananList.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -237,6 +268,7 @@ class OrderConfirmationService {
         context: context,
         selfOrder: selfOrder,
         pesananList: activePesananList,
+        basketToClear: pesananList,
         totalHarga: finalTotal,
         originalTotal: totalHarga,
         isTakeAway: isTakeAway,
@@ -266,19 +298,317 @@ class OrderConfirmationService {
         programNominal: result['programNominal'] ?? 0,
         programExtraPaymentMethod: result['programExtraPaymentMethod'],
         programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
+        operationId: 'self_order_${selfOrder.id}',
       );
     } else {
       uangYangDiterimaController.clear();
     }
   }
 
-  /// Process a self-order (similar to _processOrder but updates SelfOrder status)
   static Future<void> _processSelfOrder({
     required BuildContext context,
     required SelfOrder selfOrder,
     required List<PesananObject> pesananList,
+    required List<PesananObject> basketToClear,
     required int totalHarga,
-    required int originalTotal, String? customerName,
+    required int originalTotal,
+    required bool isTakeAway,
+    required int biayaBungkus,
+    required TextEditingController customerNameController,
+    required TextEditingController uangYangDiterimaController,
+    required int nomorBerikutnya,
+    required Function() getTotal,
+    required Future<void> Function({
+      List<PesananObject>? customPesananList,
+      int? overrideNomorBerikutnya,
+      int? overrideTotalHarga,
+      bool? overrideIsTakeAway,
+      int discountAmount,
+      int originalTotal,
+      String? customerName,
+      int? voucherRemaining,
+    }) printReceipt,
+    required String Function() getYear,
+    required String Function() getMonth,
+    required String Function() getDate,
+    required Function(int) setJumlahItem,
+    required bool isMember,
+    String? memberId,
+    String? memberPhone,
+    String? appliedVoucherCode,
+    bool isPosVoucher = false,
+    int discountAmount = 0,
+    VoidCallback? onOrderCompleted,
+    String? transactionMethod,
+    int? voucherRemaining,
+    bool isSplitPayment = false,
+    int splitCashAmount = 0,
+    int splitQrisAmount = 0,
+    String? voucherProgramId,
+    int programNominal = 0,
+    String? programExtraPaymentMethod,
+    int programExtraSplitQrisAmount = 0,
+    String? operationId,
+  }) async {
+    final firestore = FirebaseFirestore.instance;
+    final menuSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('MenuCollection')
+        .get();
+    final menuMap = _buildMenuLookup(MenuClass.getAllMenus(menuSnapshot));
+    final optionSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('OptionGroups')
+        .get();
+    final optionLookup = _buildOptionGroupLookup(optionSnapshot);
+    final stableOperationId = operationId ?? 'self_order_${selfOrder.id}';
+    final selfOrderRef =
+        firestore.collection(Col.name('SelfOrders')).doc(selfOrder.id);
+
+    if (context.mounted) {
+      LoaderWidget.showLoaderDialog(context, message: "Memproses pesanan...");
+    }
+    var loaderPopped = false;
+    try {
+      final subTotal = totalHarga - biayaBungkus;
+      final itemCounts = <String, int>{};
+      for (final item in pesananList) {
+        itemCounts[item.namaPesanan] =
+            (itemCounts[item.namaPesanan] ?? 0) + item.totalQuantity;
+      }
+      final map = <String, dynamic>{
+        'total': FieldValue.increment(totalHarga),
+        'subTotal': FieldValue.increment(subTotal),
+        'takeAwayFee': FieldValue.increment(biayaBungkus),
+        'year': getYear(),
+        'month': getMonth(),
+        'date': getDate(),
+        'timestamp': FieldValue.serverTimestamp(),
+        'selfOrderId': selfOrder.id,
+      };
+      for (final entry in itemCounts.entries) {
+        map[entry.key] = FieldValue.increment(entry.value);
+      }
+      if (isSplitPayment) {
+        _incrementPaymentAccumulator(map, 'Cash', splitCashAmount);
+        _incrementPaymentAccumulator(map, 'QRIS', splitQrisAmount);
+      } else if (voucherProgramId != null) {
+        final remaining = totalHarga - programNominal;
+        if (remaining > 0 && programExtraPaymentMethod != null) {
+          if (programExtraPaymentMethod == 'Cash + QRIS') {
+            _incrementPaymentAccumulator(
+                map, 'Cash', remaining - programExtraSplitQrisAmount);
+            _incrementPaymentAccumulator(
+                map, 'QRIS', programExtraSplitQrisAmount);
+          } else {
+            _incrementPaymentAccumulator(
+                map, programExtraPaymentMethod, remaining);
+          }
+        }
+      } else if (transactionMethod != null) {
+        _incrementPaymentAccumulator(map, transactionMethod, totalHarga);
+      }
+      final orderItems = _buildSaleOrderItems(pesananList, menuMap);
+      final result = await _runIdempotentSaleTransaction(
+        operationId: stableOperationId,
+        sourceType: 'self_order',
+        pesananList: pesananList,
+        menuMap: menuMap,
+        optionGroupLookup: optionLookup,
+        preWriteGuard: (transaction) async {
+          final selfOrderSnapshot = await transaction.get(selfOrderRef);
+          if (!selfOrderSnapshot.exists) {
+            throw Exception('Pesanan mandiri tidak ditemukan.');
+          }
+          final selfOrderData = selfOrderSnapshot.data() ?? {};
+          final status = selfOrderData['status']?.toString() ?? '';
+          if (status == SelfOrderStatus.paid ||
+              (selfOrderData['paymentStatus'] == 'PAID' &&
+                  selfOrderData['orderStatus'] == 'COMPLETED')) {
+            return false;
+          }
+          if (status == SelfOrderStatus.declined) {
+            throw Exception('Pesanan mandiri sudah ditolak.');
+          }
+          return true;
+        },
+        writeOperation: (transaction, customerNumber, preparation) async {
+          if (appliedVoucherCode != null) {
+            await _appendVoucherToBatchOrTransaction(
+              appliedVoucherCode,
+              isPosVoucher,
+              transaction: transaction,
+              usedAmount: discountAmount,
+            );
+          }
+          if (voucherProgramId != null) {
+            VoucherProgramService.addRedemptionToTransaction(
+              transaction: transaction,
+              programId: voucherProgramId,
+              amount: programNominal > 0 ? programNominal : totalHarga,
+            );
+          }
+          transaction.update(selfOrderRef, {
+            'status': SelfOrderStatus.paid,
+            'paymentStatus': 'PAID',
+            'orderStatus': 'COMPLETED',
+            'processedAt': FieldValue.serverTimestamp(),
+          });
+          InventoryService().queuePreparedStockDeltas(transaction, preparation);
+          transaction.set(
+            firestore
+                .collection(Col.name('DailyTransaction'))
+                .doc(DateFormat('yyyy-MM-dd').format(DateTime.now())),
+            map,
+            SetOptions(merge: true),
+          );
+          transaction.set(
+            firestore
+                .collection(Col.name('MonthlyTransaction'))
+                .doc(getMonth()),
+            map,
+            SetOptions(merge: true),
+          );
+          transaction.set(
+            firestore.collection(Col.name('YearlyTransaction')).doc(getYear()),
+            map,
+            SetOptions(merge: true),
+          );
+          final status = <String, dynamic>{
+            'customerNumber': customerNumber,
+            'orderItems': orderItems,
+            'status': 'Serving',
+            'namaCustomer': customerNameController.text,
+            'total': totalHarga,
+            'subTotal': subTotal,
+            'takeAwayFee': biayaBungkus,
+            'transactionMethod': 'Self Orders',
+            'isMember': isMember,
+            'canteenId': selfOrder.canteenId,
+            'selfOrderId': selfOrder.id,
+            'selfOrderShortCode': selfOrder.displayShortCode,
+            'waktuPengambilan': selfOrder.waktuPengambilan,
+            'waktuPesan': FieldValue.serverTimestamp(),
+            'orderRevision': 0,
+            'inventoryAuditFlags':
+                preparation.auditFlags.map((flag) => flag.toMap()).toList(),
+          };
+          if (isSplitPayment) {
+            status['paymentMethod'] = 'Cash/QRIS';
+            status['isSplitPayment'] = true;
+            status['splitDetails'] = {
+              'cashAmount': splitCashAmount,
+              'qrisAmount': splitQrisAmount,
+            };
+          } else if (voucherProgramId != null) {
+            status['paymentMethod'] = 'Program';
+            status['voucherProgramId'] = voucherProgramId;
+            status['programNominal'] = programNominal;
+          } else {
+            status['paymentMethod'] = transactionMethod;
+          }
+          if (memberId != null) status['memberId'] = memberId;
+          if (memberPhone != null) status['customerPhone'] = memberPhone;
+          transaction.set(
+            firestore
+                .collection(Col.name('Status'))
+                .doc('${customerNumber}_plazaUnipdu'),
+            status,
+          );
+        },
+      );
+      if (appliedVoucherCode != null && !isPosVoucher) {
+        await _claimExternalVoucherIdempotently(
+          voucherCode: appliedVoucherCode,
+          operationId: stableOperationId,
+          usedAmount: discountAmount,
+        );
+      }
+      if (result.wasAlreadyApplied) {
+        if (context.mounted) {
+          loaderPopped = true;
+          Navigator.pop(context);
+        }
+        basketToClear.clear();
+        uangYangDiterimaController.clear();
+        customerNameController.clear();
+        setJumlahItem(0);
+        getTotal();
+        return;
+      }
+      nomorBerikutnya = result.customerNumber ?? nomorBerikutnya;
+      SelfOrderService.instance.scheduleDeletion(selfOrder.id);
+      if (isMember && memberId != null) {
+        _incrementMemberPoints(memberId, totalHarga,
+            voucherProgramId: voucherProgramId, programNominal: programNominal);
+        _updateCompetitionRecord(memberId, totalHarga,
+            voucherProgramId: voucherProgramId, programNominal: programNominal);
+        _processPeriodicCashbackCampaign(
+            memberId, totalHarga, customerNameController.text,
+            voucherProgramId: voucherProgramId, programNominal: programNominal);
+      }
+      await printReceipt(
+        customPesananList: pesananList,
+        overrideNomorBerikutnya: nomorBerikutnya,
+        overrideTotalHarga: totalHarga,
+        overrideIsTakeAway: isTakeAway,
+        discountAmount: discountAmount,
+        originalTotal: originalTotal,
+        customerName: customerNameController.text,
+        voucherRemaining: voucherRemaining,
+      );
+      if (context.mounted) {
+        loaderPopped = true;
+        Navigator.pop(context);
+      }
+      final inputText = uangYangDiterimaController.text.replaceAll('.', '');
+      await _showSelfOrderSuccessDialog(
+        context: context,
+        selfOrder: selfOrder,
+        nomorBerikutnya: nomorBerikutnya,
+        uangYangDiterima: int.tryParse(inputText) ?? 0,
+        totalHarga: totalHarga,
+        originalTotal: originalTotal,
+        discountAmount: discountAmount,
+        pesananList: pesananList,
+        customerNameController: customerNameController,
+        uangYangDiterimaController: uangYangDiterimaController,
+        getTotal: getTotal,
+        setJumlahItem: setJumlahItem,
+        splitCashAmount: isSplitPayment
+            ? splitCashAmount
+            : (voucherProgramId != null &&
+                    programExtraPaymentMethod == 'Cash + QRIS'
+                ? (totalHarga - programNominal) - programExtraSplitQrisAmount
+                : 0),
+        programNominal: programNominal,
+        voucherRemaining: voucherRemaining,
+      );
+      onOrderCompleted?.call();
+    } catch (error) {
+      if (context.mounted && !loaderPopped) Navigator.pop(context);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Gagal memproses pesanan: ${UserMessageService.fromError(error)}'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  /* Legacy self-order implementation retained for reference while all new
+  /// confirmations use the transactional implementation above.
+  static Future<void> _processSelfOrderLegacy({
+    required BuildContext context,
+    required SelfOrder selfOrder,
+    required List<PesananObject> pesananList,
+    required int totalHarga,
+    required int originalTotal,
+    String? customerName,
     required bool isTakeAway,
     required int biayaBungkus,
     required TextEditingController customerNameController,
@@ -338,7 +668,8 @@ class OrderConfirmationService {
         category: doc.data().containsKey('category') ? doc['category'] : 'Umum',
         ingredients: doc.data().containsKey('ingredients')
             ? (doc['ingredients'] as List<dynamic>)
-                .map((ing) => MenuIngredient.fromMap(ing as Map<String, dynamic>))
+                .map((ing) =>
+                    MenuIngredient.fromMap(ing as Map<String, dynamic>))
                 .toList()
                 .cast<MenuIngredient>()
             : <MenuIngredient>[],
@@ -360,7 +691,8 @@ class OrderConfirmationService {
       if (menu == null) continue;
 
       final optionIngredients = _resolveOptionIngredients(
-        pesanan.selectedOptions, optionGroupLookup,
+        pesanan.selectedOptions,
+        optionGroupLookup,
       );
       final availability = await inventoryService.checkOrderAvailability(
         menu,
@@ -371,15 +703,15 @@ class OrderConfirmationService {
       if (!availability.isAvailable) {
         if (context.mounted) {
           // Revert status back to Unpaid on failure
-          await SelfOrderService.instance.updateStatus(
-              selfOrder.id, SelfOrderStatus.unpaid);
+          await SelfOrderService.instance
+              .updateStatus(selfOrder.id, SelfOrderStatus.unpaid);
 
-          _showTopError(context, 'Stok tidak cukup untuk ${pesanan.namaPesanan}: ${availability.message}');
+          _showTopError(context,
+              'Stok tidak cukup untuk ${pesanan.namaPesanan}: ${availability.message}');
         }
         return;
       }
     }
-
 
     bool loaderPopped = false;
     if (context.mounted) {
@@ -416,10 +748,13 @@ class OrderConfirmationService {
       final remaining = totalHarga - programNominal;
       if (remaining > 0 && programExtraPaymentMethod != null) {
         if (programExtraPaymentMethod == 'Cash + QRIS') {
-          _incrementPaymentAccumulator(map, 'Cash', remaining - programExtraSplitQrisAmount);
-          _incrementPaymentAccumulator(map, 'QRIS', programExtraSplitQrisAmount);
+          _incrementPaymentAccumulator(
+              map, 'Cash', remaining - programExtraSplitQrisAmount);
+          _incrementPaymentAccumulator(
+              map, 'QRIS', programExtraSplitQrisAmount);
         } else {
-          _incrementPaymentAccumulator(map, programExtraPaymentMethod, remaining);
+          _incrementPaymentAccumulator(
+              map, programExtraPaymentMethod, remaining);
         }
       }
     } else if (transactionMethod != null) {
@@ -519,16 +854,18 @@ class OrderConfirmationService {
 
     // Removed customerNumber increment here, handled by _assignCustomerNumber
     // Deduct ingredients entirely within the same atomic batch
-    await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
+    await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup,
+        batch: batch);
 
     if (appliedVoucherCode != null) {
-      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch, usedAmount: discountAmount);
+      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher,
+          batch: batch, usedAmount: discountAmount);
     }
 
     if (voucherProgramId != null) {
       VoucherProgramService.addRedemptionToBatch(
-        batch: batch, 
-        programId: voucherProgramId, 
+        batch: batch,
+        programId: voucherProgramId,
         amount: programNominal > 0 ? programNominal : totalHarga,
       );
     }
@@ -595,10 +932,11 @@ class OrderConfirmationService {
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: getTotal,
         setJumlahItem: setJumlahItem,
-        splitCashAmount: isSplitPayment 
-            ? splitCashAmount 
-            : (voucherProgramId != null && programExtraPaymentMethod == 'Cash + QRIS' 
-                ? (totalHarga - programNominal) - programExtraSplitQrisAmount 
+        splitCashAmount: isSplitPayment
+            ? splitCashAmount
+            : (voucherProgramId != null &&
+                    programExtraPaymentMethod == 'Cash + QRIS'
+                ? (totalHarga - programNominal) - programExtraSplitQrisAmount
                 : 0),
         programNominal: programNominal,
         voucherRemaining: voucherRemaining,
@@ -610,19 +948,22 @@ class OrderConfirmationService {
         Navigator.pop(context);
       }
       // Revert status on error
-      await SelfOrderService.instance.updateStatus(
-          selfOrder.id, SelfOrderStatus.unpaid);
+      await SelfOrderService.instance
+          .updateStatus(selfOrder.id, SelfOrderStatus.unpaid);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Gagal memproses pesanan: $error'),
+            content: Text(
+                'Gagal memproses pesanan: ${UserMessageService.fromError(error)}'),
             backgroundColor: Colors.red,
           ),
         );
       }
     }
   }
+
+  */
 
   /// Show success dialog specifically for self-orders
   static Future<void> _showSelfOrderSuccessDialog({
@@ -631,7 +972,8 @@ class OrderConfirmationService {
     required int nomorBerikutnya,
     required int uangYangDiterima,
     required int totalHarga,
-    required int originalTotal, String? customerName,
+    required int originalTotal,
+    String? customerName,
     required int discountAmount,
     required List<PesananObject> pesananList,
     required TextEditingController customerNameController,
@@ -647,7 +989,8 @@ class OrderConfirmationService {
       builder: (BuildContext context) {
         return Dialog(
           alignment: Alignment.topCenter,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: SizedBox(
@@ -784,12 +1127,483 @@ class OrderConfirmationService {
     return [];
   }
 
+  static String _buildOperationId(String prefix, List<String> parts) {
+    final raw = '$prefix-${parts.join('-')}';
+    final safe = raw.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+    // Firestore document IDs have a size limit. Large baskets with option
+    // names should still get a deterministic, replay-safe operation key.
+    if (safe.length <= 800) return safe;
+    var hash = 2166136261;
+    for (final codeUnit in safe.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 16777619) & 0x7fffffff;
+    }
+    return '${prefix}_$hash';
+  }
+
+  static MenuObject? _findMenu(
+      PesananObject pesanan, Map<String, MenuObject> menuMap) {
+    final stableId = pesanan.menuItemId.trim();
+    if (stableId.isNotEmpty) {
+      final byId = menuMap['__id__$stableId'];
+      if (byId != null) return byId;
+      for (final menu in menuMap.values) {
+        if (menu.id == stableId) return menu;
+      }
+      return null;
+    }
+    return menuMap['__name__${pesanan.namaPesanan.trim()}'] ??
+        menuMap[pesanan.namaPesanan];
+  }
+
+  static Map<String, MenuObject> _buildMenuLookup(Iterable<MenuObject> menus) {
+    final lookup = <String, MenuObject>{};
+    final menusByName = <String, List<MenuObject>>{};
+    for (final menu in menus) {
+      if (menu.id.isNotEmpty) lookup['__id__${menu.id}'] = menu;
+      final name = menu.namaMenu.trim();
+      if (name.isNotEmpty) {
+        menusByName.putIfAbsent(name, () => []).add(menu);
+      }
+    }
+    for (final entry in menusByName.entries) {
+      if (entry.value.length == 1) {
+        lookup['__name__${entry.key}'] = entry.value.single;
+        lookup[entry.key] = entry.value.single;
+      }
+    }
+    return lookup;
+  }
+
+  static Future<StockTransactionPreparation> _prepareOrderStock(
+    Transaction transaction, {
+    required String sourceType,
+    required String sourceId,
+    required List<PesananObject> pesananList,
+    required Map<String, MenuObject> menuMap,
+    required Map<String, Map<String, OptionItem>> optionGroupLookup,
+  }) async {
+    final inventoryService = InventoryService();
+    final calculation = inventoryService.calculateOrderStockDeltas(
+      pesananList,
+      menuLookup: menuMap,
+      optionLookup: optionGroupLookup,
+      deduct: true,
+      sourceType: sourceType,
+      sourceId: sourceId,
+    );
+
+    return inventoryService.prepareStockDeltasInTransaction(
+      transaction,
+      calculation.deltas,
+      sourceType: sourceType,
+      sourceId: sourceId,
+      additionalAuditFlags: calculation.auditFlags,
+    );
+  }
+
+  static Future<InventoryOperationResult> _runIdempotentSaleTransaction({
+    required String operationId,
+    required String sourceType,
+    required List<PesananObject> pesananList,
+    required Map<String, MenuObject> menuMap,
+    required Map<String, Map<String, OptionItem>> optionGroupLookup,
+    Future<bool> Function(Transaction transaction)? preWriteGuard,
+    required Future<void> Function(
+      Transaction transaction,
+      int customerNumber,
+      StockTransactionPreparation preparation,
+    ) writeOperation,
+  }) async {
+    final firestore = FirebaseFirestore.instance;
+    await InventoryService().refreshInventoryCache();
+
+    return firestore
+        .runTransaction<InventoryOperationResult>((transaction) async {
+      final operationRef = firestore
+          .collection(Col.name('Canteens'))
+          .doc('canteen375')
+          .collection('Orders')
+          .doc(operationId);
+      final operationSnapshot = await transaction.get(operationRef);
+      if (operationSnapshot.exists &&
+          operationSnapshot.data()?['status']?.toString().toLowerCase() ==
+              'completed') {
+        return const InventoryOperationResult.alreadyApplied();
+      }
+
+      final metadataRef = firestore
+          .collection(Col.name('Canteens'))
+          .doc('canteen375')
+          .collection('Metadata')
+          .doc('customerNumber');
+      final metadataSnapshot = await transaction.get(metadataRef);
+      final currentNumber = InventoryService.toInt(
+        metadataSnapshot.data()?['customerNumber'],
+      );
+      final customerNumber = currentNumber + 1;
+      final statusRef = firestore
+          .collection(Col.name('Status'))
+          .doc('${customerNumber}_plazaUnipdu');
+      final statusSnapshot = await transaction.get(statusRef);
+
+      // This is a read-only preparation. It must happen before any writes in
+      // [writeOperation], including voucher or status updates.
+      final preparation = await _prepareOrderStock(
+        transaction,
+        sourceType: sourceType,
+        sourceId: operationId,
+        pesananList: pesananList,
+        menuMap: menuMap,
+        optionGroupLookup: optionGroupLookup,
+      );
+
+      if (preWriteGuard != null && !await preWriteGuard(transaction)) {
+        return const InventoryOperationResult.alreadyApplied();
+      }
+      if (statusSnapshot.exists) {
+        // A manual counter reset or stale metadata must never cause a new
+        // checkout to overwrite an existing status document.
+        throw Exception(
+            'Nomor pelanggan $customerNumber sudah digunakan. Periksa metadata nomor antrean sebelum mencoba lagi.');
+      }
+
+      await writeOperation(transaction, customerNumber, preparation);
+
+      if (metadataSnapshot.exists) {
+        transaction.update(metadataRef, {'customerNumber': customerNumber});
+      } else {
+        transaction.set(metadataRef, {'customerNumber': customerNumber});
+      }
+      transaction.set(
+          operationRef,
+          {
+            'status': 'completed',
+            'type': sourceType,
+            'completedAt': FieldValue.serverTimestamp(),
+            'auditFlags':
+                preparation.auditFlags.map((flag) => flag.toMap()).toList(),
+          },
+          SetOptions(merge: true));
+      return InventoryOperationResult.applied(
+        flags: preparation.auditFlags,
+        customerNumber: customerNumber,
+      );
+    });
+  }
+
+  static List<Map<String, dynamic>> _buildSaleOrderItems(
+    List<PesananObject> pesananList,
+    Map<String, MenuObject> menuMap,
+  ) {
+    return pesananList.map((order) {
+      final menu = _findMenu(order, menuMap);
+      return <String, dynamic>{
+        'menuItemId':
+            order.menuItemId.isNotEmpty ? order.menuItemId : (menu?.id ?? ''),
+        'namaPesanan': order.namaPesanan,
+        'harga': order.harga,
+        'dineInQuantity': order.dineInQuantity,
+        'takeAwayQuantity': order.takeAwayQuantity,
+        'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
+        'isMakanan': menu?.isMakanan ?? false,
+        'customerNote': order.customerNote ?? '',
+        'status': '',
+        'dineInPreparedQuantity': 0,
+        'takeAwayPreparedQuantity': 0,
+        'orderedAt': DateTime.now().millisecondsSinceEpoch,
+      };
+    }).toList();
+  }
+
   static Future<void> _processOrder({
     required BuildContext context,
     required List<PesananObject> pesananList,
     required List<PesananObject> basketToClear,
     required int totalHarga,
-    required int originalTotal, String? customerName,
+    required int originalTotal,
+    required bool isTakeAway,
+    required int biayaBungkus,
+    required TextEditingController customerNameController,
+    required TextEditingController uangYangDiterimaController,
+    required int nomorBerikutnya,
+    required Function() getTotal,
+    required Future<void> Function({
+      List<PesananObject>? customPesananList,
+      int? overrideNomorBerikutnya,
+      int? overrideTotalHarga,
+      bool? overrideIsTakeAway,
+      int discountAmount,
+      int originalTotal,
+      String? customerName,
+      int? voucherRemaining,
+    }) printReceipt,
+    required String Function() getYear,
+    required String Function() getMonth,
+    required String Function() getDate,
+    required Function(int) setJumlahItem,
+    required bool isMember,
+    String? memberId,
+    String? memberPhone,
+    String? appliedVoucherCode,
+    bool isPosVoucher = false,
+    int discountAmount = 0,
+    String? transactionMethod,
+    int? voucherRemaining,
+    bool isSplitPayment = false,
+    int splitCashAmount = 0,
+    int splitQrisAmount = 0,
+    String? voucherProgramId,
+    int programNominal = 0,
+    String? programExtraPaymentMethod,
+    int programExtraSplitQrisAmount = 0,
+    void Function(Member?)? onSelectedMemberChanged,
+    String? operationId,
+  }) async {
+    final firestore = FirebaseFirestore.instance;
+    final menuSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('MenuCollection')
+        .get();
+    final menuMap = _buildMenuLookup(MenuClass.getAllMenus(menuSnapshot));
+    final optionSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('OptionGroups')
+        .get();
+    final optionLookup = _buildOptionGroupLookup(optionSnapshot);
+    final stableOperationId = operationId ??
+        _buildOperationId('sale', [
+          nomorBerikutnya.toString(),
+          getDate(),
+          totalHarga.toString(),
+          pesananList
+              .map((item) =>
+                  '${item.orderKey}:${item.dineInQuantity}:${item.takeAwayQuantity}:${item.harga}')
+              .join('|'),
+        ]);
+
+    if (context.mounted) {
+      LoaderWidget.showLoaderDialog(context, message: "Mohon tunggu...");
+    }
+    var loaderPopped = false;
+    try {
+      final subTotal = totalHarga - biayaBungkus;
+      final itemCounts = <String, int>{};
+      for (final item in pesananList) {
+        itemCounts[item.namaPesanan] =
+            (itemCounts[item.namaPesanan] ?? 0) + item.totalQuantity;
+      }
+      final map = <String, dynamic>{
+        'total': FieldValue.increment(totalHarga),
+        'subTotal': FieldValue.increment(subTotal),
+        'takeAwayFee': FieldValue.increment(biayaBungkus),
+        'year': getYear(),
+        'month': getMonth(),
+        'date': getDate(),
+        'timestamp': FieldValue.serverTimestamp(),
+      };
+      for (final entry in itemCounts.entries) {
+        map[entry.key] = FieldValue.increment(entry.value);
+      }
+      if (isSplitPayment) {
+        _incrementPaymentAccumulator(map, 'Cash', splitCashAmount);
+        _incrementPaymentAccumulator(map, 'QRIS', splitQrisAmount);
+      } else if (voucherProgramId != null) {
+        final remaining = totalHarga - programNominal;
+        if (remaining > 0 && programExtraPaymentMethod != null) {
+          if (programExtraPaymentMethod == 'Cash + QRIS') {
+            _incrementPaymentAccumulator(
+                map, 'Cash', remaining - programExtraSplitQrisAmount);
+            _incrementPaymentAccumulator(
+                map, 'QRIS', programExtraSplitQrisAmount);
+          } else {
+            _incrementPaymentAccumulator(
+                map, programExtraPaymentMethod, remaining);
+          }
+        }
+      } else if (transactionMethod != null) {
+        _incrementPaymentAccumulator(map, transactionMethod, totalHarga);
+      }
+      final orderItems = _buildSaleOrderItems(pesananList, menuMap);
+
+      final result = await _runIdempotentSaleTransaction(
+        operationId: stableOperationId,
+        sourceType: 'sale',
+        pesananList: pesananList,
+        menuMap: menuMap,
+        optionGroupLookup: optionLookup,
+        writeOperation: (transaction, customerNumber, preparation) async {
+          if (appliedVoucherCode != null) {
+            await _appendVoucherToBatchOrTransaction(
+              appliedVoucherCode,
+              isPosVoucher,
+              transaction: transaction,
+              usedAmount: discountAmount,
+            );
+          }
+          if (voucherProgramId != null) {
+            VoucherProgramService.addRedemptionToTransaction(
+              transaction: transaction,
+              programId: voucherProgramId,
+              amount: programNominal > 0 ? programNominal : totalHarga,
+            );
+          }
+          InventoryService().queuePreparedStockDeltas(transaction, preparation);
+
+          transaction.set(
+            firestore
+                .collection(Col.name('DailyTransaction'))
+                .doc(DateFormat('yyyy-MM-dd').format(DateTime.now())),
+            map,
+            SetOptions(merge: true),
+          );
+          transaction.set(
+            firestore
+                .collection(Col.name('MonthlyTransaction'))
+                .doc(getMonth()),
+            map,
+            SetOptions(merge: true),
+          );
+          transaction.set(
+            firestore.collection(Col.name('YearlyTransaction')).doc(getYear()),
+            map,
+            SetOptions(merge: true),
+          );
+
+          final status = <String, dynamic>{
+            'customerNumber': customerNumber,
+            'orderItems': orderItems,
+            'status': 'Serving',
+            'namaCustomer': customerNameController.text,
+            'total': totalHarga,
+            'subTotal': subTotal,
+            'takeAwayFee': biayaBungkus,
+            'transactionMethod': 'Normal',
+            'canteenId': 'canteen375_plazaUnipdu',
+            'isMember': isMember,
+            'waktuPengambilan': 'Tidak Memesan',
+            'waktuPesan': FieldValue.serverTimestamp(),
+            'orderRevision': 0,
+            'inventoryAuditFlags':
+                preparation.auditFlags.map((flag) => flag.toMap()).toList(),
+          };
+          if (isSplitPayment) {
+            status['paymentMethod'] = 'Cash/QRIS';
+            status['isSplitPayment'] = true;
+            status['splitDetails'] = {
+              'cashAmount': splitCashAmount,
+              'qrisAmount': splitQrisAmount,
+            };
+          } else if (voucherProgramId != null) {
+            status['paymentMethod'] = 'Program';
+            status['voucherProgramId'] = voucherProgramId;
+            status['programNominal'] = programNominal;
+            status['programExtraPaymentMethod'] = programExtraPaymentMethod;
+          } else {
+            status['paymentMethod'] = transactionMethod;
+          }
+          if (memberId != null) status['memberId'] = memberId;
+          if (memberPhone != null) status['customerPhone'] = memberPhone;
+          transaction.set(
+            firestore
+                .collection(Col.name('Status'))
+                .doc('${customerNumber}_plazaUnipdu'),
+            status,
+          );
+        },
+      );
+      if (appliedVoucherCode != null && !isPosVoucher) {
+        await _claimExternalVoucherIdempotently(
+          voucherCode: appliedVoucherCode,
+          operationId: stableOperationId,
+          usedAmount: discountAmount,
+        );
+      }
+
+      if (result.wasAlreadyApplied) {
+        if (context.mounted) {
+          loaderPopped = true;
+          Navigator.pop(context);
+        }
+        basketToClear.clear();
+        uangYangDiterimaController.clear();
+        customerNameController.clear();
+        setJumlahItem(0);
+        getTotal();
+        return;
+      }
+      nomorBerikutnya = result.customerNumber ?? nomorBerikutnya;
+
+      if (isMember && memberId != null) {
+        _incrementMemberPoints(memberId, totalHarga,
+            voucherProgramId: voucherProgramId, programNominal: programNominal);
+        _updateCompetitionRecord(memberId, totalHarga,
+            voucherProgramId: voucherProgramId, programNominal: programNominal);
+        _processPeriodicCashbackCampaign(
+            memberId, totalHarga, customerNameController.text,
+            voucherProgramId: voucherProgramId, programNominal: programNominal);
+      }
+      await printReceipt(
+        customPesananList: pesananList,
+        overrideNomorBerikutnya: nomorBerikutnya,
+        overrideTotalHarga: totalHarga,
+        overrideIsTakeAway: isTakeAway,
+        discountAmount: discountAmount,
+        originalTotal: originalTotal,
+        customerName: customerNameController.text,
+        voucherRemaining: voucherRemaining,
+      );
+      if (context.mounted) {
+        loaderPopped = true;
+        Navigator.pop(context);
+      }
+      final inputText = uangYangDiterimaController.text.replaceAll('.', '');
+      final uangYangDiterima = int.tryParse(inputText) ?? 0;
+      await _showSuccessDialog(
+        context: context,
+        nomorBerikutnya: nomorBerikutnya,
+        uangYangDiterima: uangYangDiterima,
+        totalHarga: totalHarga,
+        originalTotal: originalTotal,
+        discountAmount: discountAmount,
+        pesananList: pesananList,
+        basketToClear: basketToClear,
+        customerNameController: customerNameController,
+        uangYangDiterimaController: uangYangDiterimaController,
+        getTotal: getTotal,
+        setJumlahItem: setJumlahItem,
+        splitCashAmount: isSplitPayment
+            ? splitCashAmount
+            : (voucherProgramId != null &&
+                    programExtraPaymentMethod == 'Cash + QRIS'
+                ? (totalHarga - programNominal) - programExtraSplitQrisAmount
+                : 0),
+        programNominal: programNominal,
+        voucherRemaining: voucherRemaining,
+        onSelectedMemberChanged: onSelectedMemberChanged,
+      );
+    } catch (error) {
+      if (context.mounted && !loaderPopped) Navigator.pop(context);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Gagal memproses pesanan: ${UserMessageService.fromError(error)}'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  /* static Future<void> _processOrderLegacy({
+    required BuildContext context,
+    required List<PesananObject> pesananList,
+    required List<PesananObject> basketToClear,
+    required int totalHarga,
+    required int originalTotal,
+    String? customerName,
     required bool isTakeAway,
     required int biayaBungkus,
     required TextEditingController customerNameController,
@@ -830,14 +1644,14 @@ class OrderConfirmationService {
     // 🔍 STEP 1: Validate stock availability for all items
     final inventoryService = InventoryService();
     final firestore = FirebaseFirestore.instance;
-    
+
     // Get all menu items to check their ingredients
     final menuSnapshot = await firestore
         .collection(Col.name('Canteens'))
         .doc('canteen375')
         .collection('MenuCollection')
         .get();
-    
+
     final menuMap = <String, MenuObject>{};
     for (var doc in menuSnapshot.docs) {
       final menu = MenuObject(
@@ -849,7 +1663,8 @@ class OrderConfirmationService {
         category: doc.data().containsKey('category') ? doc['category'] : 'Umum',
         ingredients: doc.data().containsKey('ingredients')
             ? (doc['ingredients'] as List<dynamic>)
-                .map((ing) => MenuIngredient.fromMap(ing as Map<String, dynamic>))
+                .map((ing) =>
+                    MenuIngredient.fromMap(ing as Map<String, dynamic>))
                 .toList()
                 .cast<MenuIngredient>()
             : <MenuIngredient>[],
@@ -864,32 +1679,34 @@ class OrderConfirmationService {
         .collection('OptionGroups')
         .get();
     final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot);
-    
+
     // Check availability for each item in the order
     for (var pesanan in pesananList) {
       final menu = menuMap[pesanan.namaPesanan];
       if (menu == null) continue;
 
       final optionIngredients = _resolveOptionIngredients(
-        pesanan.selectedOptions, optionGroupLookup,
+        pesanan.selectedOptions,
+        optionGroupLookup,
       );
       final availability = await inventoryService.checkOrderAvailability(
         menu,
         optionIngredients,
         pesanan.totalQuantity,
       );
-      
+
       if (!availability.isAvailable) {
         // Close loader and show error
         if (context.mounted) {
           Navigator.pop(context); // Close loader
-          
-          _showTopError(context, 'Stok tidak cukup untuk ${pesanan.namaPesanan}: ${availability.message}');
+
+          _showTopError(context,
+              'Stok tidak cukup untuk ${pesanan.namaPesanan}: ${availability.message}');
         }
         return; // Abort order
       }
     }
-    
+
     bool loaderPopped = false;
     if (context.mounted) {
       LoaderWidget.showLoaderDialog(context, message: "Mohon tunggu...");
@@ -926,10 +1743,13 @@ class OrderConfirmationService {
       final remaining = totalHarga - programNominal;
       if (remaining > 0 && programExtraPaymentMethod != null) {
         if (programExtraPaymentMethod == 'Cash + QRIS') {
-          _incrementPaymentAccumulator(map, 'Cash', remaining - programExtraSplitQrisAmount);
-          _incrementPaymentAccumulator(map, 'QRIS', programExtraSplitQrisAmount);
+          _incrementPaymentAccumulator(
+              map, 'Cash', remaining - programExtraSplitQrisAmount);
+          _incrementPaymentAccumulator(
+              map, 'QRIS', programExtraSplitQrisAmount);
         } else {
-          _incrementPaymentAccumulator(map, programExtraPaymentMethod, remaining);
+          _incrementPaymentAccumulator(
+              map, programExtraPaymentMethod, remaining);
         }
       }
     } else if (transactionMethod != null) {
@@ -1026,16 +1846,18 @@ class OrderConfirmationService {
 
     // Removed customerNumber increment here, handled by _assignCustomerNumber
     // Deduct ingredients entirely within the same atomic batch
-    await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
-    
+    await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup,
+        batch: batch);
+
     if (appliedVoucherCode != null) {
-      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch, usedAmount: discountAmount);
+      await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher,
+          batch: batch, usedAmount: discountAmount);
     }
-    
+
     if (voucherProgramId != null) {
       VoucherProgramService.addRedemptionToBatch(
-        batch: batch, 
-        programId: voucherProgramId, 
+        batch: batch,
+        programId: voucherProgramId,
         amount: programNominal > 0 ? programNominal : totalHarga,
       );
     }
@@ -1099,10 +1921,11 @@ class OrderConfirmationService {
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: getTotal,
         setJumlahItem: setJumlahItem,
-        splitCashAmount: isSplitPayment 
-            ? splitCashAmount 
-            : (voucherProgramId != null && programExtraPaymentMethod == 'Cash + QRIS' 
-                ? (totalHarga - programNominal) - programExtraSplitQrisAmount 
+        splitCashAmount: isSplitPayment
+            ? splitCashAmount
+            : (voucherProgramId != null &&
+                    programExtraPaymentMethod == 'Cash + QRIS'
+                ? (totalHarga - programNominal) - programExtraSplitQrisAmount
                 : 0),
         programNominal: programNominal,
         voucherRemaining: voucherRemaining,
@@ -1115,12 +1938,245 @@ class OrderConfirmationService {
     }
   }
 
+  */
+
   static Future<void> _processOpenBillOrder({
     required BuildContext context,
     required List<PesananObject> pesananList,
     required List<PesananObject> basketToClear,
     required int totalHarga,
-    required int originalTotal, String? customerName,
+    required int originalTotal,
+    required bool isTakeAway,
+    required int biayaBungkus,
+    required TextEditingController customerNameController,
+    required TextEditingController uangYangDiterimaController,
+    required int nomorBerikutnya,
+    required Function() getTotal,
+    required Future<void> Function({
+      List<PesananObject>? customPesananList,
+      int? overrideNomorBerikutnya,
+      int? overrideTotalHarga,
+      bool? overrideIsTakeAway,
+      int discountAmount,
+      int originalTotal,
+      String? customerName,
+      int? voucherRemaining,
+    }) printReceipt,
+    required String Function() getYear,
+    required String Function() getMonth,
+    required String Function() getDate,
+    required Function(int) setJumlahItem,
+    required String memberId,
+    required String memberName,
+    required String? memberPhone,
+    void Function(Member?)? onSelectedMemberChanged,
+    String? operationId,
+  }) async {
+    final firestore = FirebaseFirestore.instance;
+    final menuSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('MenuCollection')
+        .get();
+    final menuMap = _buildMenuLookup(MenuClass.getAllMenus(menuSnapshot));
+    final optionSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('OptionGroups')
+        .get();
+    final optionLookup = _buildOptionGroupLookup(optionSnapshot);
+    final existingStatusDoc =
+        await OpenBillService.instance.getExistingOpenBill(memberId);
+    final openBillLockRef = firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('OpenBillLocks')
+        .doc(memberId);
+    try {
+      final creditLimit = await OpenBillService.instance.getCreditLimit();
+      final existingData = existingStatusDoc?.data();
+      final currentTotal = existingData is Map
+          ? InventoryService.toInt(existingData['total'])
+          : 0;
+      if (currentTotal + totalHarga > creditLimit) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content:
+                Text('Total tagihan melebihi batas kredit (Rp $creditLimit).'),
+            backgroundColor: Colors.red,
+          ));
+        }
+        return;
+      }
+    } catch (_) {
+      // A credit-limit read is a safeguard; stock and order integrity remain
+      // enforced by the transaction below.
+    }
+
+    final stableOperationId = operationId ??
+        _buildOperationId('open_bill', [
+          nomorBerikutnya.toString(),
+          memberId,
+          getDate(),
+          totalHarga.toString(),
+          pesananList
+              .map((item) =>
+                  '${item.orderKey}:${item.dineInQuantity}:${item.takeAwayQuantity}:${item.harga}')
+              .join('|'),
+        ]);
+    if (context.mounted) {
+      LoaderWidget.showLoaderDialog(context, message: "Menyimpan tagihan...");
+    }
+    var loaderPopped = false;
+    try {
+      final orderItems = _buildSaleOrderItems(pesananList, menuMap);
+      final foodSubtotal = totalHarga - biayaBungkus;
+      final result = await _runIdempotentSaleTransaction(
+        operationId: stableOperationId,
+        sourceType: 'open_bill',
+        pesananList: pesananList,
+        menuMap: menuMap,
+        optionGroupLookup: optionLookup,
+        writeOperation: (transaction, customerNumber, preparation) async {
+          final lockSnapshot = await transaction.get(openBillLockRef);
+          DocumentSnapshot<Map<String, dynamic>>? liveExisting;
+          DocumentReference<Map<String, dynamic>>? liveStatusRef;
+          final lockedStatusDocId =
+              lockSnapshot.data()?['statusDocId']?.toString();
+          if (lockedStatusDocId != null && lockedStatusDocId.isNotEmpty) {
+            liveStatusRef =
+                firestore.collection(Col.name('Status')).doc(lockedStatusDocId);
+            liveExisting = await transaction.get(liveStatusRef);
+          }
+          if (liveExisting == null &&
+              existingStatusDoc != null &&
+              existingStatusDoc.exists) {
+            liveStatusRef = firestore
+                .collection(Col.name('Status'))
+                .doc(existingStatusDoc.id);
+            liveExisting = await transaction.get(liveStatusRef);
+          }
+          final liveData = liveExisting?.data();
+          final isLiveOpen = liveExisting != null &&
+              liveExisting.exists &&
+              liveData != null &&
+              liveData['isClosed'] != true &&
+              liveData['status'] != 'Settled';
+          // The read above occurs before any write, which keeps the whole
+          // open-bill append transaction retry-safe.
+          if (isLiveOpen && liveExisting != null) {
+            final existingData = liveData!;
+            if (existingData['orderItems'] != null &&
+                existingData['orderItems'] is! List) {
+              throw Exception(
+                  'Open bill memiliki daftar item yang tidak valid dan tidak dapat ditambah.');
+            }
+            final existingItems = List<dynamic>.from(
+                existingData['orderItems'] ?? const <dynamic>[]);
+            existingItems.addAll(orderItems);
+            transaction.update(liveExisting.reference, {
+              'orderItems': existingItems,
+              'total': FieldValue.increment(foodSubtotal),
+              'subTotal': FieldValue.increment(foodSubtotal),
+              'orderRevision': FieldValue.increment(1),
+              'inventoryAuditFlags': FieldValue.arrayUnion(
+                preparation.auditFlags.map((flag) => flag.toMap()).toList(),
+              ),
+            });
+          } else {
+            liveStatusRef = firestore
+                .collection(Col.name('Status'))
+                .doc('${customerNumber}_plazaUnipdu');
+            final status = <String, dynamic>{
+              'customerNumber': customerNumber,
+              'orderItems': orderItems,
+              'status': 'Serving',
+              'namaCustomer': memberName,
+              'total': foodSubtotal,
+              'subTotal': foodSubtotal,
+              'takeAwayFee': 0,
+              'transactionMethod': 'Open Bill',
+              'paymentMethod': null,
+              'isMember': true,
+              'memberId': memberId,
+              'waktuPengambilan': 'Tidak Memesan',
+              'canteenId': 'canteen375_plazaUnipdu',
+              'waktuPesan': FieldValue.serverTimestamp(),
+              'isClosed': false,
+              'orderRevision': 0,
+              'inventoryAuditFlags':
+                  preparation.auditFlags.map((flag) => flag.toMap()).toList(),
+            };
+            if (memberPhone != null) status['customerPhone'] = memberPhone;
+            transaction.set(
+              liveStatusRef,
+              status,
+            );
+          }
+          transaction.set(
+            openBillLockRef,
+            {
+              'memberId': memberId,
+              'statusDocId': liveStatusRef?.id,
+              'updatedAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          );
+          InventoryService().queuePreparedStockDeltas(transaction, preparation);
+        },
+      );
+      if (result.wasAlreadyApplied) {
+        if (context.mounted) {
+          loaderPopped = true;
+          Navigator.pop(context);
+        }
+        basketToClear.clear();
+        uangYangDiterimaController.clear();
+        customerNameController.clear();
+        setJumlahItem(0);
+        getTotal();
+        return;
+      }
+      final assignedNumber = result.customerNumber ?? nomorBerikutnya;
+      if (context.mounted) {
+        loaderPopped = true;
+        Navigator.pop(context);
+      }
+      await _showSuccessDialog(
+        context: context,
+        nomorBerikutnya: assignedNumber,
+        uangYangDiterima: totalHarga,
+        totalHarga: totalHarga,
+        originalTotal: originalTotal,
+        discountAmount: 0,
+        pesananList: pesananList,
+        basketToClear: basketToClear,
+        customerNameController: customerNameController,
+        uangYangDiterimaController: uangYangDiterimaController,
+        getTotal: getTotal,
+        setJumlahItem: setJumlahItem,
+        onSelectedMemberChanged: onSelectedMemberChanged,
+      );
+    } catch (error) {
+      if (context.mounted && !loaderPopped) Navigator.pop(context);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Gagal menyimpan tagihan: ${UserMessageService.fromError(error)}'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  /* static Future<void> _processOpenBillOrderLegacy({
+    required BuildContext context,
+    required List<PesananObject> pesananList,
+    required List<PesananObject> basketToClear,
+    required int totalHarga,
+    required int originalTotal,
+    String? customerName,
     required bool isTakeAway,
     required int biayaBungkus,
     required TextEditingController customerNameController,
@@ -1148,8 +2204,12 @@ class OrderConfirmationService {
   }) async {
     final inventoryService = InventoryService();
     final firestore = FirebaseFirestore.instance;
-    
-    final menuSnapshot = await firestore.collection(Col.name('Canteens')).doc('canteen375').collection('MenuCollection').get();
+
+    final menuSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('MenuCollection')
+        .get();
     final menuMap = <String, MenuObject>{};
     for (var doc in menuSnapshot.docs) {
       menuMap[doc['namaMenu']] = MenuObject(
@@ -1160,27 +2220,38 @@ class OrderConfirmationService {
         imagePath: doc['imagePath'],
         category: doc.data().containsKey('category') ? doc['category'] : 'Umum',
         ingredients: doc.data().containsKey('ingredients')
-            ? (doc['ingredients'] as List<dynamic>).map((ing) => MenuIngredient.fromMap(ing as Map<String, dynamic>)).toList()
+            ? (doc['ingredients'] as List<dynamic>)
+                .map((ing) =>
+                    MenuIngredient.fromMap(ing as Map<String, dynamic>))
+                .toList()
             : <MenuIngredient>[],
       );
     }
-    
-    final optionGroupSnapshot = await firestore.collection(Col.name('Canteens')).doc('canteen375').collection('OptionGroups').get();
+
+    final optionGroupSnapshot = await firestore
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('OptionGroups')
+        .get();
     final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot);
-    
+
     for (var pesanan in pesananList) {
       final menu = menuMap[pesanan.namaPesanan];
       if (menu == null) continue;
-      final optionIngredients = _resolveOptionIngredients(pesanan.selectedOptions, optionGroupLookup);
-      final availability = await inventoryService.checkOrderAvailability(menu, optionIngredients, pesanan.totalQuantity);
+      final optionIngredients =
+          _resolveOptionIngredients(pesanan.selectedOptions, optionGroupLookup);
+      final availability = await inventoryService.checkOrderAvailability(
+          menu, optionIngredients, pesanan.totalQuantity);
       if (!availability.isAvailable) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Stok tidak cukup untuk ${pesanan.namaPesanan}'), backgroundColor: Colors.red));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Stok tidak cukup untuk ${pesanan.namaPesanan}'),
+              backgroundColor: Colors.red));
         }
         return;
       }
     }
-    
+
     LoaderWidget.showLoaderDialog(context, message: "Menyimpan tagihan...");
 
     nomorBerikutnya = await _assignCustomerNumber();
@@ -1188,7 +2259,8 @@ class OrderConfirmationService {
     // ── Query root Status collection for existing open bill ──
     DocumentSnapshot? existingStatusDoc;
     try {
-      existingStatusDoc = await OpenBillService.instance.getExistingOpenBill(memberId);
+      existingStatusDoc =
+          await OpenBillService.instance.getExistingOpenBill(memberId);
     } catch (_) {
       // If pre-read fails, proceed with creating a new Status doc
     }
@@ -1206,7 +2278,8 @@ class OrderConfirmationService {
         Navigator.pop(context);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Total tagihan (Rp $newTotal) melebihi batas kredit (Rp $creditLimit). Selesaikan tagihan yang ada terlebih dahulu.'),
+            content: Text(
+                'Total tagihan (Rp $newTotal) melebihi batas kredit (Rp $creditLimit). Selesaikan tagihan yang ada terlebih dahulu.'),
             backgroundColor: Colors.red,
           ));
         }
@@ -1241,7 +2314,8 @@ class OrderConfirmationService {
       if (existingStatusDoc != null && existingStatusDoc.exists) {
         // ── APPEND to existing Status doc ──
         final existingData = existingStatusDoc.data() as Map<String, dynamic>;
-        List<dynamic> existingOrderItems = List.from(existingData['orderItems'] ?? []);
+        List<dynamic> existingOrderItems =
+            List.from(existingData['orderItems'] ?? []);
         existingOrderItems.addAll(orderItems);
 
         // Store food subtotal only (exclude take-away fee); fee is recalculated at settlement
@@ -1276,20 +2350,26 @@ class OrderConfirmationService {
           'isClosed': false,
         };
 
-        DocumentReference statusRef = firestore.collection(Col.name('Status')).doc(statusDocId);
+        DocumentReference statusRef =
+            firestore.collection(Col.name('Status')).doc(statusDocId);
         batch.set(statusRef, mapStatus);
 
         // Removed customerNumber increment here, handled by _assignCustomerNumber
       }
 
       // Deduct ingredients within the batch
-      await _appendAllIngredientsToBatch(pesananList, menuMap, optionGroupLookup, batch: batch);
+      await _appendAllIngredientsToBatch(
+          pesananList, menuMap, optionGroupLookup,
+          batch: batch);
 
       await batch.commit();
     } catch (e) {
       Navigator.pop(context);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(UserMessageService.fromError(e)),
+                backgroundColor: Colors.red));
       }
       return;
     }
@@ -1318,6 +2398,8 @@ class OrderConfirmationService {
     }
   }
 
+  */
+
   static void _incrementPaymentAccumulator(
       Map<String, dynamic> map, String method, int amount) {
     if (method == 'Cash') {
@@ -1334,7 +2416,8 @@ class OrderConfirmationService {
     required int nomorBerikutnya,
     required int uangYangDiterima,
     required int totalHarga,
-    required int originalTotal, String? customerName,
+    required int originalTotal,
+    String? customerName,
     required int discountAmount,
     required List<PesananObject> pesananList,
     required List<PesananObject> basketToClear,
@@ -1436,14 +2519,20 @@ class OrderConfirmationService {
   static Future<int> _assignCustomerNumber() async {
     int assignedNumber = 0;
     final fs = FirebaseFirestore.instance;
-    final docRef = fs.collection(Col.name('Canteens')).doc('canteen375').collection('Metadata').doc('customerNumber');
+    final docRef = fs
+        .collection(Col.name('Canteens'))
+        .doc('canteen375')
+        .collection('Metadata')
+        .doc('customerNumber');
     await fs.runTransaction((transaction) async {
       final snapshot = await transaction.get(docRef);
       if (!snapshot.exists) {
         transaction.set(docRef, {'customerNumber': 1});
         assignedNumber = 1;
       } else {
-        assignedNumber = ((snapshot.data() as Map<String, dynamic>)['customerNumber'] as int) + 1;
+        assignedNumber = ((snapshot.data()
+                as Map<String, dynamic>)['customerNumber'] as int) +
+            1;
         transaction.update(docRef, {'customerNumber': assignedNumber});
       }
     });
@@ -1455,13 +2544,40 @@ class OrderConfirmationService {
     QuerySnapshot snapshot,
   ) {
     final lookup = <String, Map<String, OptionItem>>{};
+    final ambiguousGroupNames = <String>{};
     for (var doc in snapshot.docs) {
-      final group = OptionGroup.fromFirestore(doc);
+      late final OptionGroup group;
+      try {
+        group = OptionGroup.fromFirestore(doc);
+      } catch (error) {
+        // A malformed or legacy option document must not block checkout. The
+        // centralized calculator will flag any selected option that could
+        // not be resolved and will skip its ingredients.
+        print('Unable to parse option group ${doc.id}: $error');
+        continue;
+      }
       final optionMap = <String, OptionItem>{};
+      final optionNames = <String, List<OptionItem>>{};
       for (var option in group.options) {
         optionMap[option.id] = option;
+        optionNames.putIfAbsent(option.name.trim(), () => []).add(option);
+      }
+      for (final entry in optionNames.entries) {
+        if (entry.key.isNotEmpty && entry.value.length == 1) {
+          optionMap['__name__${entry.key}'] = entry.value.single;
+        }
       }
       lookup[group.id] = optionMap;
+      final groupName = group.name.trim();
+      final groupNameKey = '__name__$groupName';
+      if (groupName.isNotEmpty && !ambiguousGroupNames.contains(groupName)) {
+        if (lookup.containsKey(groupNameKey)) {
+          lookup.remove(groupNameKey);
+          ambiguousGroupNames.add(groupName);
+        } else {
+          lookup[groupNameKey] = optionMap;
+        }
+      }
     }
     return lookup;
   }
@@ -1484,31 +2600,32 @@ class OrderConfirmationService {
   }
 
   static Future<void> _appendAllIngredientsToBatch(
-    List<PesananObject> pesananList,
-    Map<String, MenuObject> menuMap,
-    Map<String, Map<String, OptionItem>> optionGroupLookup,
-    {WriteBatch? batch, Transaction? transaction}
-  ) async {
+      List<PesananObject> pesananList,
+      Map<String, MenuObject> menuMap,
+      Map<String, Map<String, OptionItem>> optionGroupLookup,
+      {WriteBatch? batch,
+      Transaction? transaction}) async {
     if (batch == null && transaction == null) return;
 
     final aggregated = <String, Map<String, dynamic>>{};
-    
+
     for (var pesanan in pesananList) {
       final menu = menuMap[pesanan.namaPesanan];
       if (menu == null) continue;
-      
+
       final optIngredients = _resolveOptionIngredients(
-        pesanan.selectedOptions, optionGroupLookup,
+        pesanan.selectedOptions,
+        optionGroupLookup,
       );
-      
+
       final singleMenuAgg = InventoryService().aggregateIngredients(
-        menu.ingredients, optIngredients, pesanan.totalQuantity
-      );
-      
+          menu.ingredients, optIngredients, pesanan.totalQuantity);
+
       for (var entry in singleMenuAgg.entries) {
         if (aggregated.containsKey(entry.key)) {
-          aggregated[entry.key]!['totalRequired'] = 
-              (aggregated[entry.key]!['totalRequired'] as int) + (entry.value['totalRequired'] as int);
+          aggregated[entry.key]!['totalRequired'] =
+              (aggregated[entry.key]!['totalRequired'] as int) +
+                  (entry.value['totalRequired'] as int);
         } else {
           aggregated[entry.key] = {
             'name': entry.value['name'],
@@ -1519,17 +2636,24 @@ class OrderConfirmationService {
     }
 
     if (batch != null) {
-      await InventoryService().batchDeductAggregatedIngredients(aggregated, batch);
+      await InventoryService()
+          .batchDeductAggregatedIngredients(aggregated, batch);
     } else if (transaction != null) {
-      await InventoryService().transactionDeductAggregatedIngredients(aggregated, transaction);
+      await InventoryService()
+          .transactionDeductAggregatedIngredients(aggregated, transaction);
     }
   }
 
   static Future<void> _appendVoucherToBatchOrTransaction(
-      String voucherCode, bool isPosVoucher, {WriteBatch? batch, Transaction? transaction, int usedAmount = 0}) async {
+      String voucherCode, bool isPosVoucher,
+      {WriteBatch? batch, Transaction? transaction, int usedAmount = 0}) async {
     try {
       if (batch == null && transaction == null) return;
-      
+      // A transaction callback can be replayed by Firestore. A different
+      // Firestore instance cannot participate in that transaction, so defer
+      // e-santren voucher mutation to the idempotent post-commit helper below.
+      if (!isPosVoucher && transaction != null) return;
+
       if (isPosVoucher) {
         FirebaseFirestore fs = FirebaseFirestore.instance;
         DocumentReference voucherRef =
@@ -1538,11 +2662,11 @@ class OrderConfirmationService {
         // Fetch document to get voucherGroupId and multi-use fields
         DocumentSnapshot doc;
         if (transaction != null) {
-            doc = await transaction.get(voucherRef);
+          doc = await transaction.get(voucherRef);
         } else {
-            doc = await voucherRef.get();
+          doc = await voucherRef.get();
         }
-        
+
         if (doc.exists) {
           Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
           String? groupId = data['voucherGroupId'];
@@ -1550,8 +2674,10 @@ class OrderConfirmationService {
 
           if (!sekaliPakai && usedAmount > 0) {
             // 🔄 Multi-use voucher: decrement balance instead of marking CLAIMED
-            int currentRemaining = (data['valueRemaining'] ?? data['value'] ?? 0) as int;
-            int newRemaining = (currentRemaining - usedAmount).clamp(0, currentRemaining);
+            int currentRemaining =
+                (data['valueRemaining'] ?? data['value'] ?? 0) as int;
+            int newRemaining =
+                (currentRemaining - usedAmount).clamp(0, currentRemaining);
             Map<String, dynamic> updates = {
               'valueUsed': FieldValue.increment(usedAmount),
               'valueRemaining': newRemaining,
@@ -1563,17 +2689,25 @@ class OrderConfirmationService {
             }
             if (batch != null) batch.update(voucherRef, updates);
             if (transaction != null) transaction.update(voucherRef, updates);
-            print('🔄 Multi-use voucher: deducted $usedAmount, remaining: $newRemaining');
+            print(
+                '🔄 Multi-use voucher: deducted $usedAmount, remaining: $newRemaining');
           } else {
             // Single-use voucher: mark as CLAIMED immediately
-            if (batch != null) batch.update(voucherRef, {'status': 'CLAIMED', 'isClaimed': true});
-            if (transaction != null) transaction.update(voucherRef, {'status': 'CLAIMED', 'isClaimed': true});
+            if (batch != null)
+              batch
+                  .update(voucherRef, {'status': 'CLAIMED', 'isClaimed': true});
+            if (transaction != null)
+              transaction
+                  .update(voucherRef, {'status': 'CLAIMED', 'isClaimed': true});
           }
 
           if (groupId != null) {
             var groupRef = fs.collection(Col.name('voucherGroup')).doc(groupId);
-            if (batch != null) batch.update(groupRef, {'totalClaimed': FieldValue.increment(1)});
-            if (transaction != null) transaction.update(groupRef, {'totalClaimed': FieldValue.increment(1)});
+            if (batch != null)
+              batch.update(groupRef, {'totalClaimed': FieldValue.increment(1)});
+            if (transaction != null)
+              transaction
+                  .update(groupRef, {'totalClaimed': FieldValue.increment(1)});
             print('📈 Incremented totalClaimed for group $groupId');
           }
         }
@@ -1588,14 +2722,18 @@ class OrderConfirmationService {
         DocumentSnapshot eSantrenDoc = await voucherRef.get();
 
         if (eSantrenDoc.exists) {
-          Map<String, dynamic> eSantrenData = eSantrenDoc.data() as Map<String, dynamic>;
+          Map<String, dynamic> eSantrenData =
+              eSantrenDoc.data() as Map<String, dynamic>;
           bool sekaliPakai = eSantrenData['sekaliPakai'] ?? true;
           String? groupId = eSantrenData['voucherGroupId'];
 
           if (!sekaliPakai && usedAmount > 0) {
             // 🔄 Multi-use e-santren voucher: decrement balance
-            int currentRemaining = (eSantrenData['valueRemaining'] ?? eSantrenData['value'] ?? 0) as int;
-            int newRemaining = (currentRemaining - usedAmount).clamp(0, currentRemaining);
+            int currentRemaining = (eSantrenData['valueRemaining'] ??
+                eSantrenData['value'] ??
+                0) as int;
+            int newRemaining =
+                (currentRemaining - usedAmount).clamp(0, currentRemaining);
             Map<String, dynamic> updates = {
               'valueUsed': FieldValue.increment(usedAmount),
               'valueRemaining': newRemaining,
@@ -1605,7 +2743,8 @@ class OrderConfirmationService {
               updates['isClaimed'] = true;
             }
             await voucherRef.update(updates);
-            print('🔄 e-santren multi-use voucher: deducted $usedAmount, remaining: $newRemaining');
+            print(
+                '🔄 e-santren multi-use voucher: deducted $usedAmount, remaining: $newRemaining');
           } else {
             // Single-use: mark as claimed immediately
             await voucherRef.update({'isClaimed': true});
@@ -1613,7 +2752,8 @@ class OrderConfirmationService {
 
           // Also update the voucherGroup totalClaimed counter on e-santren
           if (groupId != null) {
-            var groupRef = eSantrenFs.collection(Col.name('voucherGroup')).doc(groupId);
+            var groupRef =
+                eSantrenFs.collection(Col.name('voucherGroup')).doc(groupId);
             await groupRef.update({'totalClaimed': FieldValue.increment(1)});
           }
         }
@@ -1621,6 +2761,92 @@ class OrderConfirmationService {
       print('✅ Voucher $voucherCode claimed successfully inside atomic unit');
     } catch (e) {
       print('❌ Failed to claim voucher $voucherCode: $e');
+    }
+  }
+
+  /// Claims a voucher in the separate e-santren Firestore instance after the
+  /// POS transaction commits. Its own marker makes retries after an ambiguous
+  /// POS response safe and avoids mutating the external database from a
+  /// retryable POS transaction callback.
+  static Future<void> _claimExternalVoucherIdempotently({
+    required String voucherCode,
+    required String operationId,
+    required int usedAmount,
+  }) async {
+    try {
+      final fs = FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
+      final operationRef = fs
+          .collection('operationClaims')
+          .doc(_buildOperationId('voucher', [operationId, voucherCode]));
+      final voucherRef = fs.collection(Col.name('vouchers')).doc(voucherCode);
+
+      await fs.runTransaction((transaction) async {
+        final operationSnapshot = await transaction.get(operationRef);
+        if (operationSnapshot.exists &&
+            operationSnapshot.data()?['status']?.toString().toLowerCase() ==
+                'completed') {
+          return;
+        }
+
+        final voucherSnapshot = await transaction.get(voucherRef);
+        if (!voucherSnapshot.exists) {
+          transaction.set(
+            operationRef,
+            {
+              'status': 'completed',
+              'voucherMissing': true,
+              'voucherCode': voucherCode,
+              'completedAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          );
+          return;
+        }
+
+        final data = voucherSnapshot.data() ?? <String, dynamic>{};
+        final sekaliPakai = data['sekaliPakai'] != false;
+        final groupId = data['voucherGroupId']?.toString();
+        DocumentSnapshot<Map<String, dynamic>>? groupSnapshot;
+        DocumentReference<Map<String, dynamic>>? groupRef;
+        if (groupId != null && groupId.isNotEmpty) {
+          groupRef = fs.collection(Col.name('voucherGroup')).doc(groupId);
+          groupSnapshot = await transaction.get(groupRef);
+        }
+
+        if (!sekaliPakai && usedAmount > 0) {
+          final currentRemaining = InventoryService.toInt(
+            data['valueRemaining'] ?? data['value'],
+          );
+          final newRemaining =
+              (currentRemaining - usedAmount).clamp(0, currentRemaining);
+          final updates = <String, dynamic>{
+            'valueUsed': FieldValue.increment(usedAmount),
+            'valueRemaining': newRemaining,
+          };
+          if (newRemaining <= 0) updates['isClaimed'] = true;
+          transaction.update(voucherRef, updates);
+        } else {
+          transaction.update(voucherRef, {'isClaimed': true});
+        }
+
+        if (groupRef != null && groupSnapshot!.exists) {
+          transaction
+              .update(groupRef, {'totalClaimed': FieldValue.increment(1)});
+        }
+        transaction.set(
+          operationRef,
+          {
+            'status': 'completed',
+            'voucherCode': voucherCode,
+            'completedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      });
+    } catch (error) {
+      // POS stock and financial writes are already committed. Keep this
+      // non-blocking, but make the failure visible in logs for reconciliation.
+      print('Failed to claim e-santren voucher $voucherCode: $error');
     }
   }
 
@@ -1645,7 +2871,7 @@ class OrderConfirmationService {
             .where('voucherId', isEqualTo: voucherCode)
             .limit(1)
             .get();
-        
+
         if (querySnap.docs.isNotEmpty) {
           doc = querySnap.docs.first;
           data = doc.data() as Map<String, dynamic>;
@@ -1655,8 +2881,10 @@ class OrderConfirmationService {
           // Fallback 2: e-santren instance
           FirebaseFirestore eSantrenFs =
               FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
-          DocumentSnapshot eSantrenDoc =
-              await eSantrenFs.collection(Col.name("vouchers")).doc(voucherCode).get();
+          DocumentSnapshot eSantrenDoc = await eSantrenFs
+              .collection(Col.name("vouchers"))
+              .doc(voucherCode)
+              .get();
           if (eSantrenDoc.exists) {
             data = eSantrenDoc.data() as Map<String, dynamic>;
             actualDocId = eSantrenDoc.id;
@@ -1669,8 +2897,8 @@ class OrderConfirmationService {
       }
 
       DateTime now = DateTime.now();
-      
-      // Fallback to createdAt if activeDate is missing. 
+
+      // Fallback to createdAt if activeDate is missing.
       DateTime activeDate;
       final activeRaw = data['activeDate'] ?? data['createdAt'];
       if (activeRaw != null) {
@@ -1686,7 +2914,7 @@ class OrderConfirmationService {
       } else {
         activeDate = now;
       }
-          
+
       // If expireDate is missing, assume it doesn't expire (or set far future)
       DateTime expireDate;
       final expireRaw = data['expireDate'];
@@ -1696,7 +2924,8 @@ class OrderConfirmationService {
         } else if (expireRaw is DateTime) {
           expireDate = expireRaw;
         } else if (expireRaw is String) {
-          expireDate = DateTime.tryParse(expireRaw) ?? now.add(const Duration(days: 3650));
+          expireDate = DateTime.tryParse(expireRaw) ??
+              now.add(const Duration(days: 3650));
         } else {
           expireDate = now.add(const Duration(days: 3650));
         }
@@ -1750,22 +2979,27 @@ class OrderConfirmationService {
           final groupFs = isPosVoucher
               ? fs
               : FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
-          final groupDoc = await groupFs.collection(Col.name('voucherGroup')).doc(voucherGroupId).get();
-          if (!groupDoc.exists || (groupDoc.data()?['isActive'] ?? true) == false) {
-            return {'error': 'Campaign voucher ini sedang tidak aktif (Suspended)'};
+          final groupDoc = await groupFs
+              .collection(Col.name('voucherGroup'))
+              .doc(voucherGroupId)
+              .get();
+          if (!groupDoc.exists ||
+              (groupDoc.data()?['isActive'] ?? true) == false) {
+            return {'error': 'Kampanye voucher ini sedang tidak aktif'};
           }
         } catch (e) {
           print('Error checking voucher group activation status: $e');
         }
       }
 
-
       // Determine the effective discount value
       int effectiveValue;
       if (!sekaliPakai) {
         // Multi-use: discount is capped by remaining balance OR order total (whichever is less)
-        int valueRemaining = (data['valueRemaining'] ?? data['value'] ?? 0) as int;
-        effectiveValue = valueRemaining < currentTotal ? valueRemaining : currentTotal;
+        int valueRemaining =
+            (data['valueRemaining'] ?? data['value'] ?? 0) as int;
+        effectiveValue =
+            valueRemaining < currentTotal ? valueRemaining : currentTotal;
       } else {
         effectiveValue = (data['value'] ?? 0) as int;
       }
@@ -1791,13 +3025,13 @@ class OrderConfirmationService {
           await fs.collection(Col.name("vouchers")).doc(voucherCode).update({
             'status': 'EXPIRED',
           });
-          return {'error': 'Voucher sudah tidak berlaku (Expired)'};
+          return {'error': 'Voucher sudah tidak berlaku'};
         }
 
         if (userPoints < threshold) {
           return {
             'error':
-                'Insufficent Points: the user has $userPoints points while the required points are $threshold amount',
+                'Poin member belum cukup: tersedia $userPoints poin, sedangkan diperlukan $threshold poin',
             'isSnackbarError': true,
           };
         }
@@ -1815,9 +3049,11 @@ class OrderConfirmationService {
         'success': true,
         'nama': data['nama'],
         'voucherName': data['voucherName'] ?? 'Voucher',
-        'value': effectiveValue,        // ← effective discount (may be partial for multi-use)
+        'value':
+            effectiveValue, // ← effective discount (may be partial for multi-use)
         'originalValue': data['value'], // ← original face value for display
-        'valueRemaining': data['valueRemaining'] ?? data['value'] ?? 0, // ← current balance
+        'valueRemaining':
+            data['valueRemaining'] ?? data['value'] ?? 0, // ← current balance
         'isPosVoucher': isPosVoucher,
         'sekaliPakai': sekaliPakai,
         'userId': data['userId'],
@@ -1844,7 +3080,8 @@ class OrderConfirmationService {
       if (pointsToAdd <= 0) return;
 
       FirebaseFirestore fs = FirebaseFirestore.instance;
-      DocumentReference memberRef = fs.collection(Col.name('Members')).doc(memberId);
+      DocumentReference memberRef =
+          fs.collection(Col.name('Members')).doc(memberId);
 
       await memberRef.update({
         'points': FieldValue.increment(pointsToAdd),
@@ -1915,7 +3152,7 @@ class OrderConfirmationService {
 
       FirebaseFirestore fs = FirebaseFirestore.instance;
       DateTime now = DateTime.now();
-      
+
       QuerySnapshot activeCampaigns = await fs
           .collection(Col.name('voucherGroup'))
           .where('isActive', isEqualTo: true)
@@ -1932,7 +3169,7 @@ class OrderConfirmationService {
 
       Set<String> claimedCampaignIds = {};
       Map<String, DocumentSnapshot> existingVouchersMap = {};
-      
+
       for (var vDoc in userVouchers.docs) {
         Map<String, dynamic> vData = vDoc.data() as Map<String, dynamic>;
         if (vData['type'] == 'cashbackCampaign') {
@@ -1946,14 +3183,15 @@ class OrderConfirmationService {
 
       List<QueryDocumentSnapshot> eligibleCampaigns = [];
       for (var doc in activeCampaigns.docs) {
-        if (claimedCampaignIds.contains(doc.id)) continue; 
+        if (claimedCampaignIds.contains(doc.id)) continue;
 
         Map<String, dynamic> campaignData = doc.data() as Map<String, dynamic>;
         Timestamp? activeTimestamp = campaignData['activeDate'] as Timestamp?;
         Timestamp? expireTimestamp = campaignData['expireDate'] as Timestamp?;
-        
+
         if (activeTimestamp != null && expireTimestamp != null) {
-          if (now.isAfter(activeTimestamp.toDate()) && now.isBefore(expireTimestamp.toDate())) {
+          if (now.isAfter(activeTimestamp.toDate()) &&
+              now.isBefore(expireTimestamp.toDate())) {
             eligibleCampaigns.add(doc);
           }
         }
@@ -1963,37 +3201,45 @@ class OrderConfirmationService {
 
       // Priority Algorithm: Sort by expiry date closest to now
       eligibleCampaigns.sort((a, b) {
-        Timestamp expireA = (a.data() as Map<String, dynamic>)['expireDate'] as Timestamp;
-        Timestamp expireB = (b.data() as Map<String, dynamic>)['expireDate'] as Timestamp;
+        Timestamp expireA =
+            (a.data() as Map<String, dynamic>)['expireDate'] as Timestamp;
+        Timestamp expireB =
+            (b.data() as Map<String, dynamic>)['expireDate'] as Timestamp;
         return expireA.compareTo(expireB);
       });
 
       // Apply points to the top priority campaign ONLY
       var priorityCampaignDoc = eligibleCampaigns.first;
       String voucherGroupId = priorityCampaignDoc.id;
-      Map<String, dynamic> campaignData = priorityCampaignDoc.data() as Map<String, dynamic>;
-      
+      Map<String, dynamic> campaignData =
+          priorityCampaignDoc.data() as Map<String, dynamic>;
+
       var existingVoucher = existingVouchersMap[voucherGroupId];
 
       if (existingVoucher != null) {
-        Map<String, dynamic> voucherData = existingVoucher.data() as Map<String, dynamic>;
-        if (voucherData['status'] == 'IN_PROGRESS' || voucherData['status'] == 'READY_TO_CLAIM') {
+        Map<String, dynamic> voucherData =
+            existingVoucher.data() as Map<String, dynamic>;
+        if (voucherData['status'] == 'IN_PROGRESS' ||
+            voucherData['status'] == 'READY_TO_CLAIM') {
           int currentPoints = voucherData['userPoints'] ?? 0;
           int threshold = voucherData['threshold'] ?? 0;
           int newPoints = currentPoints + pointsToAdd;
-          String newStatus = newPoints >= threshold ? 'READY_TO_CLAIM' : 'IN_PROGRESS';
+          String newStatus =
+              newPoints >= threshold ? 'READY_TO_CLAIM' : 'IN_PROGRESS';
 
           await existingVoucher.reference.update({
             'userPoints': newPoints,
             'status': newStatus,
             'lastUpdatedAt': FieldValue.serverTimestamp(),
           });
-          print('🪙 Added $pointsToAdd points to prioritized campaign ${campaignData['voucherName']} for $memberId. New Status: $newStatus');
+          print(
+              '🪙 Added $pointsToAdd points to prioritized campaign ${campaignData['voucherName']} for $memberId. New Status: $newStatus');
         }
       } else {
         String newVoucherId = _generateVoucherId();
         int threshold = campaignData['threshold'] ?? 0;
-        String initialStatus = pointsToAdd >= threshold ? 'READY_TO_CLAIM' : 'IN_PROGRESS';
+        String initialStatus =
+            pointsToAdd >= threshold ? 'READY_TO_CLAIM' : 'IN_PROGRESS';
 
         await fs.collection(Col.name('vouchers')).doc(newVoucherId).set({
           'activeDate': campaignData['activeDate'],
@@ -2013,13 +3259,13 @@ class OrderConfirmationService {
           'voucherGroupId': voucherGroupId,
           'voucherName': campaignData['voucherName'],
         });
-        
+
         await priorityCampaignDoc.reference.update({
           'totalParticipants': FieldValue.increment(1),
         });
-        print('🎟️ Created new prioritized cashback campaign voucher ${campaignData['voucherName']} for $memberId');
+        print(
+            '🎟️ Created new prioritized cashback campaign voucher ${campaignData['voucherName']} for $memberId');
       }
-
     } catch (e) {
       print('❌ Failed to process periodic cashback campaign: $e');
     }
@@ -2033,7 +3279,15 @@ class OrderConfirmationService {
     required bool printerIsConnected,
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
-    required Future<void> Function({int discountAmount, int originalTotal, String? customerName, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway, int? voucherRemaining})
+    required Future<void> Function(
+            {int discountAmount,
+            int originalTotal,
+            String? customerName,
+            List<PesananObject>? customPesananList,
+            int? overrideNomorBerikutnya,
+            int? overrideTotalHarga,
+            bool? overrideIsTakeAway,
+            int? voucherRemaining})
         printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
@@ -2042,7 +3296,7 @@ class OrderConfirmationService {
   }) async {
     // 1. Aggregate all items from all orders in the open bill
     final List<PesananObject> aggregatedItems = [];
-    
+
     for (var order in billOrders) {
       for (var item in order.items) {
         final pesanan = PesananObject(
@@ -2053,8 +3307,9 @@ class OrderConfirmationService {
           takeAwayQuantity: item.takeAwayQuantity,
           selectedOptions: item.selectedOptions.toList(),
         );
-        
-        int idx = aggregatedItems.indexWhere((ai) => ai.orderKey == pesanan.orderKey);
+
+        int idx =
+            aggregatedItems.indexWhere((ai) => ai.orderKey == pesanan.orderKey);
         if (idx == -1) {
           aggregatedItems.add(pesanan);
         } else {
@@ -2075,7 +3330,8 @@ class OrderConfirmationService {
       final menuUnitsMap = <String, int>{};
       for (var doc in menuSnapshot.docs) {
         final data = doc.data();
-        menuUnitsMap[data['namaMenu'] ?? ''] = (data['unitsPerPackage'] ?? 1) as int;
+        menuUnitsMap[data['namaMenu'] ?? ''] =
+            (data['unitsPerPackage'] ?? 1) as int;
       }
 
       int totalPackages = 0;
@@ -2107,7 +3363,8 @@ class OrderConfirmationService {
     );
 
     if (result != null && result['confirmed'] == true) {
-      int finalTotal = result['finalTotal'] ?? (openBill.totalAmount + totalTakeAwayFee);
+      int finalTotal =
+          result['finalTotal'] ?? (openBill.totalAmount + totalTakeAwayFee);
       String? appliedVoucherCode = result['voucherCode'];
       String? paymentMethod = result['paymentMethod'];
 
@@ -2139,6 +3396,7 @@ class OrderConfirmationService {
         programNominal: result['programNominal'] ?? 0,
         programExtraPaymentMethod: result['programExtraPaymentMethod'],
         programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
+        operationId: 'settlement_${openBill.statusDocId ?? openBill.memberId}',
       );
     } else {
       uangYangDiterimaController.clear();
@@ -2151,11 +3409,282 @@ class OrderConfirmationService {
     required OpenBill openBill,
     required List<PesananObject> aggregatedItems,
     required int totalHarga,
-    required int originalTotal, String? customerName,
+    required int originalTotal,
+    String? customerName,
     required int totalTakeAwayFee,
     required TextEditingController uangYangDiterimaController,
     required int nomorBerikutnya,
-    required Future<void> Function({int discountAmount, int originalTotal, String? customerName, List<PesananObject>? customPesananList, int? overrideNomorBerikutnya, int? overrideTotalHarga, bool? overrideIsTakeAway, int? voucherRemaining}) printReceipt,
+    required Future<void> Function(
+            {int discountAmount,
+            int originalTotal,
+            String? customerName,
+            List<PesananObject>? customPesananList,
+            int? overrideNomorBerikutnya,
+            int? overrideTotalHarga,
+            bool? overrideIsTakeAway,
+            int? voucherRemaining})
+        printReceipt,
+    required String Function() getYear,
+    required String Function() getMonth,
+    required String Function() getDate,
+    required Function(int) setJumlahItem,
+    String? appliedVoucherCode,
+    bool isPosVoucher = false,
+    int discountAmount = 0,
+    String? transactionMethod,
+    int? voucherRemaining,
+    bool isSplitPayment = false,
+    int splitCashAmount = 0,
+    int splitQrisAmount = 0,
+    String? voucherProgramId,
+    int programNominal = 0,
+    String? programExtraPaymentMethod,
+    int programExtraSplitQrisAmount = 0,
+    String? operationId,
+  }) async {
+    final firestore = FirebaseFirestore.instance;
+    final statusDocId = openBill.statusDocId;
+    if (statusDocId == null || statusDocId.isEmpty) {
+      throw Exception('Open bill status tidak ditemukan.');
+    }
+    final stableOperationId = operationId ?? 'settlement_$statusDocId';
+    LoaderWidget.showLoaderDialog(context, message: "Menyelesaikan tagihan...");
+    var loaderPopped = false;
+    try {
+      final itemCounts = <String, int>{};
+      for (final item in aggregatedItems) {
+        itemCounts[item.namaPesanan] =
+            (itemCounts[item.namaPesanan] ?? 0) + item.totalQuantity;
+      }
+      final subTotal = totalHarga - totalTakeAwayFee;
+      final map = <String, dynamic>{
+        'total': FieldValue.increment(totalHarga),
+        'subTotal': FieldValue.increment(subTotal),
+        'takeAwayFee': FieldValue.increment(totalTakeAwayFee),
+        'year': getYear(),
+        'month': getMonth(),
+        'date': getDate(),
+        'timestamp': FieldValue.serverTimestamp(),
+      };
+      for (final entry in itemCounts.entries) {
+        map[entry.key] = FieldValue.increment(entry.value);
+      }
+      if (isSplitPayment) {
+        _incrementPaymentAccumulator(map, 'Cash', splitCashAmount);
+        _incrementPaymentAccumulator(map, 'QRIS', splitQrisAmount);
+      } else if (voucherProgramId != null) {
+        final remaining = totalHarga - programNominal;
+        if (remaining > 0 && programExtraPaymentMethod != null) {
+          if (programExtraPaymentMethod == 'Cash + QRIS') {
+            _incrementPaymentAccumulator(
+                map, 'Cash', remaining - programExtraSplitQrisAmount);
+            _incrementPaymentAccumulator(
+                map, 'QRIS', programExtraSplitQrisAmount);
+          } else {
+            _incrementPaymentAccumulator(
+                map, programExtraPaymentMethod, remaining);
+          }
+        }
+      } else if (transactionMethod != null) {
+        _incrementPaymentAccumulator(map, transactionMethod, totalHarga);
+      }
+
+      final result = await firestore
+          .runTransaction<InventoryOperationResult>((transaction) async {
+        final operationRef = firestore
+            .collection(Col.name('Canteens'))
+            .doc('canteen375')
+            .collection('Orders')
+            .doc(stableOperationId);
+        final operationSnapshot = await transaction.get(operationRef);
+        if (operationSnapshot.exists &&
+            operationSnapshot.data()?['status']?.toString().toLowerCase() ==
+                'completed') {
+          return const InventoryOperationResult.alreadyApplied();
+        }
+        final statusRef =
+            firestore.collection(Col.name('Status')).doc(statusDocId);
+        final statusSnapshot = await transaction.get(statusRef);
+        if (!statusSnapshot.exists)
+          throw Exception('Open bill tidak ditemukan.');
+        final statusData = statusSnapshot.data() ?? <String, dynamic>{};
+        if (statusData['isClosed'] == true ||
+            statusData['status'] == 'Settled') {
+          return const InventoryOperationResult.alreadyApplied();
+        }
+
+        // Voucher reads occur before any transaction write. No inventory
+        // movement is queued here: open-bill stock was deducted when items
+        // were added, and settlement must never deduct it again.
+        if (appliedVoucherCode != null) {
+          await _appendVoucherToBatchOrTransaction(
+            appliedVoucherCode,
+            isPosVoucher,
+            transaction: transaction,
+            usedAmount: discountAmount,
+          );
+        }
+        if (voucherProgramId != null) {
+          VoucherProgramService.addRedemptionToTransaction(
+            transaction: transaction,
+            programId: voucherProgramId,
+            amount: programNominal > 0 ? programNominal : totalHarga,
+          );
+        }
+
+        transaction.set(
+          firestore
+              .collection(Col.name('DailyTransaction'))
+              .doc(DateFormat('yyyy-MM-dd').format(DateTime.now())),
+          map,
+          SetOptions(merge: true),
+        );
+        transaction.set(
+          firestore.collection(Col.name('MonthlyTransaction')).doc(getMonth()),
+          map,
+          SetOptions(merge: true),
+        );
+        transaction.set(
+          firestore.collection(Col.name('YearlyTransaction')).doc(getYear()),
+          map,
+          SetOptions(merge: true),
+        );
+        transaction.update(statusRef, {
+          'isClosed': true,
+          'status': 'Settled',
+          'settledAt': FieldValue.serverTimestamp(),
+          'wasOpenBill': true,
+          'finalTotal': totalHarga,
+          'discountAmount': discountAmount,
+          if (appliedVoucherCode != null) 'voucherCode': appliedVoucherCode,
+          'subTotal': subTotal,
+          'takeAwayFee': totalTakeAwayFee,
+          'paymentMethod': transactionMethod ?? 'Cash',
+          'transactionMethod': transactionMethod ?? 'Cash',
+          'total': totalHarga,
+          if (isSplitPayment) 'isSplitPayment': true,
+          if (isSplitPayment)
+            'splitDetails': {
+              'cashAmount': splitCashAmount,
+              'qrisAmount': splitQrisAmount,
+            },
+          if (voucherProgramId != null) 'voucherProgramId': voucherProgramId,
+          'orderRevision': FieldValue.increment(1),
+        });
+        transaction.set(
+            operationRef,
+            {
+              'status': 'completed',
+              'type': 'open_bill_settlement',
+              'sourceId': statusDocId,
+              'completedAt': FieldValue.serverTimestamp(),
+              'auditFlags': const [],
+            },
+            SetOptions(merge: true));
+        return InventoryOperationResult.applied();
+      });
+      if (appliedVoucherCode != null && !isPosVoucher) {
+        await _claimExternalVoucherIdempotently(
+          voucherCode: appliedVoucherCode,
+          operationId: stableOperationId,
+          usedAmount: discountAmount,
+        );
+      }
+      if (result.wasAlreadyApplied) {
+        if (context.mounted) {
+          loaderPopped = true;
+          Navigator.pop(context);
+        }
+        return;
+      }
+
+      String memberId = openBill.memberId;
+      if (memberId == statusDocId || memberId.endsWith('_plazaUnipdu')) {
+        final memberQuery = await firestore
+            .collection(Col.name('Members'))
+            .where('nama', isEqualTo: openBill.memberName)
+            .limit(1)
+            .get();
+        if (memberQuery.docs.isNotEmpty) memberId = memberQuery.docs.first.id;
+      }
+      _incrementMemberPoints(memberId, totalHarga,
+          voucherProgramId: voucherProgramId, programNominal: programNominal);
+      _updateCompetitionRecord(memberId, totalHarga,
+          voucherProgramId: voucherProgramId, programNominal: programNominal);
+      _processPeriodicCashbackCampaign(
+          memberId, totalHarga, openBill.memberName,
+          voucherProgramId: voucherProgramId, programNominal: programNominal);
+      await printReceipt(
+        customPesananList: aggregatedItems,
+        overrideTotalHarga: totalHarga,
+        overrideNomorBerikutnya: openBill.customerNumber,
+        overrideIsTakeAway: totalTakeAwayFee > 0,
+        discountAmount: discountAmount,
+        originalTotal: originalTotal,
+        customerName: openBill.memberName,
+        voucherRemaining: voucherRemaining,
+      );
+      if (context.mounted) {
+        loaderPopped = true;
+        Navigator.pop(context);
+      }
+      await _showSuccessDialog(
+        context: context,
+        nomorBerikutnya: openBill.customerNumber,
+        uangYangDiterima:
+            int.tryParse(uangYangDiterimaController.text.replaceAll('.', '')) ??
+                0,
+        totalHarga: totalHarga,
+        originalTotal: originalTotal,
+        discountAmount: discountAmount,
+        pesananList: aggregatedItems,
+        basketToClear: aggregatedItems,
+        customerNameController:
+            TextEditingController(text: openBill.memberName),
+        uangYangDiterimaController: uangYangDiterimaController,
+        getTotal: () {},
+        setJumlahItem: setJumlahItem,
+        splitCashAmount: isSplitPayment
+            ? splitCashAmount
+            : (voucherProgramId != null &&
+                    programExtraPaymentMethod == 'Cash + QRIS'
+                ? (totalHarga - programNominal) - programExtraSplitQrisAmount
+                : 0),
+        programNominal: programNominal,
+        voucherRemaining: voucherRemaining,
+      );
+    } catch (e) {
+      if (context.mounted && !loaderPopped) Navigator.pop(context);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'Gagal menyelesaikan tagihan: ${UserMessageService.fromError(e)}'),
+            backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  /* Legacy settlement implementation retained for historical reference.
+  static Future<void> _processOpenBillSettlementLegacy({
+    required BuildContext context,
+    required OpenBill openBill,
+    required List<PesananObject> aggregatedItems,
+    required int totalHarga,
+    required int originalTotal,
+    String? customerName,
+    required int totalTakeAwayFee,
+    required TextEditingController uangYangDiterimaController,
+    required int nomorBerikutnya,
+    required Future<void> Function(
+            {int discountAmount,
+            int originalTotal,
+            String? customerName,
+            List<PesananObject>? customPesananList,
+            int? overrideNomorBerikutnya,
+            int? overrideTotalHarga,
+            bool? overrideIsTakeAway,
+            int? voucherRemaining})
+        printReceipt,
     required String Function() getYear,
     required String Function() getMonth,
     required String Function() getDate,
@@ -2174,10 +3703,10 @@ class OrderConfirmationService {
     int programExtraSplitQrisAmount = 0,
   }) async {
     LoaderWidget.showLoaderDialog(context, message: "Menyelesaikan tagihan...");
-    
+
     FirebaseFirestore fs = FirebaseFirestore.instance;
     WriteBatch batch = fs.batch();
-    
+
     // 1. Prepare Transaction Data
     Map<String, dynamic> map = {};
     for (var element in aggregatedItems) {
@@ -2194,10 +3723,13 @@ class OrderConfirmationService {
       final remaining = totalHarga - programNominal;
       if (remaining > 0 && programExtraPaymentMethod != null) {
         if (programExtraPaymentMethod == 'Cash + QRIS') {
-          _incrementPaymentAccumulator(map, 'Cash', remaining - programExtraSplitQrisAmount);
-          _incrementPaymentAccumulator(map, 'QRIS', programExtraSplitQrisAmount);
+          _incrementPaymentAccumulator(
+              map, 'Cash', remaining - programExtraSplitQrisAmount);
+          _incrementPaymentAccumulator(
+              map, 'QRIS', programExtraSplitQrisAmount);
         } else {
-          _incrementPaymentAccumulator(map, programExtraPaymentMethod, remaining);
+          _incrementPaymentAccumulator(
+              map, programExtraPaymentMethod, remaining);
         }
       }
     } else if (transactionMethod != null) {
@@ -2210,13 +3742,16 @@ class OrderConfirmationService {
 
     DateTime now = DateTime.now();
     String datenowFormatted = DateFormat('yyyy-MM-dd').format(now);
-    DocumentReference dailyTransaction = fs.collection(Col.name('DailyTransaction')).doc(datenowFormatted);
+    DocumentReference dailyTransaction =
+        fs.collection(Col.name('DailyTransaction')).doc(datenowFormatted);
     batch.set(dailyTransaction, map, SetOptions(merge: true));
 
-    DocumentReference monthlyTransaction = fs.collection(Col.name('MonthlyTransaction')).doc(getMonth());
+    DocumentReference monthlyTransaction =
+        fs.collection(Col.name('MonthlyTransaction')).doc(getMonth());
     batch.set(monthlyTransaction, map, SetOptions(merge: true));
 
-    DocumentReference yearlyTransaction = fs.collection(Col.name('YearlyTransaction')).doc(getYear());
+    DocumentReference yearlyTransaction =
+        fs.collection(Col.name('YearlyTransaction')).doc(getYear());
     batch.set(yearlyTransaction, map, SetOptions(merge: true));
 
     try {
@@ -2242,13 +3777,15 @@ class OrderConfirmationService {
       }
 
       if (appliedVoucherCode != null) {
-        await _appendVoucherToBatchOrTransaction(appliedVoucherCode, isPosVoucher, batch: batch, usedAmount: discountAmount);
+        await _appendVoucherToBatchOrTransaction(
+            appliedVoucherCode, isPosVoucher,
+            batch: batch, usedAmount: discountAmount);
       }
-      
+
       if (voucherProgramId != null) {
         VoucherProgramService.addRedemptionToBatch(
-          batch: batch, 
-          programId: voucherProgramId, 
+          batch: batch,
+          programId: voucherProgramId,
           amount: programNominal > 0 ? programNominal : totalHarga,
         );
       }
@@ -2258,7 +3795,8 @@ class OrderConfirmationService {
 
       // 💳 STEP 3: Update member points and competition records
       String memberId = openBill.memberId;
-      if (memberId == openBill.statusDocId || memberId.endsWith('_plazaUnipdu')) {
+      if (memberId == openBill.statusDocId ||
+          memberId.endsWith('_plazaUnipdu')) {
         try {
           final memberQuery = await FirebaseFirestore.instance
               .collection(Col.name('Members'))
@@ -2267,7 +3805,8 @@ class OrderConfirmationService {
               .get();
           if (memberQuery.docs.isNotEmpty) {
             memberId = memberQuery.docs.first.id;
-            print('🔍 Fallback lookup resolved member ID: $memberId for ${openBill.memberName}');
+            print(
+                '🔍 Fallback lookup resolved member ID: $memberId for ${openBill.memberName}');
           }
         } catch (e) {
           print('❌ Error resolving member ID fallback: $e');
@@ -2308,7 +3847,8 @@ class OrderConfirmationService {
 
       Navigator.pop(context); // Close loader
 
-      final String inputText = uangYangDiterimaController.text.replaceAll('.', '');
+      final String inputText =
+          uangYangDiterimaController.text.replaceAll('.', '');
       int uangYangDiterima = int.tryParse(inputText) ?? 0;
 
       await _showSuccessDialog(
@@ -2320,14 +3860,16 @@ class OrderConfirmationService {
         discountAmount: discountAmount,
         pesananList: aggregatedItems,
         basketToClear: aggregatedItems,
-        customerNameController: TextEditingController(text: openBill.memberName),
+        customerNameController:
+            TextEditingController(text: openBill.memberName),
         uangYangDiterimaController: uangYangDiterimaController,
         getTotal: () {},
         setJumlahItem: setJumlahItem,
-        splitCashAmount: isSplitPayment 
-            ? splitCashAmount 
-            : (voucherProgramId != null && programExtraPaymentMethod == 'Cash + QRIS' 
-                ? (totalHarga - programNominal) - programExtraSplitQrisAmount 
+        splitCashAmount: isSplitPayment
+            ? splitCashAmount
+            : (voucherProgramId != null &&
+                    programExtraPaymentMethod == 'Cash + QRIS'
+                ? (totalHarga - programNominal) - programExtraSplitQrisAmount
                 : 0),
         programNominal: programNominal,
         voucherRemaining: voucherRemaining,
@@ -2335,10 +3877,14 @@ class OrderConfirmationService {
     } catch (e) {
       Navigator.pop(context);
       if (context.mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal menyelesaikan tagihan: $e'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'Gagal menyelesaikan tagihan: ${UserMessageService.fromError(e)}'),
+            backgroundColor: Colors.red));
       }
     }
   }
+  */
 }
 
 class _OrderConfirmationDialog extends StatefulWidget {
@@ -2378,6 +3924,7 @@ class _OrderConfirmationDialog extends StatefulWidget {
 }
 
 class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
+  bool _isConfirming = false;
   bool applyPromo = false;
   TextEditingController voucherController = TextEditingController();
   String? voucherName;
@@ -2413,7 +3960,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
 
       // Collect all unique voucherGroupIds
       final groupIds = snapshot.docs
-          .map((doc) => (doc.data() as Map<String, dynamic>)['voucherGroupId'] as String?)
+          .map((doc) =>
+              (doc.data() as Map<String, dynamic>)['voucherGroupId'] as String?)
           .where((id) => id != null)
           .cast<String>()
           .toSet();
@@ -2427,7 +3975,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
               .doc(groupId)
               .get();
           if (groupDoc.exists) {
-            activeGroups[groupId] = (groupDoc.data()?['isActive'] ?? true) as bool;
+            activeGroups[groupId] =
+                (groupDoc.data()?['isActive'] ?? true) as bool;
           } else {
             activeGroups[groupId] = false;
           }
@@ -2441,70 +3990,75 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
         setState(() {
           final now = DateTime.now();
           final todayStart = DateTime(now.year, now.month, now.day);
-          print('DEBUG [vouchers]: Found ${snapshot.docs.length} docs from Firestore.');
+          print(
+              'DEBUG [vouchers]: Found ${snapshot.docs.length} docs from Firestore.');
           for (var doc in snapshot.docs) {
             final data = doc.data() as Map<String, dynamic>;
-            print('DEBUG [vouchers]: docId=${doc.id}, name=${data['voucherName']}, status=${data['status']}, isClaimed=${data['isClaimed']}, expireDate=${data['expireDate']}');
+            print(
+                'DEBUG [vouchers]: docId=${doc.id}, name=${data['voucherName']}, status=${data['status']}, isClaimed=${data['isClaimed']}, expireDate=${data['expireDate']}');
           }
           _redeemableVouchers = snapshot.docs
               .map((doc) => {...doc.data(), 'id': doc.id})
               .where((v) {
-                // Exclude if claimed
-                final isClaimed = v['isClaimed'] ?? false;
-                final status = v['status'] ?? '';
-                if (isClaimed || status == 'CLAIMED') {
-                  print('DEBUG [vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
-                  return false;
-                }
+            // Exclude if claimed
+            final isClaimed = v['isClaimed'] ?? false;
+            final status = v['status'] ?? '';
+            if (isClaimed || status == 'CLAIMED') {
+              print(
+                  'DEBUG [vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
+              return false;
+            }
 
-                // Exclude if the voucher's campaign/voucherGroup is inactive
-                final groupId = v['voucherGroupId'] as String?;
-                if (groupId != null && activeGroups[groupId] == false) {
-                  print('DEBUG [vouchers]: Excluded ${v['voucherName']} because its campaign is inactive/suspended');
-                  return false;
-                }
+            // Exclude if the voucher's campaign/voucherGroup is inactive
+            final groupId = v['voucherGroupId'] as String?;
+            if (groupId != null && activeGroups[groupId] == false) {
+              print(
+                  'DEBUG [vouchers]: Excluded ${v['voucherName']} because its campaign is inactive/suspended');
+              return false;
+            }
 
+            final expireRaw = v['expireDate'];
+            DateTime? expireDate;
+            if (expireRaw != null) {
+              if (expireRaw is Timestamp) {
+                expireDate = expireRaw.toDate();
+              } else if (expireRaw is DateTime) {
+                expireDate = expireRaw;
+              } else if (expireRaw is String) {
+                expireDate = DateTime.tryParse(expireRaw);
+              }
+            }
 
-                final expireRaw = v['expireDate'];
-                DateTime? expireDate;
-                if (expireRaw != null) {
-                  if (expireRaw is Timestamp) {
-                    expireDate = expireRaw.toDate();
-                  } else if (expireRaw is DateTime) {
-                    expireDate = expireRaw;
-                  } else if (expireRaw is String) {
-                    expireDate = DateTime.tryParse(expireRaw);
-                  }
+            if (expireDate == null) {
+              // Fallback: Try to parse from name
+              final voucherName = v['voucherName'] ?? '';
+              final regExp = RegExp(r'(\d{4})-(\d{2})');
+              final match = regExp.firstMatch(voucherName);
+              if (match != null) {
+                final year = int.tryParse(match.group(1) ?? '');
+                final month = int.tryParse(match.group(2) ?? '');
+                if (year != null && month != null) {
+                  final expiryYear = month == 12 ? year + 1 : year;
+                  final expiryMonth = month == 12 ? 1 : month + 1;
+                  expireDate =
+                      DateTime(expiryYear, expiryMonth + 1, 0, 23, 59, 59);
                 }
-                
-                if (expireDate == null) {
-                  // Fallback: Try to parse from name
-                  final voucherName = v['voucherName'] ?? '';
-                  final regExp = RegExp(r'(\d{4})-(\d{2})');
-                  final match = regExp.firstMatch(voucherName);
-                  if (match != null) {
-                    final year = int.tryParse(match.group(1) ?? '');
-                    final month = int.tryParse(match.group(2) ?? '');
-                    if (year != null && month != null) {
-                      final expiryYear = month == 12 ? year + 1 : year;
-                      final expiryMonth = month == 12 ? 1 : month + 1;
-                      expireDate = DateTime(expiryYear, expiryMonth + 1, 0, 23, 59, 59);
-                    }
-                  }
-                }
-                
-                if (expireDate == null) {
-                  print('DEBUG [vouchers]: Showed ${v['voucherName']} (no expiry found)');
-                  return true;
-                }
-                // Do not show if the voucher's expireDate is before today
-                final isValid = !expireDate.isBefore(todayStart);
-                if (!isValid) {
-                  print('DEBUG [vouchers]: Excluded ${v['voucherName']} because expired on $expireDate (todayStart: $todayStart)');
-                }
-                return isValid;
-              })
-              .toList();
+              }
+            }
+
+            if (expireDate == null) {
+              print(
+                  'DEBUG [vouchers]: Showed ${v['voucherName']} (no expiry found)');
+              return true;
+            }
+            // Do not show if the voucher's expireDate is before today
+            final isValid = !expireDate.isBefore(todayStart);
+            if (!isValid) {
+              print(
+                  'DEBUG [vouchers]: Excluded ${v['voucherName']} because expired on $expireDate (todayStart: $todayStart)');
+            }
+            return isValid;
+          }).toList();
           _isLoadingVouchers = false;
         });
       }
@@ -2515,6 +4069,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
       }
     }
   }
+
   String? _selectedPaymentMethod;
   bool _isSplitPayment = false;
   int _splitQrisAmount = 0;
@@ -2540,13 +4095,17 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
       voucherError = null;
     });
 
-    final result = await OrderConfirmationService._validateVoucher(docId ?? code, currentTotal);
+    final result = await OrderConfirmationService._validateVoucher(
+        docId ?? code, currentTotal);
 
     if (mounted) {
       setState(() {
         isValidatingVoucher = false;
         if (result != null && result['error'] != null) {
-          voucherError = result['error'];
+          voucherError = UserMessageService.fromText(
+            result['error']?.toString(),
+            fallback: 'Voucher tidak valid',
+          );
           voucherApplied = false;
           voucherName = null;
           voucherValue = 0;
@@ -2554,11 +4113,11 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
           voucherDocId = null;
           voucherBalance = null;
           sekaliPakai = true;
-          
+
           // Show error message
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(result['error'] ?? 'Voucher tidak valid'),
+              content: Text(voucherError ?? 'Voucher tidak valid'),
               backgroundColor: Colors.red,
             ),
           );
@@ -2681,7 +4240,9 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                             width: 8,
                             height: 8,
                             decoration: BoxDecoration(
-                              color: widget.printerIsConnected ? Colors.green : Colors.grey,
+                              color: widget.printerIsConnected
+                                  ? Colors.green
+                                  : Colors.grey,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -2873,8 +4434,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                   : () async {
                                       if (voucherController.text.length < 4) {
                                         setState(() {
-                                          voucherError =
-                                              'Minimal 4 karakter';
+                                          voucherError = 'Minimal 4 karakter';
                                         });
                                         return;
                                       }
@@ -2899,11 +4459,20 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                             ScaffoldMessenger.of(context)
                                                 .showSnackBar(
                                               SnackBar(
-                                                  content:
-                                                      Text(result['error'])),
+                                                content: Text(
+                                                    UserMessageService.fromText(
+                                                  result['error']?.toString(),
+                                                  fallback:
+                                                      'Voucher tidak valid',
+                                                )),
+                                              ),
                                             );
                                           }
-                                          voucherError = result['error'];
+                                          voucherError =
+                                              UserMessageService.fromText(
+                                            result['error']?.toString(),
+                                            fallback: 'Voucher tidak valid',
+                                          );
                                           voucherApplied = false;
                                           voucherName = null;
                                           voucherValue = 0;
@@ -2916,24 +4485,30 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                           voucherApplied = true;
                                           voucherName = result['voucherName'];
                                           voucherValue = result['value'];
-                                          isPosVoucher = result['isPosVoucher'] ?? false;
+                                          isPosVoucher =
+                                              result['isPosVoucher'] ?? false;
                                           voucherDocId = result['docId'];
-                                          voucherBalance = result['valueRemaining'];
-                                          sekaliPakai = result['sekaliPakai'] ?? true;
+                                          voucherBalance =
+                                              result['valueRemaining'];
+                                          sekaliPakai =
+                                              result['sekaliPakai'] ?? true;
 
                                           // Automatically put customer name and handle member link
                                           String? returnedName = result['nama'];
-                                          String? returnedUserId = result['userId'];
+                                          String? returnedUserId =
+                                              result['userId'];
 
                                           if (returnedUserId != null) {
                                             // Prioritize linking to the actual member and using their name
                                             try {
-                                              _selectedMember = _members.firstWhere(
-                                                  (m) => m.id == returnedUserId);
+                                              _selectedMember =
+                                                  _members.firstWhere((m) =>
+                                                      m.id == returnedUserId);
                                               isMember = true;
-                                              widget.customerNameController.text =
-                                                  _selectedMember!.name;
-                                              widget.onSelectedMemberChanged?.call(_selectedMember);
+                                              widget.customerNameController
+                                                  .text = _selectedMember!.name;
+                                              widget.onSelectedMemberChanged
+                                                  ?.call(_selectedMember);
                                               print(
                                                   "✅ Linked to member: ${_selectedMember!.name}");
                                             } catch (e) {
@@ -2981,214 +4556,245 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Autocomplete<Member>(
-                        focusNode: customerNameFocusNode,
-                        textEditingController: widget.customerNameController,
-                        displayStringForOption: (Member option) => option.name,
-                        optionsBuilder: (TextEditingValue textEditingValue) async {
-                          final query = textEditingValue.text;
-                          if (query == '') {
-                            return const Iterable<Member>.empty();
-                          }
-                          
-                          _lastSearchQuery = query;
-                          await Future.delayed(const Duration(milliseconds: 500));
-                          
-                          if (query != _lastSearchQuery) {
-                            return _lastOptionsFound;
-                          }
-                          
-                          _lastOptionsFound = await MemberService.instance
-                              .searchCachedMembers(query);
-                          return _lastOptionsFound;
-                        },
-                        onSelected: (Member selection) {
-                          setState(() {
-                            _selectedMember = selection;
-                            _memberError = null;
-                            widget.customerNameController.text = selection.name;
-                          });
-                          _fetchRedeemableVouchers(selection.id);
-                          widget.onSelectedMemberChanged?.call(selection);
-                        },
-                        fieldViewBuilder: (context, controller, focusNode,
-                            onFieldSubmitted) {
-                          // Sync initial value handled by Autocomplete internally mostly
-                          return TextField(
-                            controller: controller,
-                            focusNode: focusNode,
-                            onChanged: (value) {
-                              widget.customerNameController.text = value;
-                              // Reset selection if input changes from the selected member's name
-                              if (_selectedMember != null && value != _selectedMember!.name) {
-                                setState(() {
-                                  _selectedMember = null;
-                                  _memberError = null;
-                                });
-                                widget.onSelectedMemberChanged?.call(null);
-                              } else if (_memberError != null) {
-                                setState(() => _memberError = null);
+                            focusNode: customerNameFocusNode,
+                            textEditingController:
+                                widget.customerNameController,
+                            displayStringForOption: (Member option) =>
+                                option.name,
+                            optionsBuilder:
+                                (TextEditingValue textEditingValue) async {
+                              final query = textEditingValue.text;
+                              if (query == '') {
+                                return const Iterable<Member>.empty();
                               }
+
+                              _lastSearchQuery = query;
+                              await Future.delayed(
+                                  const Duration(milliseconds: 500));
+
+                              if (query != _lastSearchQuery) {
+                                return _lastOptionsFound;
+                              }
+
+                              _lastOptionsFound = await MemberService.instance
+                                  .searchCachedMembers(query);
+                              return _lastOptionsFound;
                             },
-                            decoration: InputDecoration(
-                              labelText: 'Cari Nama/HP Member',
-                              filled: _selectedMember != null,
-                              fillColor: _selectedMember != null ? Colors.green.shade50 : null,
-                              prefixIcon: _selectedMember != null ? const Icon(Icons.check_circle, color: Colors.green) : null,
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(4.0),
-                                borderSide: BorderSide(
-                                  color: _selectedMember != null ? Colors.green : Colors.grey.shade400,
-                                  width: _selectedMember != null ? 2.0 : 1.0,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(4.0),
-                                borderSide: BorderSide(
-                                  color: _selectedMember != null ? Colors.green : Theme.of(context).primaryColor,
-                                  width: 2.0,
-                                ),
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(4.0),
-                              ),
-                              errorText: _memberError,
-                              suffixIcon: _selectedMember != null 
-                                ? IconButton(
-                                    icon: const Icon(Icons.clear, size: 20), 
-                                    onPressed: () {
-                                      controller.clear();
-                                      setState(() {
-                                        _selectedMember = null;
-                                        widget.customerNameController.text = "";
-                                        _redeemableVouchers = [];
-                                      });
-                                      widget.onSelectedMemberChanged?.call(null);
-                                    }
-                                  ) 
-                                : null,
-                            ),
-                          );
-                        },
-                        optionsViewBuilder: (context, onSelected, options) {
-                          return Align(
-                            alignment: Alignment.topLeft,
-                            child: Material(
-                              elevation: 4.0,
-                              child: SizedBox(
-                                width: 350, // Fits the typical dialog width
-                                child: ListView.builder(
-                                  padding: EdgeInsets.zero,
-                                  shrinkWrap: true,
-                                  itemCount: options.length,
-                                  itemBuilder: (BuildContext context, int index) {
-                                    final Member option = options.elementAt(index);
-                                    return ListTile(
-                                      title: Text(
-                                        "${option.name} ${option.phoneNumber}",
-                                        style: GoogleFonts.poppins(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w500),
-                                      ),
-                                      onTap: () => onSelected(option),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      if (_isLoadingVouchers)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8.0),
-                          child: LinearProgressIndicator(),
-                        ),
-                      if (_redeemableVouchers.isNotEmpty)
-                        Container(
-                          margin: const EdgeInsets.only(top: 12),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.blue.shade200),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.card_giftcard, size: 18, color: Colors.blue.shade700),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Voucher Tersedia',
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.blue.shade900,
+                            onSelected: (Member selection) {
+                              setState(() {
+                                _selectedMember = selection;
+                                _memberError = null;
+                                widget.customerNameController.text =
+                                    selection.name;
+                              });
+                              _fetchRedeemableVouchers(selection.id);
+                              widget.onSelectedMemberChanged?.call(selection);
+                            },
+                            fieldViewBuilder: (context, controller, focusNode,
+                                onFieldSubmitted) {
+                              // Sync initial value handled by Autocomplete internally mostly
+                              return TextField(
+                                controller: controller,
+                                focusNode: focusNode,
+                                onChanged: (value) {
+                                  widget.customerNameController.text = value;
+                                  // Reset selection if input changes from the selected member's name
+                                  if (_selectedMember != null &&
+                                      value != _selectedMember!.name) {
+                                    setState(() {
+                                      _selectedMember = null;
+                                      _memberError = null;
+                                    });
+                                    widget.onSelectedMemberChanged?.call(null);
+                                  } else if (_memberError != null) {
+                                    setState(() => _memberError = null);
+                                  }
+                                },
+                                decoration: InputDecoration(
+                                  labelText: 'Cari Nama/HP Member',
+                                  filled: _selectedMember != null,
+                                  fillColor: _selectedMember != null
+                                      ? Colors.green.shade50
+                                      : null,
+                                  prefixIcon: _selectedMember != null
+                                      ? const Icon(Icons.check_circle,
+                                          color: Colors.green)
+                                      : null,
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(4.0),
+                                    borderSide: BorderSide(
+                                      color: _selectedMember != null
+                                          ? Colors.green
+                                          : Colors.grey.shade400,
+                                      width:
+                                          _selectedMember != null ? 2.0 : 1.0,
                                     ),
                                   ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(4.0),
+                                    borderSide: BorderSide(
+                                      color: _selectedMember != null
+                                          ? Colors.green
+                                          : Theme.of(context).primaryColor,
+                                      width: 2.0,
+                                    ),
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(4.0),
+                                  ),
+                                  errorText: _memberError,
+                                  suffixIcon: _selectedMember != null
+                                      ? IconButton(
+                                          icon:
+                                              const Icon(Icons.clear, size: 20),
+                                          onPressed: () {
+                                            controller.clear();
+                                            setState(() {
+                                              _selectedMember = null;
+                                              widget.customerNameController
+                                                  .text = "";
+                                              _redeemableVouchers = [];
+                                            });
+                                            widget.onSelectedMemberChanged
+                                                ?.call(null);
+                                          })
+                                      : null,
+                                ),
+                              );
+                            },
+                            optionsViewBuilder: (context, onSelected, options) {
+                              return Align(
+                                alignment: Alignment.topLeft,
+                                child: Material(
+                                  elevation: 4.0,
+                                  child: SizedBox(
+                                    width: 350, // Fits the typical dialog width
+                                    child: ListView.builder(
+                                      padding: EdgeInsets.zero,
+                                      shrinkWrap: true,
+                                      itemCount: options.length,
+                                      itemBuilder:
+                                          (BuildContext context, int index) {
+                                        final Member option =
+                                            options.elementAt(index);
+                                        return ListTile(
+                                          title: Text(
+                                            "${option.name} ${option.phoneNumber}",
+                                            style: GoogleFonts.poppins(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w500),
+                                          ),
+                                          onTap: () => onSelected(option),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          if (_isLoadingVouchers)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 8.0),
+                              child: LinearProgressIndicator(),
+                            ),
+                          if (_redeemableVouchers.isNotEmpty)
+                            Container(
+                              margin: const EdgeInsets.only(top: 12),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.blue.shade200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(Icons.card_giftcard,
+                                          size: 18,
+                                          color: Colors.blue.shade700),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Voucher Tersedia',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blue.shade900,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ..._redeemableVouchers.map((v) {
+                                    String nominalText = "";
+                                    if (v['value'] != null) {
+                                      nominalText = NumberFormat.currency(
+                                        locale: 'id_ID',
+                                        symbol: 'Rp ',
+                                        decimalDigits: 0,
+                                      ).format(v['value']);
+                                    }
+                                    return InkWell(
+                                      onTap: () {
+                                        if (v['voucherId'] != null) {
+                                          _applyVoucherCode(v['voucherId'],
+                                              docId: v['id']);
+                                        } else if (v['id'] != null) {
+                                          _applyVoucherCode(v['id'],
+                                              docId: v['id']);
+                                        }
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(
+                                            bottom: 8, top: 4),
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.check_circle,
+                                                size: 16, color: Colors.green),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    '${v['voucherName'] ?? 'Voucher'} - $nominalText',
+                                                    style: GoogleFonts.poppins(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color:
+                                                          Colors.blue.shade900,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    'Klik untuk gunakan: ${v['voucherId'] ?? ''}',
+                                                    style: GoogleFonts.poppins(
+                                                      fontSize: 10,
+                                                      color:
+                                                          Colors.blue.shade700,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            Icon(Icons.arrow_forward_ios,
+                                                size: 12,
+                                                color: Colors.blue.shade300),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
                                 ],
                               ),
-                              const SizedBox(height: 8),
-                              ..._redeemableVouchers.map((v) {
-                                String nominalText = "";
-                                if (v['value'] != null) {
-                                  nominalText = NumberFormat.currency(
-                                    locale: 'id_ID',
-                                    symbol: 'Rp ',
-                                    decimalDigits: 0,
-                                  ).format(v['value']);
-                                }
-                                return InkWell(
-                                  onTap: () {
-                                    if (v['voucherId'] != null) {
-                                      _applyVoucherCode(v['voucherId'], docId: v['id']);
-                                    } else if (v['id'] != null) {
-                                      _applyVoucherCode(v['id'], docId: v['id']);
-                                    }
-                                  },
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(bottom: 8, top: 4),
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.check_circle, size: 16, color: Colors.green),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                '${v['voucherName'] ?? 'Voucher'} - $nominalText',
-                                                style: GoogleFonts.poppins(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Colors.blue.shade900,
-                                                ),
-                                              ),
-                                              Text(
-                                                'Klik untuk gunakan: ${v['voucherId'] ?? ''}',
-                                                style: GoogleFonts.poppins(
-                                                  fontSize: 10,
-                                                  color: Colors.blue.shade700,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Icon(Icons.arrow_forward_ios, size: 12, color: Colors.blue.shade300),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
-                            ],
-                          ),
-                        ),
+                            ),
                         ],
                       )
                     else
                       TextField(
-
                         controller: widget.customerNameController,
                         focusNode: customerNameFocusNode,
                         decoration: InputDecoration(
@@ -3202,7 +4808,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                 ),
               ),
             ),
-            const VerticalDivider(width: 48, thickness: 1, indent: 20, endIndent: 20),
+            const VerticalDivider(
+                width: 48, thickness: 1, indent: 20, endIndent: 20),
             // Second Column: Payment method until order confirmation
             Expanded(
               child: SingleChildScrollView(
@@ -3221,7 +4828,13 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: ['Cash', 'QRIS', 'Online', 'Cash + QRIS', 'Program'].map((method) {
+                      children: [
+                        'Cash',
+                        'QRIS',
+                        'Online',
+                        'Cash + QRIS',
+                        'Program'
+                      ].map((method) {
                         final isSelected = _selectedPaymentMethod == method;
                         return ChoiceChip(
                           label: Text(method),
@@ -3229,8 +4842,11 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           selectedColor: const Color(0xFFC8E6C9),
                           labelStyle: GoogleFonts.poppins(
                             fontSize: 13,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                            color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
+                            fontWeight:
+                                isSelected ? FontWeight.w600 : FontWeight.w400,
+                            color: isSelected
+                                ? const Color(0xFF2E7D32)
+                                : Colors.black87,
                           ),
                           onSelected: (selected) {
                             setState(() {
@@ -3264,25 +4880,33 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               controller: _splitQrisController,
                               keyboardType: TextInputType.number,
                               inputFormatters: [
-                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                                TextInputFormatter.withFunction((oldValue, newValue) {
-                                  final plainNumber = newValue.text.replaceAll('.', '');
+                                FilteringTextInputFormatter.allow(
+                                    RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction(
+                                    (oldValue, newValue) {
+                                  final plainNumber =
+                                      newValue.text.replaceAll('.', '');
                                   if (plainNumber.isEmpty) return newValue;
                                   final format = NumberFormat("#,###", "id_ID");
-                                  final newText = format.format(int.parse(plainNumber));
+                                  final newText =
+                                      format.format(int.parse(plainNumber));
                                   return newValue.copyWith(
                                     text: newText,
-                                    selection: TextSelection.collapsed(offset: newText.length),
+                                    selection: TextSelection.collapsed(
+                                        offset: newText.length),
                                   );
                                 }),
                               ],
                               decoration: InputDecoration(
                                 labelText: 'Jumlah QRIS (Rp)',
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(4)),
                               ),
                               onChanged: (val) {
                                 setState(() {
-                                  _splitQrisAmount = int.tryParse(val.replaceAll('.', '')) ?? 0;
+                                  _splitQrisAmount =
+                                      int.tryParse(val.replaceAll('.', '')) ??
+                                          0;
                                 });
                               },
                             ),
@@ -3290,7 +4914,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 12, horizontal: 12),
                               decoration: BoxDecoration(
                                 color: Colors.blue.shade50,
                                 borderRadius: BorderRadius.circular(4),
@@ -3299,10 +4924,16 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)),
+                                  Text('Sisa Cash:',
+                                      style: GoogleFonts.poppins(
+                                          fontSize: 11,
+                                          color: Colors.blue.shade700)),
                                   Text(
                                     'Rp ${NumberFormat("#,###", "id_ID").format((displayTotal - _splitQrisAmount).clamp(0, displayTotal))}',
-                                    style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue.shade900),
                                   ),
                                 ],
                               ),
@@ -3311,26 +4942,35 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                         ],
                       ),
                     ],
-                    if (_selectedPaymentMethod == 'Program' && _activePrograms.isNotEmpty) ...[
+                    if (_selectedPaymentMethod == 'Program' &&
+                        _activePrograms.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
                         value: _selectedProgramId,
                         items: _activePrograms.map((p) {
                           return DropdownMenuItem<String>(
                             value: p['id'],
-                            child: Text('${p['programName']} (${p['institutionName']})'),
+                            child: Text(
+                                '${p['programName']} (${p['institutionName']})'),
                           );
                         }).toList(),
                         onChanged: (val) {
                           setState(() {
                             _selectedProgramId = val;
                             if (val != null) {
-                              final prog = _activePrograms.firstWhere((p) => p['id'] == val, orElse: () => {});
-                              final defNominal = ((prog['defaultNominal'] ?? 0) as num).toInt();
+                              final prog = _activePrograms.firstWhere(
+                                  (p) => p['id'] == val,
+                                  orElse: () => {});
+                              final defNominal =
+                                  ((prog['defaultNominal'] ?? 0) as num)
+                                      .toInt();
                               _programNominal = defNominal;
                               _baseProgramNominal = defNominal;
                               _programMultiplier = 1;
-                              _programNominalController.text = defNominal > 0 ? NumberFormat('#,###', 'id_ID').format(defNominal) : '';
+                              _programNominalController.text = defNominal > 0
+                                  ? NumberFormat('#,###', 'id_ID')
+                                      .format(defNominal)
+                                  : '';
                               _programExtraPaymentMethod = null;
                               _isProgramExtraSplit = false;
                               _programExtraQrisAmount = 0;
@@ -3341,12 +4981,14 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                         },
                         decoration: InputDecoration(
                           labelText: 'Pilih Program Voucher',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(4)),
                         ),
                       ),
                     ],
                     // ─── PROGRAM PAYMENT SECTION ───
-                    if (_selectedPaymentMethod == 'Program' && _selectedProgramId != null) ...[ 
+                    if (_selectedPaymentMethod == 'Program' &&
+                        _selectedProgramId != null) ...[
                       const SizedBox(height: 12),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3356,28 +4998,39 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               controller: _programNominalController,
                               keyboardType: TextInputType.number,
                               inputFormatters: [
-                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                                TextInputFormatter.withFunction((oldValue, newValue) {
-                                  final plain = newValue.text.replaceAll('.', '');
+                                FilteringTextInputFormatter.allow(
+                                    RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction(
+                                    (oldValue, newValue) {
+                                  final plain =
+                                      newValue.text.replaceAll('.', '');
                                   if (plain.isEmpty) return newValue;
                                   final fmt = NumberFormat('#,###', 'id_ID');
                                   final t = fmt.format(int.parse(plain));
-                                  return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
+                                  return newValue.copyWith(
+                                      text: t,
+                                      selection: TextSelection.collapsed(
+                                          offset: t.length));
                                 }),
                               ],
                               decoration: InputDecoration(
                                 labelText: 'Nominal Voucher (Rp)',
                                 helperText: 'Jumlah yang ditanggung program',
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(4)),
                               ),
                               onChanged: (val) {
                                 setState(() {
-                                  int newTotal = int.tryParse(val.replaceAll('.', '')) ?? 0;
+                                  int newTotal =
+                                      int.tryParse(val.replaceAll('.', '')) ??
+                                          0;
                                   _programNominal = newTotal;
 
                                   // Only reset multiplier if the user manually edited the total
                                   // to something other than base * multiplier
-                                  if (newTotal != _baseProgramNominal * _programMultiplier) {
+                                  if (newTotal !=
+                                      _baseProgramNominal *
+                                          _programMultiplier) {
                                     _baseProgramNominal = newTotal;
                                     _programMultiplier = 1;
                                   }
@@ -3396,25 +5049,33 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                             onTap: () {
                               setState(() {
                                 _programMultiplier++;
-                                _programNominal = _baseProgramNominal * _programMultiplier;
-                                _programNominalController.text = NumberFormat('#,###', 'id_ID').format(_programNominal);
+                                _programNominal =
+                                    _baseProgramNominal * _programMultiplier;
+                                _programNominalController.text =
+                                    NumberFormat('#,###', 'id_ID')
+                                        .format(_programNominal);
                               });
                             },
                             onLongPress: () {
                               setState(() {
                                 _programMultiplier = 1;
-                                _programNominal = _baseProgramNominal * _programMultiplier;
-                                _programNominalController.text = NumberFormat('#,###', 'id_ID').format(_programNominal);
+                                _programNominal =
+                                    _baseProgramNominal * _programMultiplier;
+                                _programNominalController.text =
+                                    NumberFormat('#,###', 'id_ID')
+                                        .format(_programNominal);
                               });
                             },
                             child: Container(
-                              height: 56, // Fixed height to match TextField's input area
+                              height:
+                                  56, // Fixed height to match TextField's input area
                               width: 56,
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: const Color(0xFFC8E6C9),
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: const Color(0xFF2E7D32)),
+                                border:
+                                    Border.all(color: const Color(0xFF2E7D32)),
                               ),
                               child: Text(
                                 'x$_programMultiplier',
@@ -3434,153 +5095,323 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Row(children: [
-                              const Icon(Icons.check_circle, color: Colors.green, size: 16),
+                              const Icon(Icons.check_circle,
+                                  color: Colors.green, size: 16),
                               const SizedBox(width: 6),
-                              Text('Voucher menutupi seluruh tagihan', style: GoogleFonts.poppins(fontSize: 12, color: Colors.green.shade700)),
+                              Text('Voucher menutupi seluruh tagihan',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      color: Colors.green.shade700)),
                             ]),
                           );
                         }
-                        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.orange.shade200)),
-                            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                              Text('Sisa yang harus dibayar:', style: GoogleFonts.poppins(fontSize: 12, color: Colors.orange.shade800)),
-                              Text('Rp ${NumberFormat("#,###", "id_ID").format(remaining)}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.orange.shade900)),
-                            ]),
-                          ),
-                          const SizedBox(height: 10),
-                          Text('Metode Pembayaran Sisa', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.grey.shade700)),
-                          const SizedBox(height: 6),
-                          Wrap(spacing: 8, runSpacing: 8, children: ['Cash', 'QRIS', 'Cash + QRIS'].map((m) {
-                            final isSel = _programExtraPaymentMethod == m;
-                            return ChoiceChip(
-                              label: Text(m, style: GoogleFonts.poppins(fontSize: 12)),
-                              selected: isSel,
-                              selectedColor: const Color(0xFFC8E6C9),
-                              labelStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: isSel ? const Color(0xFF2E7D32) : Colors.black87),
-                              onSelected: (sel) {
-                                setState(() {
-                                  _programExtraPaymentMethod = sel ? m : null;
-                                  _isProgramExtraSplit = sel && m == 'Cash + QRIS';
-                                  _programExtraQrisAmount = 0;
-                                  _programExtraQrisController.clear();
-                                  if (sel && m == 'QRIS') {
-                                    widget.uangYangDiterimaController.text = NumberFormat('#,###', 'id_ID').format(remaining);
-                                  } else {
-                                    widget.uangYangDiterimaController.clear();
-                                  }
-                                });
-                              },
-                            );
-                          }).toList()),
-                          if (_isProgramExtraSplit) ...[ 
-                            const SizedBox(height: 10),
-                            Row(children: [
-                              Expanded(child: TextField(
-                                controller: _programExtraQrisController,
-                                keyboardType: TextInputType.number,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                                  TextInputFormatter.withFunction((oldValue, newValue) {
-                                    final plain = newValue.text.replaceAll('.', '');
-                                    if (plain.isEmpty) return newValue;
-                                    final t = NumberFormat('#,###', 'id_ID').format(int.parse(plain));
-                                    return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
-                                  }),
-                                ],
-                                decoration: InputDecoration(labelText: 'Jumlah QRIS (Rp)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(4))),
-                                onChanged: (val) => setState(() => _programExtraQrisAmount = int.tryParse(val.replaceAll('.', '')) ?? 0),
-                              )),
-                              const SizedBox(width: 12),
-                              Expanded(child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                                decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.blue.shade200)),
-                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)),
-                                  Text('Rp ${NumberFormat("#,###", "id_ID").format((remaining - _programExtraQrisAmount).clamp(0, remaining))}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
+                        return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                    color: Colors.orange.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color: Colors.orange.shade200)),
+                                child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text('Sisa yang harus dibayar:',
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 12,
+                                              color: Colors.orange.shade800)),
+                                      Text(
+                                          'Rp ${NumberFormat("#,###", "id_ID").format(remaining)}',
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.orange.shade900)),
+                                    ]),
+                              ),
+                              const SizedBox(height: 10),
+                              Text('Metode Pembayaran Sisa',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.grey.shade700)),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children:
+                                      ['Cash', 'QRIS', 'Cash + QRIS'].map((m) {
+                                    final isSel =
+                                        _programExtraPaymentMethod == m;
+                                    return ChoiceChip(
+                                      label: Text(m,
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 12)),
+                                      selected: isSel,
+                                      selectedColor: const Color(0xFFC8E6C9),
+                                      labelStyle: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          fontWeight: isSel
+                                              ? FontWeight.w600
+                                              : FontWeight.w400,
+                                          color: isSel
+                                              ? const Color(0xFF2E7D32)
+                                              : Colors.black87),
+                                      onSelected: (sel) {
+                                        setState(() {
+                                          _programExtraPaymentMethod =
+                                              sel ? m : null;
+                                          _isProgramExtraSplit =
+                                              sel && m == 'Cash + QRIS';
+                                          _programExtraQrisAmount = 0;
+                                          _programExtraQrisController.clear();
+                                          if (sel && m == 'QRIS') {
+                                            widget.uangYangDiterimaController
+                                                    .text =
+                                                NumberFormat('#,###', 'id_ID')
+                                                    .format(remaining);
+                                          } else {
+                                            widget.uangYangDiterimaController
+                                                .clear();
+                                          }
+                                        });
+                                      },
+                                    );
+                                  }).toList()),
+                              if (_isProgramExtraSplit) ...[
+                                const SizedBox(height: 10),
+                                Row(children: [
+                                  Expanded(
+                                      child: TextField(
+                                    controller: _programExtraQrisController,
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.allow(
+                                          RegExp(r'[0-9.]')),
+                                      TextInputFormatter.withFunction(
+                                          (oldValue, newValue) {
+                                        final plain =
+                                            newValue.text.replaceAll('.', '');
+                                        if (plain.isEmpty) return newValue;
+                                        final t = NumberFormat('#,###', 'id_ID')
+                                            .format(int.parse(plain));
+                                        return newValue.copyWith(
+                                            text: t,
+                                            selection: TextSelection.collapsed(
+                                                offset: t.length));
+                                      }),
+                                    ],
+                                    decoration: InputDecoration(
+                                        labelText: 'Jumlah QRIS (Rp)',
+                                        border: OutlineInputBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(4))),
+                                    onChanged: (val) => setState(() =>
+                                        _programExtraQrisAmount = int.tryParse(
+                                                val.replaceAll('.', '')) ??
+                                            0),
+                                  )),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                      child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12, horizontal: 12),
+                                    decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(
+                                            color: Colors.blue.shade200)),
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text('Sisa Cash:',
+                                              style: GoogleFonts.poppins(
+                                                  fontSize: 11,
+                                                  color: Colors.blue.shade700)),
+                                          Text(
+                                              'Rp ${NumberFormat("#,###", "id_ID").format((remaining - _programExtraQrisAmount).clamp(0, remaining))}',
+                                              style: GoogleFonts.poppins(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.blue.shade900)),
+                                        ]),
+                                  )),
                                 ]),
-                              )),
-                            ]),
-                          ],
-                          if (_programExtraPaymentMethod != null && _programExtraPaymentMethod != 'QRIS') ...[ 
-                            const SizedBox(height: 10),
-                            TextField(
-                              controller: widget.uangYangDiterimaController,
-                              focusNode: uangFocusNode,
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                                TextInputFormatter.withFunction((oldValue, newValue) {
-                                  final plain = newValue.text.replaceAll('.', '');
-                                  if (plain.isEmpty) return newValue;
-                                  final t = NumberFormat('#,###', 'id_ID').format(int.parse(plain));
-                                  return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
+                              ],
+                              if (_programExtraPaymentMethod != null &&
+                                  _programExtraPaymentMethod != 'QRIS') ...[
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: widget.uangYangDiterimaController,
+                                  focusNode: uangFocusNode,
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                        RegExp(r'[0-9.]')),
+                                    TextInputFormatter.withFunction(
+                                        (oldValue, newValue) {
+                                      final plain =
+                                          newValue.text.replaceAll('.', '');
+                                      if (plain.isEmpty) return newValue;
+                                      final t = NumberFormat('#,###', 'id_ID')
+                                          .format(int.parse(plain));
+                                      return newValue.copyWith(
+                                          text: t,
+                                          selection: TextSelection.collapsed(
+                                              offset: t.length));
+                                    }),
+                                  ],
+                                  decoration: InputDecoration(
+                                    labelText: _isProgramExtraSplit
+                                        ? 'Cash Diterima (Rp)'
+                                        : 'Uang Diterima (Rp)',
+                                    border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(4)),
+                                  ),
+                                ),
+                                Builder(builder: (ctx) {
+                                  final cashReceived = int.tryParse(widget
+                                          .uangYangDiterimaController.text
+                                          .replaceAll('.', '')) ??
+                                      0;
+                                  final cashNeeded = _isProgramExtraSplit
+                                      ? (remaining - _programExtraQrisAmount)
+                                          .clamp(0, remaining)
+                                      : remaining;
+                                  final change = cashReceived - cashNeeded;
+                                  if (change <= 0)
+                                    return const SizedBox.shrink();
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Text(
+                                        'Kembalian: Rp ${NumberFormat("#,###", "id_ID").format(change)}',
+                                        style: GoogleFonts.poppins(
+                                            fontSize: 13,
+                                            color: Colors.green.shade700,
+                                            fontWeight: FontWeight.w600)),
+                                  );
                                 }),
                               ],
-                              decoration: InputDecoration(
-                                labelText: _isProgramExtraSplit ? 'Cash Diterima (Rp)' : 'Uang Diterima (Rp)',
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
-                              ),
-                            ),
-                            Builder(builder: (ctx) {
-                              final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
-                              final cashNeeded = _isProgramExtraSplit ? (remaining - _programExtraQrisAmount).clamp(0, remaining) : remaining;
-                              final change = cashReceived - cashNeeded;
-                              if (change <= 0) return const SizedBox.shrink();
-                              return Padding(
-                                padding: const EdgeInsets.only(top: 6),
-                                child: Text('Kembalian: Rp ${NumberFormat("#,###", "id_ID").format(change)}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700, fontWeight: FontWeight.w600)),
-                              );
-                            }),
-                          ],
-                        ]);
+                            ]);
                       }),
                       const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
-                          onPressed: () {
-                            if (isMember && _selectedMember == null) {
-                              final error = widget.customerNameController.text.trim().isEmpty ? 'Nama member wajib diisi' : 'Nama tidak ditemukan, pilih dari daftar';
-                              setState(() { _memberError = error; });
-                              _showTopError(context, error);
-                              return;
-                            }
-                            if (!isMember && widget.customerNameController.text.trim().isEmpty) {
-                              _showTopError(context, 'Nama customer wajib diisi');
-                              return;
-                            }
-                            if (_programNominal <= 0) { _showTopError(context, 'Masukkan nominal voucher'); return; }
-                            final remaining = displayTotal - _programNominal;
-                            int extraQris = 0;
-                            if (remaining > 0) {
-                              if (_programExtraPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran sisa'); return; }
-                              if (_isProgramExtraSplit) {
-                                if (_programExtraQrisAmount <= 0 || _programExtraQrisAmount >= remaining) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; }
-                                extraQris = _programExtraQrisAmount;
-                                final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
-                                if (cashReceived < remaining - extraQris) { _showTopError(context, 'Cash yang diterima kurang'); return; }
-                              } else if (_programExtraPaymentMethod == 'Cash') {
-                                final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
-                                if (cashReceived < remaining) { _showTopError(context, 'Cash yang diterima kurang'); return; }
-                              }
-                            }
-                            Navigator.pop(context, {
-                              'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': 'Program',
-                              'voucherProgramId': _selectedProgramId,
-                              'programNominal': _programNominal,
-                              'programExtraPaymentMethod': remaining > 0 ? _programExtraPaymentMethod : null,
-                              'programExtraSplitQrisAmount': extraQris,
-                              'isMember': isMember, 'memberId': _selectedMember?.id, 'memberPhone': _selectedMember?.phoneNumber,
-                              'voucherCode': voucherApplied ? voucherDocId : null,
-                              'isPosVoucher': voucherApplied ? isPosVoucher : false,
-                              'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
-                            });
-                          },
-                          child: Text('OK', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF2E7D32),
+                              foregroundColor: Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14)),
+                          onPressed: _isConfirming
+                              ? null
+                              : () {
+                                  if (isMember && _selectedMember == null) {
+                                    final error = widget
+                                            .customerNameController.text
+                                            .trim()
+                                            .isEmpty
+                                        ? 'Nama member wajib diisi'
+                                        : 'Nama tidak ditemukan, pilih dari daftar';
+                                    setState(() {
+                                      _memberError = error;
+                                    });
+                                    _showTopError(context, error);
+                                    return;
+                                  }
+                                  if (!isMember &&
+                                      widget.customerNameController.text
+                                          .trim()
+                                          .isEmpty) {
+                                    _showTopError(
+                                        context, 'Nama customer wajib diisi');
+                                    return;
+                                  }
+                                  if (_programNominal <= 0) {
+                                    _showTopError(
+                                        context, 'Masukkan nominal voucher');
+                                    return;
+                                  }
+                                  final remaining =
+                                      displayTotal - _programNominal;
+                                  int extraQris = 0;
+                                  if (remaining > 0) {
+                                    if (_programExtraPaymentMethod == null) {
+                                      _showTopError(context,
+                                          'Pilih metode pembayaran sisa');
+                                      return;
+                                    }
+                                    if (_isProgramExtraSplit) {
+                                      if (_programExtraQrisAmount <= 0 ||
+                                          _programExtraQrisAmount >=
+                                              remaining) {
+                                        _showTopError(
+                                            context, 'Jumlah QRIS tidak valid');
+                                        return;
+                                      }
+                                      extraQris = _programExtraQrisAmount;
+                                      final cashReceived = int.tryParse(widget
+                                              .uangYangDiterimaController.text
+                                              .replaceAll('.', '')) ??
+                                          0;
+                                      if (cashReceived <
+                                          remaining - extraQris) {
+                                        _showTopError(context,
+                                            'Cash yang diterima kurang');
+                                        return;
+                                      }
+                                    } else if (_programExtraPaymentMethod ==
+                                        'Cash') {
+                                      final cashReceived = int.tryParse(widget
+                                              .uangYangDiterimaController.text
+                                              .replaceAll('.', '')) ??
+                                          0;
+                                      if (cashReceived < remaining) {
+                                        _showTopError(context,
+                                            'Cash yang diterima kurang');
+                                        return;
+                                      }
+                                    }
+                                  }
+                                  setState(() => _isConfirming = true);
+                                  Navigator.pop(context, {
+                                    'confirmed': true,
+                                    'finalTotal': displayTotal,
+                                    'paymentMethod': 'Program',
+                                    'voucherProgramId': _selectedProgramId,
+                                    'programNominal': _programNominal,
+                                    'programExtraPaymentMethod': remaining > 0
+                                        ? _programExtraPaymentMethod
+                                        : null,
+                                    'programExtraSplitQrisAmount': extraQris,
+                                    'isMember': isMember,
+                                    'memberId': _selectedMember?.id,
+                                    'memberPhone': _selectedMember?.phoneNumber,
+                                    'voucherCode':
+                                        voucherApplied ? voucherDocId : null,
+                                    'isPosVoucher':
+                                        voucherApplied ? isPosVoucher : false,
+                                    'discountAmount': voucherApplied
+                                        ? (currentTotal - displayTotal)
+                                        : 0,
+                                  });
+                                },
+                          child: _isConfirming
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white),
+                                )
+                              : Text('OK',
+                                  style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600)),
                         ),
                       ),
                     ],
@@ -3595,18 +5426,26 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               focusNode: uangFocusNode,
                               keyboardType: TextInputType.number,
                               inputFormatters: [
-                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                                TextInputFormatter.withFunction((oldValue, newValue) {
-                                  final plainNumber = newValue.text.replaceAll('.', '');
+                                FilteringTextInputFormatter.allow(
+                                    RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction(
+                                    (oldValue, newValue) {
+                                  final plainNumber =
+                                      newValue.text.replaceAll('.', '');
                                   final format = NumberFormat("#,###", "id_ID");
-                                  final newText = format.format(int.parse(plainNumber));
-                                  return TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
+                                  final newText =
+                                      format.format(int.parse(plainNumber));
+                                  return TextEditingValue(
+                                      text: newText,
+                                      selection: TextSelection.collapsed(
+                                          offset: newText.length));
                                 }),
                               ],
                               controller: widget.uangYangDiterimaController,
                               decoration: InputDecoration(
                                 labelText: 'Uang yang diterima (Rp)',
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4.0)),
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(4.0)),
                               ),
                             ),
                           ),
@@ -3614,42 +5453,107 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           Expanded(
                             flex: 3,
                             child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
-                              onPressed: () {
-                                if (isMember && _selectedMember == null) {
-                                  final error = widget.customerNameController.text.trim().isEmpty ? 'Nama member wajib diisi' : 'Nama tidak ditemukan, pilih dari daftar';
-                                  setState(() { _memberError = error; });
-                                  _showTopError(context, error);
-                                  return;
-                                }
-                                if (!isMember && widget.customerNameController.text.trim().isEmpty) {
-                                  _showTopError(context, 'Nama customer wajib diisi');
-                                  return;
-                                }
-                                if (_selectedPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran'); return; }
-                                if (_isSplitPayment) {
-                                  if (_splitQrisAmount <= 0 || _splitQrisAmount >= displayTotal) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; }
-                                }
-                                final inputText = widget.uangYangDiterimaController.text.replaceAll('.', '');
-                                if (inputText.isEmpty) { _showTopError(context, 'Masukkan uang yang diterima'); return; }
-                                int uangYangDiterima = int.parse(inputText);
-                                final cashNeeded = _isSplitPayment ? displayTotal - _splitQrisAmount : displayTotal;
-                                if (uangYangDiterima >= cashNeeded) {
-                                  Navigator.pop(context, {
-                                    'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': _selectedPaymentMethod,
-                                    'isSplitPayment': _isSplitPayment, 'splitCashAmount': displayTotal - _splitQrisAmount, 'splitQrisAmount': _splitQrisAmount,
-                                    'voucherProgramId': null,
-                                    'isMember': isMember, 'memberId': _selectedMember?.id, 'memberPhone': _selectedMember?.phoneNumber,
-                                    'voucherCode': voucherApplied ? voucherDocId : null,
-                                    'isPosVoucher': voucherApplied ? isPosVoucher : false,
-                                    'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
-                                    'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
-                                  });
-                                } else {
-                                  _showTopError(context, 'Uang yang diterima masih kurang');
-                                }
-                              },
-                              child: Text('OK', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600)),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2E7D32),
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14)),
+                              onPressed: _isConfirming
+                                  ? null
+                                  : () {
+                                      if (isMember && _selectedMember == null) {
+                                        final error = widget
+                                                .customerNameController.text
+                                                .trim()
+                                                .isEmpty
+                                            ? 'Nama member wajib diisi'
+                                            : 'Nama tidak ditemukan, pilih dari daftar';
+                                        setState(() {
+                                          _memberError = error;
+                                        });
+                                        _showTopError(context, error);
+                                        return;
+                                      }
+                                      if (!isMember &&
+                                          widget.customerNameController.text
+                                              .trim()
+                                              .isEmpty) {
+                                        _showTopError(context,
+                                            'Nama customer wajib diisi');
+                                        return;
+                                      }
+                                      if (_selectedPaymentMethod == null) {
+                                        _showTopError(
+                                            context, 'Pilih metode pembayaran');
+                                        return;
+                                      }
+                                      if (_isSplitPayment) {
+                                        if (_splitQrisAmount <= 0 ||
+                                            _splitQrisAmount >= displayTotal) {
+                                          _showTopError(context,
+                                              'Jumlah QRIS tidak valid');
+                                          return;
+                                        }
+                                      }
+                                      final inputText = widget
+                                          .uangYangDiterimaController.text
+                                          .replaceAll('.', '');
+                                      if (inputText.isEmpty) {
+                                        _showTopError(context,
+                                            'Masukkan uang yang diterima');
+                                        return;
+                                      }
+                                      int uangYangDiterima =
+                                          int.parse(inputText);
+                                      final cashNeeded = _isSplitPayment
+                                          ? displayTotal - _splitQrisAmount
+                                          : displayTotal;
+                                      if (uangYangDiterima >= cashNeeded) {
+                                        setState(() => _isConfirming = true);
+                                        Navigator.pop(context, {
+                                          'confirmed': true,
+                                          'finalTotal': displayTotal,
+                                          'paymentMethod':
+                                              _selectedPaymentMethod,
+                                          'isSplitPayment': _isSplitPayment,
+                                          'splitCashAmount':
+                                              displayTotal - _splitQrisAmount,
+                                          'splitQrisAmount': _splitQrisAmount,
+                                          'voucherProgramId': null,
+                                          'isMember': isMember,
+                                          'memberId': _selectedMember?.id,
+                                          'memberPhone':
+                                              _selectedMember?.phoneNumber,
+                                          'voucherCode': voucherApplied
+                                              ? voucherDocId
+                                              : null,
+                                          'isPosVoucher': voucherApplied
+                                              ? isPosVoucher
+                                              : false,
+                                          'discountAmount': voucherApplied
+                                              ? (currentTotal - displayTotal)
+                                              : 0,
+                                          'voucherRemaining': voucherApplied &&
+                                                  !sekaliPakai
+                                              ? (voucherBalance! - voucherValue)
+                                              : null,
+                                        });
+                                      } else {
+                                        _showTopError(context,
+                                            'Uang yang diterima masih kurang');
+                                      }
+                                    },
+                              child: _isConfirming
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: Colors.white),
+                                    )
+                                  : Text('OK',
+                                      style: GoogleFonts.poppins(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600)),
                             ),
                           ),
                         ],
@@ -3667,14 +5571,17 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                             side: BorderSide(color: Colors.orange.shade800),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
-                          onPressed: () {
-                            Navigator.pop(context, {
-                              'chargeToTab': true,
-                              'memberId': _selectedMember!.id,
-                              'memberName': _selectedMember!.name,
-                              'memberPhone': _selectedMember!.phoneNumber,
-                            });
-                          },
+                          onPressed: _isConfirming
+                              ? null
+                              : () {
+                                  setState(() => _isConfirming = true);
+                                  Navigator.pop(context, {
+                                    'chargeToTab': true,
+                                    'memberId': _selectedMember!.id,
+                                    'memberName': _selectedMember!.name,
+                                    'memberPhone': _selectedMember!.phoneNumber,
+                                  });
+                                },
                         ),
                       ),
                     ],
@@ -3752,6 +5659,7 @@ class _SelfOrderConfirmationDialog extends StatefulWidget {
 
 class _SelfOrderConfirmationDialogState
     extends State<_SelfOrderConfirmationDialog> {
+  bool _isConfirming = false;
   bool applyPromo = false;
   TextEditingController voucherController = TextEditingController();
   String? voucherName;
@@ -3792,7 +5700,7 @@ class _SelfOrderConfirmationDialogState
     currentTotal = widget.totalHarga;
     _loadMembers();
     _loadPrograms();
-    
+
     // Pre-fill customer name from self-order
     widget.customerNameController.text = widget.selfOrder.namaCustomer;
 
@@ -3825,13 +5733,17 @@ class _SelfOrderConfirmationDialogState
       voucherError = null;
     });
 
-    final result = await OrderConfirmationService._validateVoucher(docId ?? code, currentTotal);
+    final result = await OrderConfirmationService._validateVoucher(
+        docId ?? code, currentTotal);
 
     if (mounted) {
       setState(() {
         isValidatingVoucher = false;
         if (result != null && result['error'] != null) {
-          voucherError = result['error'];
+          voucherError = UserMessageService.fromText(
+            result['error']?.toString(),
+            fallback: 'Voucher tidak valid',
+          );
           voucherApplied = false;
           voucherName = null;
           voucherValue = 0;
@@ -3839,11 +5751,11 @@ class _SelfOrderConfirmationDialogState
           voucherDocId = null;
           voucherBalance = null;
           sekaliPakai = true;
-          
+
           // Show error message
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(result['error'] ?? 'Voucher tidak valid'),
+              content: Text(voucherError ?? 'Voucher tidak valid'),
               backgroundColor: Colors.red,
             ),
           );
@@ -3877,9 +5789,9 @@ class _SelfOrderConfirmationDialogState
       _members = members;
       // Try to find matching member by memberId
       _selectedMember = _members.cast<Member?>().firstWhere(
-        (m) => m?.id == widget.selfOrder.memberId,
-        orElse: () => null,
-      );
+            (m) => m?.id == widget.selfOrder.memberId,
+            orElse: () => null,
+          );
       if (_selectedMember != null) {
         widget.customerNameController.text = _selectedMember!.name;
         _fetchRedeemableVouchers(_selectedMember!.id);
@@ -3902,7 +5814,8 @@ class _SelfOrderConfirmationDialogState
 
       // Collect all unique voucherGroupIds
       final groupIds = snapshot.docs
-          .map((doc) => (doc.data() as Map<String, dynamic>)['voucherGroupId'] as String?)
+          .map((doc) =>
+              (doc.data() as Map<String, dynamic>)['voucherGroupId'] as String?)
           .where((id) => id != null)
           .cast<String>()
           .toSet();
@@ -3916,7 +5829,8 @@ class _SelfOrderConfirmationDialogState
               .doc(groupId)
               .get();
           if (groupDoc.exists) {
-            activeGroups[groupId] = (groupDoc.data()?['isActive'] ?? true) as bool;
+            activeGroups[groupId] =
+                (groupDoc.data()?['isActive'] ?? true) as bool;
           } else {
             activeGroups[groupId] = false;
           }
@@ -3930,70 +5844,75 @@ class _SelfOrderConfirmationDialogState
         setState(() {
           final now = DateTime.now();
           final todayStart = DateTime(now.year, now.month, now.day);
-          print('DEBUG [self-vouchers]: Found ${snapshot.docs.length} docs from Firestore.');
+          print(
+              'DEBUG [self-vouchers]: Found ${snapshot.docs.length} docs from Firestore.');
           for (var doc in snapshot.docs) {
             final data = doc.data() as Map<String, dynamic>;
-            print('DEBUG [self-vouchers]: docId=${doc.id}, name=${data['voucherName']}, status=${data['status']}, isClaimed=${data['isClaimed']}, expireDate=${data['expireDate']}');
+            print(
+                'DEBUG [self-vouchers]: docId=${doc.id}, name=${data['voucherName']}, status=${data['status']}, isClaimed=${data['isClaimed']}, expireDate=${data['expireDate']}');
           }
           _redeemableVouchers = snapshot.docs
               .map((doc) => {...doc.data(), 'id': doc.id})
               .where((v) {
-                // Exclude if claimed
-                final isClaimed = v['isClaimed'] ?? false;
-                final status = v['status'] ?? '';
-                if (isClaimed || status == 'CLAIMED') {
-                  print('DEBUG [self-vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
-                  return false;
-                }
+            // Exclude if claimed
+            final isClaimed = v['isClaimed'] ?? false;
+            final status = v['status'] ?? '';
+            if (isClaimed || status == 'CLAIMED') {
+              print(
+                  'DEBUG [self-vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
+              return false;
+            }
 
-                // Exclude if the voucher's campaign/voucherGroup is inactive
-                final groupId = v['voucherGroupId'] as String?;
-                if (groupId != null && activeGroups[groupId] == false) {
-                  print('DEBUG [self-vouchers]: Excluded ${v['voucherName']} because its campaign is inactive/suspended');
-                  return false;
-                }
+            // Exclude if the voucher's campaign/voucherGroup is inactive
+            final groupId = v['voucherGroupId'] as String?;
+            if (groupId != null && activeGroups[groupId] == false) {
+              print(
+                  'DEBUG [self-vouchers]: Excluded ${v['voucherName']} because its campaign is inactive/suspended');
+              return false;
+            }
 
+            final expireRaw = v['expireDate'];
+            DateTime? expireDate;
+            if (expireRaw != null) {
+              if (expireRaw is Timestamp) {
+                expireDate = expireRaw.toDate();
+              } else if (expireRaw is DateTime) {
+                expireDate = expireRaw;
+              } else if (expireRaw is String) {
+                expireDate = DateTime.tryParse(expireRaw);
+              }
+            }
 
-                final expireRaw = v['expireDate'];
-                DateTime? expireDate;
-                if (expireRaw != null) {
-                  if (expireRaw is Timestamp) {
-                    expireDate = expireRaw.toDate();
-                  } else if (expireRaw is DateTime) {
-                    expireDate = expireRaw;
-                  } else if (expireRaw is String) {
-                    expireDate = DateTime.tryParse(expireRaw);
-                  }
+            if (expireDate == null) {
+              // Fallback: Try to parse from name
+              final voucherName = v['voucherName'] ?? '';
+              final regExp = RegExp(r'(\d{4})-(\d{2})');
+              final match = regExp.firstMatch(voucherName);
+              if (match != null) {
+                final year = int.tryParse(match.group(1) ?? '');
+                final month = int.tryParse(match.group(2) ?? '');
+                if (year != null && month != null) {
+                  final expiryYear = month == 12 ? year + 1 : year;
+                  final expiryMonth = month == 12 ? 1 : month + 1;
+                  expireDate =
+                      DateTime(expiryYear, expiryMonth + 1, 0, 23, 59, 59);
                 }
-                
-                if (expireDate == null) {
-                  // Fallback: Try to parse from name
-                  final voucherName = v['voucherName'] ?? '';
-                  final regExp = RegExp(r'(\d{4})-(\d{2})');
-                  final match = regExp.firstMatch(voucherName);
-                  if (match != null) {
-                    final year = int.tryParse(match.group(1) ?? '');
-                    final month = int.tryParse(match.group(2) ?? '');
-                    if (year != null && month != null) {
-                      final expiryYear = month == 12 ? year + 1 : year;
-                      final expiryMonth = month == 12 ? 1 : month + 1;
-                      expireDate = DateTime(expiryYear, expiryMonth + 1, 0, 23, 59, 59);
-                    }
-                  }
-                }
-                
-                if (expireDate == null) {
-                  print('DEBUG [self-vouchers]: Showed ${v['voucherName']} (no expiry found)');
-                  return true;
-                }
-                // Do not show if the voucher's expireDate is before today
-                final isValid = !expireDate.isBefore(todayStart);
-                if (!isValid) {
-                  print('DEBUG [self-vouchers]: Excluded ${v['voucherName']} because expired on $expireDate (todayStart: $todayStart)');
-                }
-                return isValid;
-              })
-              .toList();
+              }
+            }
+
+            if (expireDate == null) {
+              print(
+                  'DEBUG [self-vouchers]: Showed ${v['voucherName']} (no expiry found)');
+              return true;
+            }
+            // Do not show if the voucher's expireDate is before today
+            final isValid = !expireDate.isBefore(todayStart);
+            if (!isValid) {
+              print(
+                  'DEBUG [self-vouchers]: Excluded ${v['voucherName']} because expired on $expireDate (todayStart: $todayStart)');
+            }
+            return isValid;
+          }).toList();
           _isLoadingVouchers = false;
         });
       }
@@ -4037,7 +5956,10 @@ class _SelfOrderConfirmationDialogState
         isPosVoucher = result['isPosVoucher'] ?? false;
         voucherDocId = result['docId'];
       } else {
-        voucherError = result?['error'] ?? 'Voucher tidak valid';
+        voucherError = UserMessageService.fromText(
+          result?['error']?.toString(),
+          fallback: 'Voucher tidak valid',
+        );
         voucherDocId = null;
         if (result?['isSnackbarError'] == true) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -4139,7 +6061,8 @@ class _SelfOrderConfirmationDialogState
                           ),
                           const SizedBox(height: 8),
                           ...widget.pesananList.map((item) => Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 2),
                                 child: Row(
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
@@ -4147,7 +6070,8 @@ class _SelfOrderConfirmationDialogState
                                     Expanded(
                                       child: Text(
                                         '${item.namaPesanan} x${item.totalQuantity}',
-                                        style: GoogleFonts.poppins(fontSize: 13),
+                                        style:
+                                            GoogleFonts.poppins(fontSize: 13),
                                       ),
                                     ),
                                     Text(
@@ -4165,7 +6089,8 @@ class _SelfOrderConfirmationDialogState
                                 Text(
                                   'Biaya Bungkus',
                                   style: GoogleFonts.poppins(
-                                      fontSize: 13, color: Colors.grey.shade600),
+                                      fontSize: 13,
+                                      color: Colors.grey.shade600),
                                 ),
                                 Text(
                                   'Rp ${NumberFormat.decimalPattern().format(widget.selfOrder.takeAwayFee).replaceAll(',', '.')}',
@@ -4177,7 +6102,8 @@ class _SelfOrderConfirmationDialogState
                         ],
                       ),
                     ),
-                    if (widget.selfOrder.paymentMethod == 'QRIS' && widget.selfOrder.paymentProof.isNotEmpty) ...[
+                    if (widget.selfOrder.paymentMethod == 'QRIS' &&
+                        widget.selfOrder.paymentProof.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -4188,7 +6114,8 @@ class _SelfOrderConfirmationDialogState
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.info, color: Colors.blue, size: 20),
+                            const Icon(Icons.info,
+                                color: Colors.blue, size: 20),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
@@ -4231,15 +6158,18 @@ class _SelfOrderConfirmationDialogState
                         Text(
                           'Rp ${NumberFormat.decimalPattern().format(displayTotal).replaceAll(',', '.')}',
                           style: GoogleFonts.poppins(
-                            color:
-                                voucherApplied ? Colors.green : const Color(0xFF2E7D32),
+                            color: voucherApplied
+                                ? Colors.green
+                                : const Color(0xFF2E7D32),
                             fontWeight: FontWeight.bold,
                             fontSize: 20,
                           ),
                         ),
                       ],
                     ),
-                    if (voucherApplied && !sekaliPakai && voucherBalance != null)
+                    if (voucherApplied &&
+                        !sekaliPakai &&
+                        voucherBalance != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
@@ -4270,7 +6200,8 @@ class _SelfOrderConfirmationDialogState
                           children: [
                             Row(
                               children: [
-                                Icon(Icons.card_giftcard, size: 18, color: Colors.blue.shade700),
+                                Icon(Icons.card_giftcard,
+                                    size: 18, color: Colors.blue.shade700),
                                 const SizedBox(width: 8),
                                 Text(
                                   'Voucher Tersedia',
@@ -4295,20 +6226,24 @@ class _SelfOrderConfirmationDialogState
                               return InkWell(
                                 onTap: () {
                                   if (v['voucherId'] != null) {
-                                    _applyVoucherCode(v['voucherId'], docId: v['id']);
+                                    _applyVoucherCode(v['voucherId'],
+                                        docId: v['id']);
                                   } else if (v['id'] != null) {
                                     _applyVoucherCode(v['id'], docId: v['id']);
                                   }
                                 },
                                 child: Padding(
-                                  padding: const EdgeInsets.only(bottom: 8, top: 4),
+                                  padding:
+                                      const EdgeInsets.only(bottom: 8, top: 4),
                                   child: Row(
                                     children: [
-                                      const Icon(Icons.check_circle, size: 16, color: Colors.green),
+                                      const Icon(Icons.check_circle,
+                                          size: 16, color: Colors.green),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               '${v['voucherName'] ?? 'Voucher'} - $nominalText',
@@ -4328,7 +6263,9 @@ class _SelfOrderConfirmationDialogState
                                           ],
                                         ),
                                       ),
-                                      Icon(Icons.arrow_forward_ios, size: 12, color: Colors.blue.shade300),
+                                      Icon(Icons.arrow_forward_ios,
+                                          size: 12,
+                                          color: Colors.blue.shade300),
                                     ],
                                   ),
                                 ),
@@ -4396,8 +6333,9 @@ class _SelfOrderConfirmationDialogState
                           ),
                           const SizedBox(width: 8),
                           ElevatedButton(
-                            onPressed:
-                                voucherApplied ? null : _validateAndApplyVoucher,
+                            onPressed: voucherApplied
+                                ? null
+                                : _validateAndApplyVoucher,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF2E7D32),
                               foregroundColor: Colors.white,
@@ -4466,7 +6404,13 @@ class _SelfOrderConfirmationDialogState
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: ['Cash', 'QRIS', 'Online', 'Cash + QRIS', 'Program'].map((method) {
+                      children: [
+                        'Cash',
+                        'QRIS',
+                        'Online',
+                        'Cash + QRIS',
+                        'Program'
+                      ].map((method) {
                         final isSelected = _selectedPaymentMethod == method;
                         return ChoiceChip(
                           label: Text(method),
@@ -4474,8 +6418,11 @@ class _SelfOrderConfirmationDialogState
                           selectedColor: const Color(0xFFC8E6C9),
                           labelStyle: GoogleFonts.poppins(
                             fontSize: 13,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                            color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
+                            fontWeight:
+                                isSelected ? FontWeight.w600 : FontWeight.w400,
+                            color: isSelected
+                                ? const Color(0xFF2E7D32)
+                                : Colors.black87,
                           ),
                           onSelected: (selected) {
                             setState(() {
@@ -4509,25 +6456,33 @@ class _SelfOrderConfirmationDialogState
                               controller: _splitQrisController,
                               keyboardType: TextInputType.number,
                               inputFormatters: [
-                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                                TextInputFormatter.withFunction((oldValue, newValue) {
-                                  final plainNumber = newValue.text.replaceAll('.', '');
+                                FilteringTextInputFormatter.allow(
+                                    RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction(
+                                    (oldValue, newValue) {
+                                  final plainNumber =
+                                      newValue.text.replaceAll('.', '');
                                   if (plainNumber.isEmpty) return newValue;
                                   final format = NumberFormat("#,###", "id_ID");
-                                  final newText = format.format(int.parse(plainNumber));
+                                  final newText =
+                                      format.format(int.parse(plainNumber));
                                   return newValue.copyWith(
                                     text: newText,
-                                    selection: TextSelection.collapsed(offset: newText.length),
+                                    selection: TextSelection.collapsed(
+                                        offset: newText.length),
                                   );
                                 }),
                               ],
                               decoration: InputDecoration(
                                 labelText: 'Jumlah QRIS (Rp)',
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(4)),
                               ),
                               onChanged: (val) {
                                 setState(() {
-                                  _splitQrisAmount = int.tryParse(val.replaceAll('.', '')) ?? 0;
+                                  _splitQrisAmount =
+                                      int.tryParse(val.replaceAll('.', '')) ??
+                                          0;
                                 });
                               },
                             ),
@@ -4535,7 +6490,8 @@ class _SelfOrderConfirmationDialogState
                           const SizedBox(width: 12),
                           Expanded(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 12, horizontal: 12),
                               decoration: BoxDecoration(
                                 color: Colors.blue.shade50,
                                 borderRadius: BorderRadius.circular(4),
@@ -4544,10 +6500,16 @@ class _SelfOrderConfirmationDialogState
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)),
+                                  Text('Sisa Cash:',
+                                      style: GoogleFonts.poppins(
+                                          fontSize: 11,
+                                          color: Colors.blue.shade700)),
                                   Text(
                                     'Rp ${NumberFormat("#,###", "id_ID").format((displayTotal - _splitQrisAmount).clamp(0, displayTotal))}',
-                                    style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue.shade900),
                                   ),
                                 ],
                               ),
@@ -4556,24 +6518,33 @@ class _SelfOrderConfirmationDialogState
                         ],
                       ),
                     ],
-                    if (_selectedPaymentMethod == 'Program' && _activePrograms.isNotEmpty) ...[
+                    if (_selectedPaymentMethod == 'Program' &&
+                        _activePrograms.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
                         value: _selectedProgramId,
                         items: _activePrograms.map((p) {
                           return DropdownMenuItem<String>(
                             value: p['id'],
-                            child: Text('${p['programName']} (${p['institutionName']})'),
+                            child: Text(
+                                '${p['programName']} (${p['institutionName']})'),
                           );
                         }).toList(),
                         onChanged: (val) {
                           setState(() {
                             _selectedProgramId = val;
                             if (val != null) {
-                              final prog = _activePrograms.firstWhere((p) => p['id'] == val, orElse: () => {});
-                              final defNominal = ((prog['defaultNominal'] ?? 0) as num).toInt();
+                              final prog = _activePrograms.firstWhere(
+                                  (p) => p['id'] == val,
+                                  orElse: () => {});
+                              final defNominal =
+                                  ((prog['defaultNominal'] ?? 0) as num)
+                                      .toInt();
                               _programNominal = defNominal;
-                              _programNominalController.text = defNominal > 0 ? NumberFormat('#,###', 'id_ID').format(defNominal) : '';
+                              _programNominalController.text = defNominal > 0
+                                  ? NumberFormat('#,###', 'id_ID')
+                                      .format(defNominal)
+                                  : '';
                               _programExtraPaymentMethod = null;
                               _isProgramExtraSplit = false;
                               _programExtraQrisAmount = 0;
@@ -4584,12 +6555,14 @@ class _SelfOrderConfirmationDialogState
                         },
                         decoration: InputDecoration(
                           labelText: 'Pilih Program Voucher',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
                         ),
                       ),
                     ],
                     // ─── PROGRAM PAYMENT SECTION ───
-                    if (_selectedPaymentMethod == 'Program' && _selectedProgramId != null) ...[
+                    if (_selectedPaymentMethod == 'Program' &&
+                        _selectedProgramId != null) ...[
                       const SizedBox(height: 12),
                       TextField(
                         controller: _programNominalController,
@@ -4599,16 +6572,27 @@ class _SelfOrderConfirmationDialogState
                           TextInputFormatter.withFunction((oldValue, newValue) {
                             final plain = newValue.text.replaceAll('.', '');
                             if (plain.isEmpty) return newValue;
-                            final t = NumberFormat('#,###', 'id_ID').format(int.parse(plain));
-                            return newValue.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length));
+                            final t = NumberFormat('#,###', 'id_ID')
+                                .format(int.parse(plain));
+                            return newValue.copyWith(
+                                text: t,
+                                selection:
+                                    TextSelection.collapsed(offset: t.length));
                           }),
                         ],
-                        decoration: InputDecoration(labelText: 'Nominal Voucher (Rp)', helperText: 'Jumlah yang ditanggung program', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                        decoration: InputDecoration(
+                            labelText: 'Nominal Voucher (Rp)',
+                            helperText: 'Jumlah yang ditanggung program',
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8))),
                         onChanged: (val) {
                           setState(() {
-                            _programNominal = int.tryParse(val.replaceAll('.', '')) ?? 0;
-                            _programExtraPaymentMethod = null; _isProgramExtraSplit = false;
-                            _programExtraQrisAmount = 0; _programExtraQrisController.clear();
+                            _programNominal =
+                                int.tryParse(val.replaceAll('.', '')) ?? 0;
+                            _programExtraPaymentMethod = null;
+                            _isProgramExtraSplit = false;
+                            _programExtraQrisAmount = 0;
+                            _programExtraQrisController.clear();
                             widget.uangYangDiterimaController.clear();
                           });
                         },
@@ -4616,149 +6600,467 @@ class _SelfOrderConfirmationDialogState
                       Builder(builder: (ctx) {
                         final remaining = displayTotal - _programNominal;
                         if (remaining <= 0) {
-                          return Padding(padding: const EdgeInsets.only(top: 8), child: Row(children: [
-                            const Icon(Icons.check_circle, color: Colors.green, size: 16), const SizedBox(width: 6),
-                            Text('Voucher menutupi seluruh tagihan', style: GoogleFonts.poppins(fontSize: 12, color: Colors.green.shade700)),
-                          ]));
+                          return Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Row(children: [
+                                const Icon(Icons.check_circle,
+                                    color: Colors.green, size: 16),
+                                const SizedBox(width: 6),
+                                Text('Voucher menutupi seluruh tagihan',
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 12,
+                                        color: Colors.green.shade700)),
+                              ]));
                         }
-                        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.orange.shade200)),
-                            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                              Text('Sisa yang harus dibayar:', style: GoogleFonts.poppins(fontSize: 12, color: Colors.orange.shade800)),
-                              Text('Rp ${NumberFormat("#,###", "id_ID").format(remaining)}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.orange.shade900)),
-                            ]),
-                          ),
-                          const SizedBox(height: 10),
-                          Text('Metode Pembayaran Sisa', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.grey.shade700)),
-                          const SizedBox(height: 6),
-                          Wrap(spacing: 8, runSpacing: 8, children: ['Cash', 'QRIS', 'Cash + QRIS'].map((m) {
-                            final isSel = _programExtraPaymentMethod == m;
-                            return ChoiceChip(
-                              label: Text(m, style: GoogleFonts.poppins(fontSize: 12)), selected: isSel,
-                              selectedColor: const Color(0xFFC8E6C9),
-                              labelStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: isSel ? const Color(0xFF2E7D32) : Colors.black87),
-                              onSelected: (sel) {
-                                setState(() {
-                                  _programExtraPaymentMethod = sel ? m : null; _isProgramExtraSplit = sel && m == 'Cash + QRIS';
-                                  _programExtraQrisAmount = 0; _programExtraQrisController.clear();
-                                  if (sel && m == 'QRIS') { widget.uangYangDiterimaController.text = NumberFormat('#,###', 'id_ID').format(remaining); }
-                                  else { widget.uangYangDiterimaController.clear(); }
-                                });
-                              },
-                            );
-                          }).toList()),
-                          if (_isProgramExtraSplit) ...[
-                            const SizedBox(height: 10),
-                            Row(children: [
-                              Expanded(child: TextField(controller: _programExtraQrisController, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })], decoration: InputDecoration(labelText: 'Jumlah QRIS (Rp)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(4))), onChanged: (val) => setState(() => _programExtraQrisAmount = int.tryParse(val.replaceAll('.','')) ?? 0))),
-                              const SizedBox(width: 12),
-                              Expanded(child: Container(padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12), decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.blue.shade200)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)), Text('Rp ${NumberFormat("#,###","id_ID").format((remaining - _programExtraQrisAmount).clamp(0, remaining))}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900))]))),
-                            ]),
-                          ],
-                          if (_programExtraPaymentMethod != null && _programExtraPaymentMethod != 'QRIS') ...[
-                            const SizedBox(height: 10),
-                            TextField(controller: widget.uangYangDiterimaController, focusNode: uangFocusNode, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })], decoration: InputDecoration(labelText: _isProgramExtraSplit ? 'Cash Diterima (Rp)' : 'Uang Diterima (Rp)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
-                            Builder(builder: (ctx) {
-                              final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
-                              final cashNeeded = _isProgramExtraSplit ? (remaining - _programExtraQrisAmount).clamp(0, remaining) : remaining;
-                              final change = cashReceived - cashNeeded;
-                              if (change <= 0) return const SizedBox.shrink();
-                              return Padding(padding: const EdgeInsets.only(top: 6), child: Text('Kembalian: Rp ${NumberFormat("#,###","id_ID").format(change)}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700, fontWeight: FontWeight.w600)));
-                            }),
-                          ],
-                        ]);
+                        return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                    color: Colors.orange.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color: Colors.orange.shade200)),
+                                child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text('Sisa yang harus dibayar:',
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 12,
+                                              color: Colors.orange.shade800)),
+                                      Text(
+                                          'Rp ${NumberFormat("#,###", "id_ID").format(remaining)}',
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.orange.shade900)),
+                                    ]),
+                              ),
+                              const SizedBox(height: 10),
+                              Text('Metode Pembayaran Sisa',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.grey.shade700)),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children:
+                                      ['Cash', 'QRIS', 'Cash + QRIS'].map((m) {
+                                    final isSel =
+                                        _programExtraPaymentMethod == m;
+                                    return ChoiceChip(
+                                      label: Text(m,
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 12)),
+                                      selected: isSel,
+                                      selectedColor: const Color(0xFFC8E6C9),
+                                      labelStyle: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          fontWeight: isSel
+                                              ? FontWeight.w600
+                                              : FontWeight.w400,
+                                          color: isSel
+                                              ? const Color(0xFF2E7D32)
+                                              : Colors.black87),
+                                      onSelected: (sel) {
+                                        setState(() {
+                                          _programExtraPaymentMethod =
+                                              sel ? m : null;
+                                          _isProgramExtraSplit =
+                                              sel && m == 'Cash + QRIS';
+                                          _programExtraQrisAmount = 0;
+                                          _programExtraQrisController.clear();
+                                          if (sel && m == 'QRIS') {
+                                            widget.uangYangDiterimaController
+                                                    .text =
+                                                NumberFormat('#,###', 'id_ID')
+                                                    .format(remaining);
+                                          } else {
+                                            widget.uangYangDiterimaController
+                                                .clear();
+                                          }
+                                        });
+                                      },
+                                    );
+                                  }).toList()),
+                              if (_isProgramExtraSplit) ...[
+                                const SizedBox(height: 10),
+                                Row(children: [
+                                  Expanded(
+                                      child: TextField(
+                                          controller:
+                                              _programExtraQrisController,
+                                          keyboardType: TextInputType.number,
+                                          inputFormatters: [
+                                            FilteringTextInputFormatter.allow(
+                                                RegExp(r'[0-9.]')),
+                                            TextInputFormatter.withFunction(
+                                                (o, n) {
+                                              final plain =
+                                                  n.text.replaceAll('.', '');
+                                              if (plain.isEmpty) return n;
+                                              final t =
+                                                  NumberFormat('#,###', 'id_ID')
+                                                      .format(int.parse(plain));
+                                              return n.copyWith(
+                                                  text: t,
+                                                  selection:
+                                                      TextSelection.collapsed(
+                                                          offset: t.length));
+                                            })
+                                          ],
+                                          decoration: InputDecoration(
+                                              labelText: 'Jumlah QRIS (Rp)',
+                                              border: OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          4))),
+                                          onChanged: (val) => setState(() =>
+                                              _programExtraQrisAmount =
+                                                  int.tryParse(val.replaceAll(
+                                                          '.', '')) ??
+                                                      0))),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                      child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 12, horizontal: 12),
+                                          decoration: BoxDecoration(
+                                              color: Colors.blue.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                              border: Border.all(
+                                                  color: Colors.blue.shade200)),
+                                          child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text('Sisa Cash:',
+                                                    style: GoogleFonts.poppins(
+                                                        fontSize: 11,
+                                                        color: Colors
+                                                            .blue.shade700)),
+                                                Text(
+                                                    'Rp ${NumberFormat("#,###", "id_ID").format((remaining - _programExtraQrisAmount).clamp(0, remaining))}',
+                                                    style: GoogleFonts.poppins(
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        color: Colors
+                                                            .blue.shade900))
+                                              ]))),
+                                ]),
+                              ],
+                              if (_programExtraPaymentMethod != null &&
+                                  _programExtraPaymentMethod != 'QRIS') ...[
+                                const SizedBox(height: 10),
+                                TextField(
+                                    controller:
+                                        widget.uangYangDiterimaController,
+                                    focusNode: uangFocusNode,
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.allow(
+                                          RegExp(r'[0-9.]')),
+                                      TextInputFormatter.withFunction((o, n) {
+                                        final plain =
+                                            n.text.replaceAll('.', '');
+                                        if (plain.isEmpty) return n;
+                                        final t = NumberFormat('#,###', 'id_ID')
+                                            .format(int.parse(plain));
+                                        return n.copyWith(
+                                            text: t,
+                                            selection: TextSelection.collapsed(
+                                                offset: t.length));
+                                      })
+                                    ],
+                                    decoration: InputDecoration(
+                                        labelText: _isProgramExtraSplit
+                                            ? 'Cash Diterima (Rp)'
+                                            : 'Uang Diterima (Rp)',
+                                        border: OutlineInputBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(8)))),
+                                Builder(builder: (ctx) {
+                                  final cashReceived = int.tryParse(widget
+                                          .uangYangDiterimaController.text
+                                          .replaceAll('.', '')) ??
+                                      0;
+                                  final cashNeeded = _isProgramExtraSplit
+                                      ? (remaining - _programExtraQrisAmount)
+                                          .clamp(0, remaining)
+                                      : remaining;
+                                  final change = cashReceived - cashNeeded;
+                                  if (change <= 0)
+                                    return const SizedBox.shrink();
+                                  return Padding(
+                                      padding: const EdgeInsets.only(top: 6),
+                                      child: Text(
+                                          'Kembalian: Rp ${NumberFormat("#,###", "id_ID").format(change)}',
+                                          style: GoogleFonts.poppins(
+                                              fontSize: 13,
+                                              color: Colors.green.shade700,
+                                              fontWeight: FontWeight.w600)));
+                                }),
+                              ],
+                            ]);
                       }),
                       const SizedBox(height: 20),
                       Row(children: [
-                        Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context, null), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), side: BorderSide(color: Colors.grey.shade400), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey.shade700)))),
+                        Expanded(
+                            child: OutlinedButton(
+                                onPressed: () => Navigator.pop(context, null),
+                                style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 14),
+                                    side:
+                                        BorderSide(color: Colors.grey.shade400),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8))),
+                                child: Text('Batal',
+                                    style: GoogleFonts.poppins(
+                                        color: Colors.grey.shade700)))),
                         const SizedBox(width: 12),
-                        Expanded(flex: 2, child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                          onPressed: () {
-                            if (_programNominal <= 0) { _showTopError(context, 'Masukkan nominal voucher'); return; }
-                            final remaining = displayTotal - _programNominal;
-                            int extraQris = 0;
-                            if (remaining > 0) {
-                              if (_programExtraPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran sisa'); return; }
-                              if (_isProgramExtraSplit) {
-                                if (_programExtraQrisAmount <= 0 || _programExtraQrisAmount >= remaining) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; }
-                                extraQris = _programExtraQrisAmount;
-                                final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.','')) ?? 0;
-                                if (cashReceived < remaining - extraQris) { _showTopError(context, 'Cash yang diterima kurang'); return; }
-                              } else if (_programExtraPaymentMethod == 'Cash') {
-                                final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.','')) ?? 0;
-                                if (cashReceived < remaining) { _showTopError(context, 'Cash yang diterima kurang'); return; }
-                              }
-                            }
-                            Navigator.pop(context, {
-                              'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': 'Program',
-                              'voucherProgramId': _selectedProgramId, 'programNominal': _programNominal,
-                              'programExtraPaymentMethod': remaining > 0 ? _programExtraPaymentMethod : null,
-                              'programExtraSplitQrisAmount': extraQris,
-                              'isMember': _selectedMember != null, 'memberId': _selectedMember?.id ?? widget.selfOrder.userId,
-                              'memberPhone': _selectedMember?.phoneNumber,
-                              'voucherCode': voucherApplied ? voucherDocId : null,
-                              'isPosVoucher': voucherApplied ? isPosVoucher : false,
-                              'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
-                              'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
-                            });
-                          },
-                          child: Text('Konfirmasi Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        )),
+                        Expanded(
+                            flex: 2,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2E7D32),
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8))),
+                              onPressed: _isConfirming
+                                  ? null
+                                  : () {
+                                      if (_programNominal <= 0) {
+                                        _showTopError(context,
+                                            'Masukkan nominal voucher');
+                                        return;
+                                      }
+                                      final remaining =
+                                          displayTotal - _programNominal;
+                                      int extraQris = 0;
+                                      if (remaining > 0) {
+                                        if (_programExtraPaymentMethod ==
+                                            null) {
+                                          _showTopError(context,
+                                              'Pilih metode pembayaran sisa');
+                                          return;
+                                        }
+                                        if (_isProgramExtraSplit) {
+                                          if (_programExtraQrisAmount <= 0 ||
+                                              _programExtraQrisAmount >=
+                                                  remaining) {
+                                            _showTopError(context,
+                                                'Jumlah QRIS tidak valid');
+                                            return;
+                                          }
+                                          extraQris = _programExtraQrisAmount;
+                                          final cashReceived = int.tryParse(
+                                                  widget
+                                                      .uangYangDiterimaController
+                                                      .text
+                                                      .replaceAll('.', '')) ??
+                                              0;
+                                          if (cashReceived <
+                                              remaining - extraQris) {
+                                            _showTopError(context,
+                                                'Cash yang diterima kurang');
+                                            return;
+                                          }
+                                        } else if (_programExtraPaymentMethod ==
+                                            'Cash') {
+                                          final cashReceived = int.tryParse(
+                                                  widget
+                                                      .uangYangDiterimaController
+                                                      .text
+                                                      .replaceAll('.', '')) ??
+                                              0;
+                                          if (cashReceived < remaining) {
+                                            _showTopError(context,
+                                                'Cash yang diterima kurang');
+                                            return;
+                                          }
+                                        }
+                                      }
+                                      setState(() => _isConfirming = true);
+                                      Navigator.pop(context, {
+                                        'confirmed': true,
+                                        'finalTotal': displayTotal,
+                                        'paymentMethod': 'Program',
+                                        'voucherProgramId': _selectedProgramId,
+                                        'programNominal': _programNominal,
+                                        'programExtraPaymentMethod':
+                                            remaining > 0
+                                                ? _programExtraPaymentMethod
+                                                : null,
+                                        'programExtraSplitQrisAmount':
+                                            extraQris,
+                                        'isMember': _selectedMember != null,
+                                        'memberId': _selectedMember?.id ??
+                                            widget.selfOrder.userId,
+                                        'memberPhone':
+                                            _selectedMember?.phoneNumber,
+                                        'voucherCode': voucherApplied
+                                            ? voucherDocId
+                                            : null,
+                                        'isPosVoucher': voucherApplied
+                                            ? isPosVoucher
+                                            : false,
+                                        'discountAmount': voucherApplied
+                                            ? (currentTotal - displayTotal)
+                                            : 0,
+                                        'voucherRemaining': voucherApplied &&
+                                                !sekaliPakai
+                                            ? (voucherBalance! - voucherValue)
+                                            : null,
+                                      });
+                                    },
+                              child: _isConfirming
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: Colors.white),
+                                    )
+                                  : Text('Konfirmasi Pembayaran',
+                                      style: GoogleFonts.poppins(
+                                          fontWeight: FontWeight.w600)),
+                            )),
                       ]),
                     ],
                     // ─── NORMAL PAYMENT SECTION ───
                     if (_selectedPaymentMethod != 'Program') ...[
                       const SizedBox(height: 16),
                       TextField(
-                        focusNode: uangFocusNode, keyboardType: TextInputType.number,
+                        focusNode: uangFocusNode,
+                        keyboardType: TextInputType.number,
                         inputFormatters: [
                           FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                           TextInputFormatter.withFunction((oldValue, newValue) {
                             if (newValue.text.isEmpty) return newValue;
-                            final plainNumber = newValue.text.replaceAll('.', '');
+                            final plainNumber =
+                                newValue.text.replaceAll('.', '');
                             if (plainNumber.isEmpty) return newValue;
                             final format = NumberFormat("#,###", "id_ID");
-                            final newText = format.format(int.parse(plainNumber));
-                            return TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
+                            final newText =
+                                format.format(int.parse(plainNumber));
+                            return TextEditingValue(
+                                text: newText,
+                                selection: TextSelection.collapsed(
+                                    offset: newText.length));
                           }),
                         ],
                         controller: widget.uangYangDiterimaController,
-                        decoration: InputDecoration(labelText: 'Uang yang diterima (Rp)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                        decoration: InputDecoration(
+                            labelText: 'Uang yang diterima (Rp)',
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8))),
                       ),
                       const SizedBox(height: 20),
                       Row(children: [
-                        Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context, null), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14), side: BorderSide(color: Colors.grey.shade400), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey.shade700)))),
+                        Expanded(
+                            child: OutlinedButton(
+                                onPressed: () => Navigator.pop(context, null),
+                                style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 14),
+                                    side:
+                                        BorderSide(color: Colors.grey.shade400),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8))),
+                                child: Text('Batal',
+                                    style: GoogleFonts.poppins(
+                                        color: Colors.grey.shade700)))),
                         const SizedBox(width: 12),
-                        Expanded(flex: 2, child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                          onPressed: () {
-                            if (_selectedPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran'); return; }
-                            final inputText = widget.uangYangDiterimaController.text.replaceAll('.', '');
-                            if (inputText.isEmpty) { _showTopError(context, 'Masukkan uang yang diterima'); return; }
-                            int uangYangDiterima = int.parse(inputText);
-                            final cashNeeded = _isSplitPayment ? displayTotal - _splitQrisAmount : displayTotal;
-                            if (uangYangDiterima >= cashNeeded) {
-                              Navigator.pop(context, {
-                                'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': _selectedPaymentMethod,
-                                'isSplitPayment': _isSplitPayment, 'splitCashAmount': displayTotal - _splitQrisAmount, 'splitQrisAmount': _splitQrisAmount,
-                                'voucherProgramId': null,
-                                'isMember': _selectedMember != null, 'memberId': _selectedMember?.id ?? widget.selfOrder.userId,
-                                'memberPhone': _selectedMember?.phoneNumber,
-                                'voucherCode': voucherApplied ? voucherDocId : null,
-                                'isPosVoucher': voucherApplied ? isPosVoucher : false,
-                                'discountAmount': voucherApplied ? (currentTotal - displayTotal) : 0,
-                                'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
-                              });
-                            } else {
-                              _showTopError(context, 'Uang yang diterima masih kurang');
-                            }
-                          },
-                          child: Text('Konfirmasi Pembayaran', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        )),
+                        Expanded(
+                            flex: 2,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2E7D32),
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8))),
+                              onPressed: _isConfirming
+                                  ? null
+                                  : () {
+                                      if (_selectedPaymentMethod == null) {
+                                        _showTopError(
+                                            context, 'Pilih metode pembayaran');
+                                        return;
+                                      }
+                                      final inputText = widget
+                                          .uangYangDiterimaController.text
+                                          .replaceAll('.', '');
+                                      if (inputText.isEmpty) {
+                                        _showTopError(context,
+                                            'Masukkan uang yang diterima');
+                                        return;
+                                      }
+                                      int uangYangDiterima =
+                                          int.parse(inputText);
+                                      final cashNeeded = _isSplitPayment
+                                          ? displayTotal - _splitQrisAmount
+                                          : displayTotal;
+                                      if (uangYangDiterima >= cashNeeded) {
+                                        setState(() => _isConfirming = true);
+                                        Navigator.pop(context, {
+                                          'confirmed': true,
+                                          'finalTotal': displayTotal,
+                                          'paymentMethod':
+                                              _selectedPaymentMethod,
+                                          'isSplitPayment': _isSplitPayment,
+                                          'splitCashAmount':
+                                              displayTotal - _splitQrisAmount,
+                                          'splitQrisAmount': _splitQrisAmount,
+                                          'voucherProgramId': null,
+                                          'isMember': _selectedMember != null,
+                                          'memberId': _selectedMember?.id ??
+                                              widget.selfOrder.userId,
+                                          'memberPhone':
+                                              _selectedMember?.phoneNumber,
+                                          'voucherCode': voucherApplied
+                                              ? voucherDocId
+                                              : null,
+                                          'isPosVoucher': voucherApplied
+                                              ? isPosVoucher
+                                              : false,
+                                          'discountAmount': voucherApplied
+                                              ? (currentTotal - displayTotal)
+                                              : 0,
+                                          'voucherRemaining': voucherApplied &&
+                                                  !sekaliPakai
+                                              ? (voucherBalance! - voucherValue)
+                                              : null,
+                                        });
+                                      } else {
+                                        _showTopError(context,
+                                            'Uang yang diterima masih kurang');
+                                      }
+                                    },
+                              child: _isConfirming
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: Colors.white),
+                                    )
+                                  : Text('Konfirmasi Pembayaran',
+                                      style: GoogleFonts.poppins(
+                                          fontWeight: FontWeight.w600)),
+                            )),
                       ]),
                     ],
                   ],
@@ -4815,10 +7117,12 @@ class _OpenBillSettlementDialog extends StatefulWidget {
   });
 
   @override
-  _OpenBillSettlementDialogState createState() => _OpenBillSettlementDialogState();
+  _OpenBillSettlementDialogState createState() =>
+      _OpenBillSettlementDialogState();
 }
 
 class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
+  bool _isConfirming = false;
   bool applyPromo = false;
   TextEditingController voucherController = TextEditingController();
   String? voucherName;
@@ -4884,12 +7188,16 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
     });
 
     final result = await OrderConfirmationService._validateVoucher(
-        voucherController.text, widget.openBill.totalAmount + widget.totalTakeAwayFee);
+        voucherController.text,
+        widget.openBill.totalAmount + widget.totalTakeAwayFee);
 
     setState(() {
       isValidatingVoucher = false;
       if (result?['error'] != null) {
-        voucherError = result!['error'];
+        voucherError = UserMessageService.fromText(
+          result!['error']?.toString(),
+          fallback: 'Voucher tidak valid',
+        );
         voucherApplied = false;
         voucherDocId = null;
         voucherBalance = null;
@@ -5006,14 +7314,15 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                 ),
               ),
               const SizedBox(height: 16),
-              
+
               // Total
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
                     'Total Tagihan: ',
-                    style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w500),
+                    style: GoogleFonts.poppins(
+                        fontSize: 15, fontWeight: FontWeight.w500),
                   ),
                   if (voucherApplied) ...[
                     Text(
@@ -5046,9 +7355,9 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                     ),
                   ),
                 ),
-              
+
               const SizedBox(height: 16),
-              
+
               // Voucher input
               Row(
                 children: [
@@ -5060,30 +7369,34 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                         labelText: 'Kode Voucher',
                         border: const OutlineInputBorder(),
                         errorText: voucherError,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: _validateAndApplyVoucher,
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange),
                     child: const Text('Apply'),
                   ),
                 ],
               ),
-              
+
               const SizedBox(height: 20),
-              
+
               Text(
                 'Metode Pembayaran',
-                style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500),
+                style: GoogleFonts.poppins(
+                    fontSize: 13, fontWeight: FontWeight.w500),
               ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: ['Cash', 'QRIS', 'Online', 'Cash + QRIS', 'Program'].map((method) {
+                children: ['Cash', 'QRIS', 'Online', 'Cash + QRIS', 'Program']
+                    .map((method) {
                   final isSelected = _selectedPaymentMethod == method;
                   return ChoiceChip(
                     label: Text(method),
@@ -5091,8 +7404,10 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                     selectedColor: const Color(0xFFC8E6C9),
                     labelStyle: GoogleFonts.poppins(
                       fontSize: 13,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                      color: isSelected ? const Color(0xFF2E7D32) : Colors.black87,
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.w400,
+                      color:
+                          isSelected ? const Color(0xFF2E7D32) : Colors.black87,
                     ),
                     onSelected: (val) {
                       setState(() {
@@ -5106,7 +7421,8 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                           _isSplitPayment = false;
                           if (val && method != 'Cash') {
                             widget.uangYangDiterimaController.text =
-                                NumberFormat("#,###", "id_ID").format(displayTotal);
+                                NumberFormat("#,###", "id_ID")
+                                    .format(displayTotal);
                           } else if (val && method == 'Cash') {
                             widget.uangYangDiterimaController.clear();
                           }
@@ -5127,23 +7443,28 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                         inputFormatters: [
                           FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                           TextInputFormatter.withFunction((oldValue, newValue) {
-                            final plainNumber = newValue.text.replaceAll('.', '');
+                            final plainNumber =
+                                newValue.text.replaceAll('.', '');
                             if (plainNumber.isEmpty) return newValue;
                             final format = NumberFormat("#,###", "id_ID");
-                            final newText = format.format(int.parse(plainNumber));
+                            final newText =
+                                format.format(int.parse(plainNumber));
                             return newValue.copyWith(
                               text: newText,
-                              selection: TextSelection.collapsed(offset: newText.length),
+                              selection: TextSelection.collapsed(
+                                  offset: newText.length),
                             );
                           }),
                         ],
                         decoration: InputDecoration(
                           labelText: 'Jumlah QRIS (Rp)',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(4)),
                         ),
                         onChanged: (val) {
                           setState(() {
-                            _splitQrisAmount = int.tryParse(val.replaceAll('.', '')) ?? 0;
+                            _splitQrisAmount =
+                                int.tryParse(val.replaceAll('.', '')) ?? 0;
                           });
                         },
                       ),
@@ -5151,7 +7472,8 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 12, horizontal: 12),
                         decoration: BoxDecoration(
                           color: Colors.blue.shade50,
                           borderRadius: BorderRadius.circular(4),
@@ -5160,10 +7482,15 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)),
+                            Text('Sisa Cash:',
+                                style: GoogleFonts.poppins(
+                                    fontSize: 11, color: Colors.blue.shade700)),
                             Text(
                               'Rp ${NumberFormat("#,###", "id_ID").format((displayTotal - _splitQrisAmount).clamp(0, displayTotal))}',
-                              style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                              style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue.shade900),
                             ),
                           ],
                         ),
@@ -5172,24 +7499,31 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                   ],
                 ),
               ],
-              if (_selectedPaymentMethod == 'Program' && _activePrograms.isNotEmpty) ...[
+              if (_selectedPaymentMethod == 'Program' &&
+                  _activePrograms.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   value: _selectedProgramId,
                   items: _activePrograms.map((p) {
                     return DropdownMenuItem<String>(
                       value: p['id'],
-                      child: Text('${p['programName']} (${p['institutionName']})'),
+                      child:
+                          Text('${p['programName']} (${p['institutionName']})'),
                     );
                   }).toList(),
                   onChanged: (val) {
                     setState(() {
                       _selectedProgramId = val;
                       if (val != null) {
-                        final prog = _activePrograms.firstWhere((p) => p['id'] == val, orElse: () => {});
-                        final defNominal = ((prog['defaultNominal'] ?? 0) as num).toInt();
+                        final prog = _activePrograms.firstWhere(
+                            (p) => p['id'] == val,
+                            orElse: () => {});
+                        final defNominal =
+                            ((prog['defaultNominal'] ?? 0) as num).toInt();
                         _programNominal = defNominal;
-                        _programNominalController.text = defNominal > 0 ? NumberFormat('#,###', 'id_ID').format(defNominal) : '';
+                        _programNominalController.text = defNominal > 0
+                            ? NumberFormat('#,###', 'id_ID').format(defNominal)
+                            : '';
                         _programExtraPaymentMethod = null;
                         _isProgramExtraSplit = false;
                         _programExtraQrisAmount = 0;
@@ -5200,23 +7534,43 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                   },
                   decoration: InputDecoration(
                     labelText: 'Pilih Program Voucher',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(4)),
                   ),
                 ),
               ],
-              
+
               // ─── PROGRAM PAYMENT SECTION ───
-              if (_selectedPaymentMethod == 'Program' && _selectedProgramId != null) ...[  
+              if (_selectedPaymentMethod == 'Program' &&
+                  _selectedProgramId != null) ...[
                 const SizedBox(height: 12),
                 TextField(
-                  controller: _programNominalController, keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })],
-                  decoration: InputDecoration(labelText: 'Nominal Voucher (Rp)', helperText: 'Jumlah yang ditanggung program', border: const OutlineInputBorder()),
+                  controller: _programNominalController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    TextInputFormatter.withFunction((o, n) {
+                      final plain = n.text.replaceAll('.', '');
+                      if (plain.isEmpty) return n;
+                      final t = NumberFormat('#,###', 'id_ID')
+                          .format(int.parse(plain));
+                      return n.copyWith(
+                          text: t,
+                          selection: TextSelection.collapsed(offset: t.length));
+                    })
+                  ],
+                  decoration: InputDecoration(
+                      labelText: 'Nominal Voucher (Rp)',
+                      helperText: 'Jumlah yang ditanggung program',
+                      border: const OutlineInputBorder()),
                   onChanged: (val) {
                     setState(() {
-                      _programNominal = int.tryParse(val.replaceAll('.', '')) ?? 0;
-                      _programExtraPaymentMethod = null; _isProgramExtraSplit = false;
-                      _programExtraQrisAmount = 0; _programExtraQrisController.clear();
+                      _programNominal =
+                          int.tryParse(val.replaceAll('.', '')) ?? 0;
+                      _programExtraPaymentMethod = null;
+                      _isProgramExtraSplit = false;
+                      _programExtraQrisAmount = 0;
+                      _programExtraQrisController.clear();
                       widget.uangYangDiterimaController.clear();
                     });
                   },
@@ -5224,31 +7578,219 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                 Builder(builder: (ctx) {
                   final remaining = displayTotal - _programNominal;
                   if (remaining <= 0) {
-                    return Padding(padding: const EdgeInsets.only(top: 8), child: Row(children: [const Icon(Icons.check_circle, color: Colors.green, size: 16), const SizedBox(width: 6), Text('Voucher menutupi seluruh tagihan', style: GoogleFonts.poppins(fontSize: 12, color: Colors.green.shade700))]));
+                    return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(children: [
+                          const Icon(Icons.check_circle,
+                              color: Colors.green, size: 16),
+                          const SizedBox(width: 6),
+                          Text('Voucher menutupi seluruh tagihan',
+                              style: GoogleFonts.poppins(
+                                  fontSize: 12, color: Colors.green.shade700))
+                        ]));
                   }
-                  return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    const SizedBox(height: 8),
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.orange.shade200)), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Sisa:', style: GoogleFonts.poppins(fontSize: 12, color: Colors.orange.shade800)), Text('Rp ${NumberFormat("#,###","id_ID").format(remaining)}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.orange.shade900))])),
-                    const SizedBox(height: 10),
-                    Text('Metode Pembayaran Sisa', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.grey.shade700)),
-                    const SizedBox(height: 6),
-                    Wrap(spacing: 8, runSpacing: 8, children: ['Cash', 'QRIS', 'Cash + QRIS'].map((m) {
-                      final isSel = _programExtraPaymentMethod == m;
-                      return ChoiceChip(label: Text(m, style: GoogleFonts.poppins(fontSize: 12)), selected: isSel, selectedColor: const Color(0xFFC8E6C9), labelStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: isSel ? const Color(0xFF2E7D32) : Colors.black87),
-                        onSelected: (sel) { setState(() { _programExtraPaymentMethod = sel ? m : null; _isProgramExtraSplit = sel && m == 'Cash + QRIS'; _programExtraQrisAmount = 0; _programExtraQrisController.clear(); if (sel && m == 'QRIS') { widget.uangYangDiterimaController.text = NumberFormat('#,###','id_ID').format(remaining); } else { widget.uangYangDiterimaController.clear(); } }); });
-                    }).toList()),
-                    if (_isProgramExtraSplit) ...[const SizedBox(height: 10), Row(children: [Expanded(child: TextField(controller: _programExtraQrisController, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })], decoration: const InputDecoration(labelText: 'Jumlah QRIS (Rp)', border: OutlineInputBorder()), onChanged: (val) => setState(() => _programExtraQrisAmount = int.tryParse(val.replaceAll('.','')) ?? 0))), const SizedBox(width: 12), Expanded(child: Container(padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12), decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.blue.shade200)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Sisa Cash:', style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade700)), Text('Rp ${NumberFormat("#,###","id_ID").format((remaining - _programExtraQrisAmount).clamp(0, remaining))}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue.shade900))])))])],
-                    if (_programExtraPaymentMethod != null && _programExtraPaymentMethod != 'QRIS') ...[const SizedBox(height: 10), TextField(controller: widget.uangYangDiterimaController, focusNode: uangFocusNode, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')), TextInputFormatter.withFunction((o, n) { final plain = n.text.replaceAll('.',''); if (plain.isEmpty) return n; final t = NumberFormat('#,###','id_ID').format(int.parse(plain)); return n.copyWith(text: t, selection: TextSelection.collapsed(offset: t.length)); })], decoration: InputDecoration(labelText: _isProgramExtraSplit ? 'Cash Diterima (Rp)' : 'Uang Diterima (Rp)', border: const OutlineInputBorder(), prefixText: 'Rp ')), Builder(builder: (ctx) { final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0; final cashNeeded = _isProgramExtraSplit ? (remaining - _programExtraQrisAmount).clamp(0, remaining) : remaining; final change = cashReceived - cashNeeded; if (change <= 0) return const SizedBox.shrink(); return Padding(padding: const EdgeInsets.only(top: 6), child: Text('Kembalian: Rp ${NumberFormat("#,###","id_ID").format(change)}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700, fontWeight: FontWeight.w600))); })],
-                  ]);
+                  return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SizedBox(height: 8),
+                        Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                                color: Colors.orange.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border:
+                                    Border.all(color: Colors.orange.shade200)),
+                            child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Sisa:',
+                                      style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          color: Colors.orange.shade800)),
+                                  Text(
+                                      'Rp ${NumberFormat("#,###", "id_ID").format(remaining)}',
+                                      style: GoogleFonts.poppins(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.orange.shade900))
+                                ])),
+                        const SizedBox(height: 10),
+                        Text('Metode Pembayaran Sisa',
+                            style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey.shade700)),
+                        const SizedBox(height: 6),
+                        Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: ['Cash', 'QRIS', 'Cash + QRIS'].map((m) {
+                              final isSel = _programExtraPaymentMethod == m;
+                              return ChoiceChip(
+                                  label: Text(m,
+                                      style: GoogleFonts.poppins(fontSize: 12)),
+                                  selected: isSel,
+                                  selectedColor: const Color(0xFFC8E6C9),
+                                  labelStyle: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: isSel
+                                          ? FontWeight.w600
+                                          : FontWeight.w400,
+                                      color: isSel
+                                          ? const Color(0xFF2E7D32)
+                                          : Colors.black87),
+                                  onSelected: (sel) {
+                                    setState(() {
+                                      _programExtraPaymentMethod =
+                                          sel ? m : null;
+                                      _isProgramExtraSplit =
+                                          sel && m == 'Cash + QRIS';
+                                      _programExtraQrisAmount = 0;
+                                      _programExtraQrisController.clear();
+                                      if (sel && m == 'QRIS') {
+                                        widget.uangYangDiterimaController.text =
+                                            NumberFormat('#,###', 'id_ID')
+                                                .format(remaining);
+                                      } else {
+                                        widget.uangYangDiterimaController
+                                            .clear();
+                                      }
+                                    });
+                                  });
+                            }).toList()),
+                        if (_isProgramExtraSplit) ...[
+                          const SizedBox(height: 10),
+                          Row(children: [
+                            Expanded(
+                                child: TextField(
+                                    controller: _programExtraQrisController,
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.allow(
+                                          RegExp(r'[0-9.]')),
+                                      TextInputFormatter.withFunction((o, n) {
+                                        final plain =
+                                            n.text.replaceAll('.', '');
+                                        if (plain.isEmpty) return n;
+                                        final t = NumberFormat('#,###', 'id_ID')
+                                            .format(int.parse(plain));
+                                        return n.copyWith(
+                                            text: t,
+                                            selection: TextSelection.collapsed(
+                                                offset: t.length));
+                                      })
+                                    ],
+                                    decoration: const InputDecoration(
+                                        labelText: 'Jumlah QRIS (Rp)',
+                                        border: OutlineInputBorder()),
+                                    onChanged: (val) => setState(() =>
+                                        _programExtraQrisAmount = int.tryParse(
+                                                val.replaceAll('.', '')) ??
+                                            0))),
+                            const SizedBox(width: 12),
+                            Expanded(
+                                child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12, horizontal: 12),
+                                    decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(
+                                            color: Colors.blue.shade200)),
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text('Sisa Cash:',
+                                              style: GoogleFonts.poppins(
+                                                  fontSize: 11,
+                                                  color: Colors.blue.shade700)),
+                                          Text(
+                                              'Rp ${NumberFormat("#,###", "id_ID").format((remaining - _programExtraQrisAmount).clamp(0, remaining))}',
+                                              style: GoogleFonts.poppins(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.blue.shade900))
+                                        ])))
+                          ])
+                        ],
+                        if (_programExtraPaymentMethod != null &&
+                            _programExtraPaymentMethod != 'QRIS') ...[
+                          const SizedBox(height: 10),
+                          TextField(
+                              controller: widget.uangYangDiterimaController,
+                              focusNode: uangFocusNode,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                    RegExp(r'[0-9.]')),
+                                TextInputFormatter.withFunction((o, n) {
+                                  final plain = n.text.replaceAll('.', '');
+                                  if (plain.isEmpty) return n;
+                                  final t = NumberFormat('#,###', 'id_ID')
+                                      .format(int.parse(plain));
+                                  return n.copyWith(
+                                      text: t,
+                                      selection: TextSelection.collapsed(
+                                          offset: t.length));
+                                })
+                              ],
+                              decoration: InputDecoration(
+                                  labelText: _isProgramExtraSplit
+                                      ? 'Cash Diterima (Rp)'
+                                      : 'Uang Diterima (Rp)',
+                                  border: const OutlineInputBorder(),
+                                  prefixText: 'Rp ')),
+                          Builder(builder: (ctx) {
+                            final cashReceived = int.tryParse(widget
+                                    .uangYangDiterimaController.text
+                                    .replaceAll('.', '')) ??
+                                0;
+                            final cashNeeded = _isProgramExtraSplit
+                                ? (remaining - _programExtraQrisAmount)
+                                    .clamp(0, remaining)
+                                : remaining;
+                            final change = cashReceived - cashNeeded;
+                            if (change <= 0) return const SizedBox.shrink();
+                            return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                    'Kembalian: Rp ${NumberFormat("#,###", "id_ID").format(change)}',
+                                    style: GoogleFonts.poppins(
+                                        fontSize: 13,
+                                        color: Colors.green.shade700,
+                                        fontWeight: FontWeight.w600)));
+                          })
+                        ],
+                      ]);
                 }),
               ],
               // ─── NORMAL PAYMENT SECTION ───
-              if (_selectedPaymentMethod != 'Program') ...[  
+              if (_selectedPaymentMethod != 'Program') ...[
                 const SizedBox(height: 16),
                 TextField(
-                  controller: widget.uangYangDiterimaController, focusNode: uangFocusNode, keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, TextInputFormatter.withFunction((oldValue, newValue) { if (newValue.text.isEmpty) return newValue; final intValue = int.parse(newValue.text); final newText = NumberFormat('#,###', 'id_ID').format(intValue); return TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length)); })],
-                  decoration: const InputDecoration(labelText: 'Uang yang Diterima', border: OutlineInputBorder(), prefixText: 'Rp '),
+                  controller: widget.uangYangDiterimaController,
+                  focusNode: uangFocusNode,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    TextInputFormatter.withFunction((oldValue, newValue) {
+                      if (newValue.text.isEmpty) return newValue;
+                      final intValue = int.parse(newValue.text);
+                      final newText =
+                          NumberFormat('#,###', 'id_ID').format(intValue);
+                      return TextEditingValue(
+                          text: newText,
+                          selection:
+                              TextSelection.collapsed(offset: newText.length));
+                    })
+                  ],
+                  decoration: const InputDecoration(
+                      labelText: 'Uang yang Diterima',
+                      border: OutlineInputBorder(),
+                      prefixText: 'Rp '),
                 ),
               ],
             ],
@@ -5257,58 +7799,129 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: _isConfirming ? null : () => Navigator.pop(context),
           child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
         ),
         ElevatedButton(
-          onPressed: () {
-            if (_selectedPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran'); return; }
-            if (_selectedPaymentMethod == 'Program') {
-              if (_selectedProgramId == null) { _showTopError(context, 'Pilih program voucher'); return; }
-              if (_programNominal <= 0) { _showTopError(context, 'Masukkan nominal voucher'); return; }
-              final remaining = displayTotal - _programNominal;
-              int extraQris = 0;
-              if (remaining > 0) {
-                if (_programExtraPaymentMethod == null) { _showTopError(context, 'Pilih metode pembayaran sisa'); return; }
-                if (_isProgramExtraSplit) {
-                  if (_programExtraQrisAmount <= 0 || _programExtraQrisAmount >= remaining) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; }
-                  extraQris = _programExtraQrisAmount;
-                  final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.','')) ?? 0;
-                  if (cashReceived < remaining - extraQris) { _showTopError(context, 'Cash yang diterima kurang'); return; }
-                } else if (_programExtraPaymentMethod == 'Cash') {
-                  final cashReceived = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.','')) ?? 0;
-                  if (cashReceived < remaining) { _showTopError(context, 'Cash yang diterima kurang'); return; }
-                }
-              }
-              Navigator.pop(context, {
-                'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': 'Program',
-                'isSplitPayment': false, 'splitCashAmount': 0, 'splitQrisAmount': 0,
-                'voucherProgramId': _selectedProgramId, 'programNominal': _programNominal,
-                'programExtraPaymentMethod': remaining > 0 ? _programExtraPaymentMethod : null,
-                'programExtraSplitQrisAmount': extraQris,
-                'voucherCode': voucherApplied ? voucherDocId : null,
-                'isPosVoucher': voucherApplied ? isPosVoucher : false,
-                'discountAmount': voucherApplied ? (baseTotal - displayTotal) : 0,
-                'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
-              });
-              return;
-            }
-            if (_isSplitPayment) { if (_splitQrisAmount <= 0 || _splitQrisAmount >= displayTotal) { _showTopError(context, 'Jumlah QRIS tidak valid'); return; } }
-            final totalDiterima = int.tryParse(widget.uangYangDiterimaController.text.replaceAll('.', '')) ?? 0;
-            final cashNeeded = _isSplitPayment ? displayTotal - _splitQrisAmount : displayTotal;
-            if (totalDiterima < cashNeeded) { _showTopError(context, 'Uang kurang'); return; }
-            Navigator.pop(context, {
-              'confirmed': true, 'finalTotal': displayTotal, 'paymentMethod': _selectedPaymentMethod,
-              'isSplitPayment': _isSplitPayment, 'splitCashAmount': displayTotal - _splitQrisAmount, 'splitQrisAmount': _splitQrisAmount,
-              'voucherProgramId': null,
-              'voucherCode': voucherApplied ? voucherDocId : null,
-              'isPosVoucher': voucherApplied ? isPosVoucher : false,
-              'discountAmount': voucherApplied ? (baseTotal - displayTotal) : 0,
-              'voucherRemaining': voucherApplied && !sekaliPakai ? (voucherBalance! - voucherValue) : null,
-            });
-          },
-          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-          child: Text('PROSES BAYAR', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          onPressed: _isConfirming
+              ? null
+              : () {
+                  if (_selectedPaymentMethod == null) {
+                    _showTopError(context, 'Pilih metode pembayaran');
+                    return;
+                  }
+                  if (_selectedPaymentMethod == 'Program') {
+                    if (_selectedProgramId == null) {
+                      _showTopError(context, 'Pilih program voucher');
+                      return;
+                    }
+                    if (_programNominal <= 0) {
+                      _showTopError(context, 'Masukkan nominal voucher');
+                      return;
+                    }
+                    final remaining = displayTotal - _programNominal;
+                    int extraQris = 0;
+                    if (remaining > 0) {
+                      if (_programExtraPaymentMethod == null) {
+                        _showTopError(context, 'Pilih metode pembayaran sisa');
+                        return;
+                      }
+                      if (_isProgramExtraSplit) {
+                        if (_programExtraQrisAmount <= 0 ||
+                            _programExtraQrisAmount >= remaining) {
+                          _showTopError(context, 'Jumlah QRIS tidak valid');
+                          return;
+                        }
+                        extraQris = _programExtraQrisAmount;
+                        final cashReceived = int.tryParse(widget
+                                .uangYangDiterimaController.text
+                                .replaceAll('.', '')) ??
+                            0;
+                        if (cashReceived < remaining - extraQris) {
+                          _showTopError(context, 'Cash yang diterima kurang');
+                          return;
+                        }
+                      } else if (_programExtraPaymentMethod == 'Cash') {
+                        final cashReceived = int.tryParse(widget
+                                .uangYangDiterimaController.text
+                                .replaceAll('.', '')) ??
+                            0;
+                        if (cashReceived < remaining) {
+                          _showTopError(context, 'Cash yang diterima kurang');
+                          return;
+                        }
+                      }
+                    }
+                    setState(() => _isConfirming = true);
+                    Navigator.pop(context, {
+                      'confirmed': true,
+                      'finalTotal': displayTotal,
+                      'paymentMethod': 'Program',
+                      'isSplitPayment': false,
+                      'splitCashAmount': 0,
+                      'splitQrisAmount': 0,
+                      'voucherProgramId': _selectedProgramId,
+                      'programNominal': _programNominal,
+                      'programExtraPaymentMethod':
+                          remaining > 0 ? _programExtraPaymentMethod : null,
+                      'programExtraSplitQrisAmount': extraQris,
+                      'voucherCode': voucherApplied ? voucherDocId : null,
+                      'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                      'discountAmount':
+                          voucherApplied ? (baseTotal - displayTotal) : 0,
+                      'voucherRemaining': voucherApplied && !sekaliPakai
+                          ? (voucherBalance! - voucherValue)
+                          : null,
+                    });
+                    return;
+                  }
+                  if (_isSplitPayment) {
+                    if (_splitQrisAmount <= 0 ||
+                        _splitQrisAmount >= displayTotal) {
+                      _showTopError(context, 'Jumlah QRIS tidak valid');
+                      return;
+                    }
+                  }
+                  final totalDiterima = int.tryParse(widget
+                          .uangYangDiterimaController.text
+                          .replaceAll('.', '')) ??
+                      0;
+                  final cashNeeded = _isSplitPayment
+                      ? displayTotal - _splitQrisAmount
+                      : displayTotal;
+                  if (totalDiterima < cashNeeded) {
+                    _showTopError(context, 'Uang kurang');
+                    return;
+                  }
+                  setState(() => _isConfirming = true);
+                  Navigator.pop(context, {
+                    'confirmed': true,
+                    'finalTotal': displayTotal,
+                    'paymentMethod': _selectedPaymentMethod,
+                    'isSplitPayment': _isSplitPayment,
+                    'splitCashAmount': displayTotal - _splitQrisAmount,
+                    'splitQrisAmount': _splitQrisAmount,
+                    'voucherProgramId': null,
+                    'voucherCode': voucherApplied ? voucherDocId : null,
+                    'isPosVoucher': voucherApplied ? isPosVoucher : false,
+                    'discountAmount':
+                        voucherApplied ? (baseTotal - displayTotal) : 0,
+                    'voucherRemaining': voucherApplied && !sekaliPakai
+                        ? (voucherBalance! - voucherValue)
+                        : null,
+                  });
+                },
+          style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D32)),
+          child: _isConfirming
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : Text('PROSES BAYAR',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
         ),
       ],
     );
@@ -5316,9 +7929,13 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
 }
 
 void _showTopError(BuildContext context, String message) {
+  final localizedMessage = UserMessageService.fromText(
+    message,
+    fallback: 'Terjadi kesalahan. Silakan coba lagi.',
+  );
   final overlay = Overlay.of(context);
   if (overlay == null) return;
-  
+
   late OverlayEntry overlayEntry;
   overlayEntry = OverlayEntry(
     builder: (context) => SafeArea(
@@ -5332,7 +7949,10 @@ void _showTopError(BuildContext context, String message) {
             decoration: BoxDecoration(
               color: Colors.redAccent,
               borderRadius: BorderRadius.circular(12),
-              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4))],
+              boxShadow: const [
+                BoxShadow(
+                    color: Colors.black26, blurRadius: 10, offset: Offset(0, 4))
+              ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -5341,8 +7961,11 @@ void _showTopError(BuildContext context, String message) {
                 const SizedBox(width: 12),
                 Flexible(
                   child: Text(
-                    message,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                    localizedMessage,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -5357,7 +7980,7 @@ void _showTopError(BuildContext context, String message) {
       ),
     ),
   );
-  
+
   overlay.insert(overlayEntry);
   Future.delayed(const Duration(seconds: 4), () {
     if (overlayEntry.mounted) overlayEntry.remove();
