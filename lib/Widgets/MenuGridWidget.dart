@@ -16,7 +16,8 @@ class MenuGridWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasPortraitImage = menuObjectList.any((m) => m.imageAspectRatio == '3:4');
+    final hasPortraitImage =
+        menuObjectList.any((m) => m.imageAspectRatio == '3:4');
     final gridAspectRatio = hasPortraitImage ? 0.6 : 0.8;
 
     return GridView.builder(
@@ -57,7 +58,9 @@ class MenuGridWidget extends StatelessWidget {
                 border: Border.all(
                   color: hasWarning
                       ? Colors.orange.shade300
-                      : (isAvailable ? Colors.grey.shade300 : Colors.red.shade300),
+                      : (isAvailable
+                          ? Colors.grey.shade300
+                          : Colors.red.shade300),
                   width: (hasWarning || !isAvailable) ? 2 : 1,
                 ),
               ),
@@ -67,26 +70,29 @@ class MenuGridWidget extends StatelessWidget {
                   onTap: isAvailable
                       ? () => onMenuTap(menu)
                       : () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Row(
-                                children: [
-                                  const Icon(Icons.error_outline, color: Colors.white),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      availabilityMessage,
-                                      style: GoogleFonts.poppins(
-                                          fontWeight: FontWeight.w500),
+                          ScaffoldMessenger.of(context)
+                            ..clearSnackBars()
+                            ..showSnackBar(
+                              SnackBar(
+                                content: Row(
+                                  children: [
+                                    const Icon(Icons.error_outline,
+                                        color: Colors.white),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        availabilityMessage,
+                                        style: GoogleFonts.poppins(
+                                            fontWeight: FontWeight.w500),
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
+                                backgroundColor: Colors.red.shade700,
+                                behavior: SnackBarBehavior.floating,
+                                duration: const Duration(seconds: 3),
                               ),
-                              backgroundColor: Colors.red.shade700,
-                              behavior: SnackBarBehavior.floating,
-                              duration: const Duration(seconds: 3),
-                            ),
-                          );
+                            );
                         },
                   borderRadius: BorderRadius.circular(12),
                   child: Stack(
@@ -101,22 +107,26 @@ class MenuGridWidget extends StatelessWidget {
                                 height: imgHeight,
                                 width: imgWidth,
                                 child: Image(
-                                  image:
-                                      CachedNetworkImageProvider(menu.imagePath),
+                                  image: CachedNetworkImageProvider(
+                                      menu.imagePath),
                                   fit: BoxFit.contain,
                                 ),
                               ),
                             const SizedBox(height: 8),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 8.0),
-                              child: Text(
-                                menu.namaMenu,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontFamily: 'Montserrat',
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
+                            Flexible(
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 8.0),
+                                child: Text(
+                                  menu.namaMenu,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontFamily: 'Montserrat',
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
                             ),
@@ -128,7 +138,8 @@ class MenuGridWidget extends StatelessWidget {
                           top: 4,
                           right: 4,
                           child: Builder(builder: (_) {
-                            final maxServings = InventoryService().getMaxServings(menu.ingredients);
+                            final maxServings = InventoryService()
+                                .getMaxServings(menu.ingredients);
                             final count = maxServings ?? 0;
                             final Color bg;
                             if (count <= 0) {
@@ -139,7 +150,8 @@ class MenuGridWidget extends StatelessWidget {
                               bg = Colors.green;
                             }
                             return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
                                 color: bg,
                                 borderRadius: BorderRadius.circular(12),
@@ -147,7 +159,8 @@ class MenuGridWidget extends StatelessWidget {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.inventory_2, size: 12, color: Colors.white),
+                                  const Icon(Icons.inventory_2,
+                                      size: 12, color: Colors.white),
                                   const SizedBox(width: 4),
                                   Text(
                                     '$count',

@@ -9,6 +9,7 @@ import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Services/LoaderWidget.dart';
 import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
+import 'package:point_of_sales_app_v3/Services/VoucherProgramService.dart';
 
 class EditOrderService {
   static Future<void> processEditOrder({
@@ -50,7 +51,7 @@ class EditOrderService {
     final activePesananList = newPesananList.where((p) => p.totalQuantity > 0).toList();
     if (activePesananList.isEmpty) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context)..clearSnackBars()..showSnackBar(
           const SnackBar(
             content: Text('Pesanan tidak boleh kosong. Silakan hapus pesanan atau masukkan minimal 1 item.'),
             backgroundColor: Colors.red,
@@ -293,7 +294,7 @@ class EditOrderService {
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context)..clearSnackBars()..showSnackBar(
           SnackBar(
             content: Text(
                 'Gagal mengubah pesanan: ${UserMessageService.fromError(e)}'),
@@ -389,6 +390,16 @@ class EditOrderService {
       if (amount != 0) result[field] = (result[field] ?? 0) + amount;
     }
 
+    // Normalized B2B data is authoritative even if a legacy document also
+    // contains stale ordinary split-payment fields.
+    if (data['paymentMethod']?.toString() == 'Program') {
+      final breakdown = B2BPaymentBreakdown.fromStatus(data, total: total);
+      add('totalCash', breakdown.cashAmount);
+      add('totalQris', breakdown.qrisAmount);
+      add('totalOnline', breakdown.onlineAmount);
+      add('totalVoucher', breakdown.nominal);
+      return result;
+    }
     if (data['isSplitPayment'] == true) {
       final split = data['splitDetails'] is Map
           ? Map<String, dynamic>.from(data['splitDetails'] as Map)
@@ -398,28 +409,6 @@ class EditOrderService {
       return result;
     }
     final method = data['paymentMethod']?.toString();
-    if (method == 'Program') {
-      final nominal = InventoryService.toInt(data['programNominal']);
-      final remaining = total - nominal;
-      final extra = data['programExtraPaymentMethod']?.toString();
-      if (remaining > 0 && extra != null) {
-        if (extra == 'Cash + QRIS') {
-          final split = data['programExtraSplitDetails'] is Map
-              ? Map<String, dynamic>.from(
-                  data['programExtraSplitDetails'] as Map)
-              : <String, dynamic>{};
-          add('totalCash', InventoryService.toInt(split['cashAmount']));
-          add('totalQris', InventoryService.toInt(split['qrisAmount']));
-        } else if (extra == 'Cash') {
-          add('totalCash', remaining);
-        } else if (extra == 'QRIS') {
-          add('totalQris', remaining);
-        } else if (extra == 'Online') {
-          add('totalOnline', remaining);
-        }
-      }
-      return result;
-    }
     if (method == 'Cash') add('totalCash', total);
     if (method == 'QRIS') add('totalQris', total);
     if (method == 'Online') add('totalOnline', total);
@@ -446,12 +435,14 @@ class EditOrderService {
         newPesananList.where((item) => item.totalQuantity > 0).toList();
     if (activeOrders.isEmpty) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Pesanan tidak boleh kosong.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Pesanan tidak boleh kosong.'),
+              backgroundColor: Colors.red,
+            ),
+          );
       }
       return;
     }
@@ -496,6 +487,41 @@ class EditOrderService {
           throw Exception(
               'Pesanan sudah diubah oleh perangkat lain. Muat ulang sebelum mengedit lagi.');
         }
+        final oldTotal = InventoryService.toInt(current['total']);
+        final oldB2b = current['paymentMethod']?.toString() == 'Program'
+            ? B2BPaymentBreakdown.fromStatus(current, total: oldTotal)
+            : B2BPaymentBreakdown.none;
+        if (current['paymentMethod']?.toString() == 'Program' &&
+            (oldB2b.programId == null ||
+                oldB2b.nominal <= 0 ||
+                oldB2b.isAmbiguousLegacy)) {
+          throw const VoucherProgramException(
+              'Pesanan voucher lama memiliki rincian B2B yang tidak lengkap dan tidak aman untuk diedit.');
+        }
+        B2BPaymentBreakdown? newB2b;
+        if (oldB2b.isProgram) {
+          final cappedNominal =
+              oldB2b.nominal < newTotalHarga ? oldB2b.nominal : newTotalHarga;
+          final newRemainingBeforeSplit = newTotalHarga - cappedNominal;
+          final qris = oldB2b.qrisAmount > newRemainingBeforeSplit
+              ? newRemainingBeforeSplit
+              : oldB2b.qrisAmount;
+          newB2b = B2BPaymentBreakdown.calculate(
+            billTotal: newTotalHarga,
+            requestedNominal: oldB2b.nominal,
+            programId: oldB2b.programId,
+            extraPaymentMethod: oldB2b.extraPaymentMethod,
+            qrisAmount: qris,
+          );
+        }
+        final b2bEdit = await VoucherProgramService.prepareEditInTransaction(
+          transaction: transaction,
+          operationId: operationId,
+          oldProgramId: oldB2b.programId,
+          oldNominal: oldB2b.nominal,
+          newProgramId: newB2b?.programId,
+          newNominal: newB2b?.nominal ?? 0,
+        );
         final oldItems = (current['orderItems'] as List<dynamic>? ?? [])
             .whereType<Map>()
             .map((item) =>
@@ -510,7 +536,6 @@ class EditOrderService {
           statusDocId: statusDocId,
         );
 
-        final oldTotal = InventoryService.toInt(current['total']);
         final oldSubTotal = InventoryService.toInt(current['subTotal']);
         final oldTakeAwayFee = InventoryService.toInt(current['takeAwayFee']);
         final newSubTotal = newTotalHarga - newBiayaBungkus;
@@ -520,10 +545,22 @@ class EditOrderService {
           'takeAwayFee': FieldValue.increment(newBiayaBungkus - oldTakeAwayFee),
         };
         final oldPayments = _paymentBreakdown(current, oldTotal);
-        final newPayments = _paymentBreakdown(current, newTotalHarga);
+        final newPaymentData = newB2b == null
+            ? current
+            : <String, dynamic>{
+                ...current,
+                ...newB2b.toStatusFields(operationId: operationId),
+              };
+        final newPayments = _paymentBreakdown(newPaymentData, newTotalHarga);
         for (final key in {...oldPayments.keys, ...newPayments.keys}) {
           final delta = (newPayments[key] ?? 0) - (oldPayments[key] ?? 0);
           if (delta != 0) financialDelta[key] = FieldValue.increment(delta);
+        }
+        if (newB2b != null && newB2b.nominal != oldB2b.nominal) {
+          financialDelta['totalVoucher'] =
+              FieldValue.increment(newB2b.nominal - oldB2b.nominal);
+          financialDelta['totalB2BRedeemed'] =
+              FieldValue.increment(newB2b.nominal - oldB2b.nominal);
         }
         final oldCounts = <String, int>{};
         for (final item in oldItems) {
@@ -565,6 +602,11 @@ class EditOrderService {
         }
 
         InventoryService().queuePreparedStockDeltas(transaction, preparation);
+        VoucherProgramService.commitEditInTransaction(
+          transaction: transaction,
+          preparation: b2bEdit,
+          sourceId: statusDocId,
+        );
         final oldItemsByKey = <String, Map<String, dynamic>>{};
         for (final raw in (current['orderItems'] as List<dynamic>? ?? [])) {
           if (raw is Map) {
@@ -606,6 +648,11 @@ class EditOrderService {
           statusUpdates['inventoryAuditFlags'] = FieldValue.arrayUnion(
               preparation.auditFlags.map((flag) => flag.toMap()).toList());
         }
+        if (newB2b != null) {
+          statusUpdates.addAll(newB2b.toStatusFields(operationId: operationId));
+          statusUpdates['isSplitPayment'] = false;
+          statusUpdates['splitDetails'] = FieldValue.delete();
+        }
         transaction.update(statusRef, statusUpdates);
         transaction.set(
             operationRef,
@@ -635,19 +682,23 @@ class EditOrderService {
           customerName: originalStatusData['namaCustomer']?.toString(),
           activePesananList: activeOrders,
         );
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Pesanan berhasil diubah.')),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            const SnackBar(content: Text('Pesanan berhasil diubah.')),
+          );
       }
     } catch (e) {
       if (context.mounted && !loaderPopped) Navigator.pop(context);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  'Gagal mengubah pesanan: ${UserMessageService.fromError(e)}'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+                content: Text(
+                    'Gagal mengubah pesanan: ${UserMessageService.fromError(e)}'),
+                backgroundColor: Colors.red),
+          );
       }
     }
   }

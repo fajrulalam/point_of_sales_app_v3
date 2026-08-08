@@ -107,15 +107,17 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
     final amount = _parseFormattedNumber(_amountController.text);
 
     if (category.isEmpty || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Isi kategori dan jumlah terlebih dahulu',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Isi kategori dan jumlah terlebih dahulu',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+            ),
+            backgroundColor: Colors.orange,
           ),
-          backgroundColor: Colors.orange,
-        ),
-      );
+        );
       return;
     }
 
@@ -142,34 +144,38 @@ class _QuickExpenseBottomSheetState extends State<QuickExpenseBottomSheet> {
       await _fetchTodayExpenses();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 12),
-                Text(
-                  'Pengeluaran berhasil dicatat',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                ),
-              ],
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Pengeluaran berhasil dicatat',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
             ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+          );
       }
     } catch (e) {
       setState(() => _isSaving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Gagal menyimpan pengeluaran: ${UserMessageService.fromError(e)}',
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Gagal menyimpan pengeluaran: ${UserMessageService.fromError(e)}',
+              ),
+              backgroundColor: Colors.red,
             ),
-            backgroundColor: Colors.red,
-          ),
-        );
+          );
       }
     }
   }

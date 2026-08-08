@@ -28,7 +28,8 @@ class OptionSelectionBottomSheet extends StatefulWidget {
     List<SelectedOption>? initialOptions,
     int? initialQuantity,
   }) {
-    return showModalBottomSheet<List<({List<SelectedOption> options, int quantity})>>(
+    return showModalBottomSheet<
+        List<({List<SelectedOption> options, int quantity})>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -50,7 +51,8 @@ class _OptionSelectionBottomSheetState
     extends State<OptionSelectionBottomSheet> {
   final List<_GroupConfig> _groups = [];
 
-  bool get isEditMode => widget.initialOptions != null || widget.initialQuantity != null;
+  bool get isEditMode =>
+      widget.initialOptions != null || widget.initialQuantity != null;
 
   @override
   void initState() {
@@ -98,10 +100,13 @@ class _OptionSelectionBottomSheetState
       for (var group in widget.linkedGroups) {
         final selected = groupConfig.selections[group.id] ?? {};
         if (group.isRequired && selected.isEmpty) {
-          groupConfig.errors[group.id] = 'Pilih minimal ${group.minSelection > 0 ? group.minSelection : 1} opsi';
+          groupConfig.errors[group.id] =
+              'Pilih minimal ${group.minSelection > 0 ? group.minSelection : 1} opsi';
           allValid = false;
-        } else if (group.minSelection > 0 && selected.length < group.minSelection) {
-          groupConfig.errors[group.id] = 'Pilih minimal ${group.minSelection} opsi';
+        } else if (group.minSelection > 0 &&
+            selected.length < group.minSelection) {
+          groupConfig.errors[group.id] =
+              'Pilih minimal ${group.minSelection} opsi';
           allValid = false;
         } else {
           groupConfig.errors[group.id] = null;
@@ -113,20 +118,24 @@ class _OptionSelectionBottomSheetState
 
   void _toggleOption(int index, OptionGroup group, OptionItem option) {
     final groupConfig = _groups[index];
-    final bool isSelected = (groupConfig.selections[group.id] ?? {}).contains(option.name);
-    
+    final bool isSelected =
+        (groupConfig.selections[group.id] ?? {}).contains(option.name);
+
     // If selecting (not deselecting), check stock for a warning
     if (!isSelected) {
       final maxServings = InventoryService().getMaxServings(option.ingredients);
       if (maxServings != null && maxServings <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Peringatan: Stok "${option.name}" habis, tapi tetap bisa ditambahkan.'),
-            backgroundColor: Colors.orange.shade800,
-            duration: const Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                  'Peringatan: Stok "${option.name}" habis, tapi tetap bisa ditambahkan.'),
+              backgroundColor: Colors.orange.shade800,
+              duration: const Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
       }
     }
 
@@ -198,7 +207,8 @@ class _OptionSelectionBottomSheetState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ...List.generate(_groups.length, (index) => _buildGroupCard(index)),
+                  ...List.generate(
+                      _groups.length, (index) => _buildGroupCard(index)),
                   if (!isEditMode) ...[
                     const SizedBox(height: 8),
                     SizedBox(
@@ -219,7 +229,8 @@ class _OptionSelectionBottomSheetState
                         ),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          side: const BorderSide(color: Color(0xFF2E7D32), width: 1.5),
+                          side: const BorderSide(
+                              color: Color(0xFF2E7D32), width: 1.5),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -317,12 +328,14 @@ class _OptionSelectionBottomSheetState
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: Colors.grey.shade50,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(12)),
               border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.widgets_outlined, size: 18, color: Color(0xFF2E7D32)),
+                const Icon(Icons.widgets_outlined,
+                    size: 18, color: Color(0xFF2E7D32)),
                 const SizedBox(width: 8),
                 Text(
                   'Kombinasi #${index + 1}',
@@ -335,7 +348,8 @@ class _OptionSelectionBottomSheetState
                 const Spacer(),
                 if (_groups.length > 1)
                   IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                    icon: const Icon(Icons.delete_outline,
+                        color: Colors.red, size: 20),
                     onPressed: () {
                       setState(() {
                         _groups.removeAt(index);
@@ -354,7 +368,8 @@ class _OptionSelectionBottomSheetState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ...widget.linkedGroups
-                    .map((group) => _buildGroupSection(groupConfig, group, index))
+                    .map((group) =>
+                        _buildGroupSection(groupConfig, group, index))
                     .toList(),
                 const Divider(height: 24),
                 // Local quantity controls inside each card
@@ -410,7 +425,8 @@ class _OptionSelectionBottomSheetState
     );
   }
 
-  Widget _buildGroupSection(_GroupConfig groupConfig, OptionGroup group, int index) {
+  Widget _buildGroupSection(
+      _GroupConfig groupConfig, OptionGroup group, int index) {
     final selected = groupConfig.selections[group.id] ?? {};
     final error = groupConfig.errors[group.id];
 
@@ -475,7 +491,8 @@ class _OptionSelectionBottomSheetState
             runSpacing: 8,
             children: group.options.map((option) {
               final isSelected = selected.contains(option.name);
-              final maxServings = InventoryService().getMaxServings(option.ingredients);
+              final maxServings =
+                  InventoryService().getMaxServings(option.ingredients);
               return _buildOptionChip(option, isSelected, maxServings, () {
                 _toggleOption(index, group, option);
               });
@@ -486,7 +503,8 @@ class _OptionSelectionBottomSheetState
     );
   }
 
-  Widget _buildOptionChip(OptionItem option, bool isSelected, int? maxServings, VoidCallback onTap) {
+  Widget _buildOptionChip(OptionItem option, bool isSelected, int? maxServings,
+      VoidCallback onTap) {
     final bool hasStock = maxServings != null;
     final bool outOfStock = hasStock && maxServings <= 0;
 
@@ -644,7 +662,8 @@ class _OptionSelectionBottomSheetState
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2E7D32),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),

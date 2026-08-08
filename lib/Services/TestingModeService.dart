@@ -126,7 +126,12 @@ class Col {
     // Check if already migrated by looking for the canteen doc
     final check =
         await fs.collection('zTesting_Canteens').doc('canteen375').get();
-    if (check.exists) return; // already migrated
+    if (check.exists) {
+      // Older testing-mode data may already contain the canteen copy but not
+      // the B2B root collection.  Migrate that collection independently.
+      await _migrateVoucherPrograms(fs);
+      return;
+    }
 
     debugPrint('[TestingMode] Migrating seed data …');
 
@@ -136,7 +141,10 @@ class Col {
     // 2. Migrate Members (flat)
     await _migrateFlat(fs, 'Members');
 
-    // 3. Migrate Canteens + subcollections
+    // 3. Migrate B2B programs and their operation ledgers.
+    await _migrateVoucherPrograms(fs);
+
+    // 4. Migrate Canteens + subcollections
     await _migrateCanteens(fs);
 
     debugPrint('[TestingMode] Migration complete.');
@@ -154,6 +162,39 @@ class Col {
     }
     await batch.commit();
     debugPrint('[TestingMode]   $source: ${snap.docs.length} docs copied.');
+  }
+
+  /// Copies voucherPrograms without mutating production.  Nested ledgers are
+  /// copied as well so testing mode can exercise idempotency against realistic
+  /// historical data.
+  static Future<void> _migrateVoucherPrograms(FirebaseFirestore fs) async {
+    final testCollection = fs.collection('zTesting_voucherPrograms');
+    final existing = await testCollection.limit(1).get();
+    if (existing.docs.isNotEmpty) return;
+
+    final source = await fs.collection('voucherPrograms').get();
+    for (final chunk in _chunkList(source.docs, 400)) {
+      final batch = fs.batch();
+      for (final doc in chunk) {
+        batch.set(testCollection.doc(doc.id), doc.data());
+      }
+      await batch.commit();
+    }
+    for (final doc in source.docs) {
+      for (final sub in ['redemptions', 'settlements', 'closures']) {
+        final nested = await doc.reference.collection(sub).get();
+        for (final chunk in _chunkList(nested.docs, 400)) {
+          final batch = fs.batch();
+          for (final child in chunk) {
+            batch.set(testCollection.doc(doc.id).collection(sub).doc(child.id),
+                child.data());
+          }
+          await batch.commit();
+        }
+      }
+    }
+    debugPrint(
+        '[TestingMode]   voucherPrograms: ${source.docs.length} docs copied.');
   }
 
   /// Deep-copy Canteens/canteen375 and all its subcollections.

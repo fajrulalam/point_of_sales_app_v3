@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Services/VoucherProgramService.dart';
+import 'package:point_of_sales_app_v3/Services/VoucherProgramAuditService.dart';
+import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
 class VoucherProgramScreen extends StatefulWidget {
   const VoucherProgramScreen({Key? key}) : super(key: key);
@@ -16,8 +18,7 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
   bool _isLoading = true;
   bool _showAll = false;
 
-  static final _fmt =
-      NumberFormat.decimalPattern('id_ID');
+  static final _fmt = NumberFormat.decimalPattern('id_ID');
 
   @override
   void initState() {
@@ -26,28 +27,56 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
   }
 
   Future<void> _loadPrograms() async {
-    setState(() => _isLoading = true);
-    final list = _showAll
-        ? await VoucherProgramService.getAllPrograms()
-        : await VoucherProgramService.getActivePrograms();
-    if (mounted) setState(() { _programs = list; _isLoading = false; });
+    if (mounted) setState(() => _isLoading = true);
+    try {
+      final list = _showAll
+          ? await VoucherProgramService.getAllPrograms()
+          : await VoucherProgramService.getActivePrograms();
+      if (mounted) {
+        setState(() {
+          _programs = list;
+          _isLoading = false;
+        });
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showError(
+          'Gagal memuat program: ${UserMessageService.fromError(error)}');
+    }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ));
   }
 
   String _fmt2(int v) => 'Rp ${_fmt.format(v)}';
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'paid': return Colors.green.shade700;
-      case 'closed': return Colors.grey.shade600;
-      default: return const Color(0xFF069494);
+      case 'paid':
+        return Colors.green.shade700;
+      case 'closed':
+        return Colors.grey.shade600;
+      default:
+        return const Color(0xFF069494);
     }
   }
 
   String _statusLabel(String status) {
     switch (status) {
-      case 'paid': return 'Lunas';
-      case 'closed': return 'Ditutup';
-      default: return 'Aktif';
+      case 'paid':
+        return 'Lunas';
+      case 'closed':
+        return 'Ditutup';
+      default:
+        return 'Aktif';
     }
   }
 
@@ -79,6 +108,11 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
               style: GoogleFonts.poppins(fontSize: 12),
             ),
           ),
+          IconButton(
+            tooltip: 'Audit B2B',
+            onPressed: _showAuditDialog,
+            icon: const Icon(Icons.fact_check_outlined),
+          ),
           const SizedBox(width: 8),
         ],
       ),
@@ -88,7 +122,8 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
         icon: const Icon(Icons.add, color: Colors.white),
         label: Text(
           'Buat Program',
-          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600),
+          style: GoogleFonts.poppins(
+              color: Colors.white, fontWeight: FontWeight.w600),
         ),
       ),
       body: _isLoading
@@ -111,16 +146,19 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey.shade400),
+          Icon(Icons.receipt_long_outlined,
+              size: 64, color: Colors.grey.shade400),
           const SizedBox(height: 16),
           Text(
             _showAll ? 'Belum ada program' : 'Tidak ada program aktif',
-            style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 15),
+            style:
+                GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 15),
           ),
           const SizedBox(height: 8),
           Text(
             'Tekan "+ Buat Program" untuk memulai',
-            style: GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 13),
+            style:
+                GoogleFonts.poppins(color: Colors.grey.shade400, fontSize: 13),
           ),
         ],
       ),
@@ -132,11 +170,14 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
     final name = program['programName'] ?? '';
     final institution = program['institutionName'] ?? '';
     final status = program['status'] ?? 'active';
-    final redeemed = (program['totalRedeemed'] ?? 0) as int;
-    final settled = (program['totalSettled'] ?? 0) as int;
+    final redeemed =
+        VoucherProgramService.parseAmount(program['totalRedeemed']);
+    final settled = VoucherProgramService.parseAmount(program['totalSettled']);
     final outstanding = redeemed - settled;
     final notes = program['notes'] ?? '';
-    final defaultNominal = (program['defaultNominal'] ?? 0) as int;
+    final defaultNominal =
+        VoucherProgramService.parseAmount(program['defaultNominal']);
+    final revision = VoucherProgramService.parseAmount(program['revision']);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -183,11 +224,13 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: _statusColor(status).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _statusColor(status).withOpacity(0.4)),
+                    border: Border.all(
+                        color: _statusColor(status).withOpacity(0.4)),
                   ),
                   child: Text(
                     _statusLabel(status),
@@ -204,7 +247,8 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
               const SizedBox(height: 6),
               Text(
                 notes,
-                style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade500),
+                style: GoogleFonts.poppins(
+                    fontSize: 12, color: Colors.grey.shade500),
               ),
             ],
             const SizedBox(height: 12),
@@ -228,15 +272,19 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton.icon(
-                  onPressed: () => _showEditDialog(id, name, institution, notes, defaultNominal),
+                  onPressed: status == 'closed'
+                      ? null
+                      : () => _showEditDialog(id, name, institution, notes,
+                          defaultNominal, revision, false),
                   icon: const Icon(Icons.edit_outlined, size: 16),
                   label: Text('Edit', style: GoogleFonts.poppins(fontSize: 12)),
                   style: TextButton.styleFrom(
                     foregroundColor: Colors.grey.shade700,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   ),
                 ),
-                if (status == 'active') ...[
+                if (status != 'closed' && outstanding > 0) ...[
                   const SizedBox(width: 4),
                   TextButton.icon(
                     onPressed: () => _showSettleDialog(id, name, outstanding),
@@ -245,17 +293,22 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
                         style: GoogleFonts.poppins(fontSize: 12)),
                     style: TextButton.styleFrom(
                       foregroundColor: const Color(0xFF069494),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
                     ),
                   ),
                   const SizedBox(width: 4),
+                ],
+                if (status != 'closed' && outstanding == 0) ...[
                   TextButton.icon(
-                    onPressed: () => _confirmSettle(id, name, outstanding),
+                    onPressed: () => _confirmClose(id, name),
                     icon: const Icon(Icons.archive_outlined, size: 16),
-                    label: Text('Tutup & Lunasi', style: GoogleFonts.poppins(fontSize: 12)),
+                    label: Text('Tutup Program',
+                        style: GoogleFonts.poppins(fontSize: 12)),
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.red.shade400,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
                     ),
                   ),
                 ],
@@ -305,82 +358,106 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
     final instCtrl = TextEditingController();
     final nominalCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
+    var processing = false;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Buat Program Baru',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _dialogTextField(nameCtrl, 'Nama Program', 'Cth: UNIPDU Fak. Bisnis'),
-              const SizedBox(height: 12),
-              _dialogTextField(instCtrl, 'Nama Institusi', 'Cth: UNIPDU'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: nominalCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                  TextInputFormatter.withFunction((old, newVal) {
-                    if (newVal.text.isEmpty) return newVal;
-                    final plain = newVal.text.replaceAll('.', '');
-                    if (plain.isEmpty) return newVal;
-                    final formatted =
-                        NumberFormat('#,###', 'id_ID').format(int.parse(plain));
-                    return TextEditingValue(
-                      text: formatted,
-                      selection: TextSelection.collapsed(offset: formatted.length),
-                    );
-                  }),
-                ],
-                decoration: InputDecoration(
-                  labelText: 'Nominal Voucher (Rp)',
-                  hintText: 'Cth: 15000',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setStateDialog) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Buat Program Baru',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _dialogTextField(
+                    nameCtrl, 'Nama Program', 'Cth: UNIPDU Fak. Bisnis'),
+                const SizedBox(height: 12),
+                _dialogTextField(instCtrl, 'Nama Institusi', 'Cth: UNIPDU'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nominalCtrl,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    TextInputFormatter.withFunction((old, newVal) {
+                      if (newVal.text.isEmpty) return newVal;
+                      final plain = newVal.text.replaceAll('.', '');
+                      if (plain.isEmpty) return newVal;
+                      final formatted = NumberFormat('#,###', 'id_ID')
+                          .format(int.parse(plain));
+                      return TextEditingValue(
+                        text: formatted,
+                        selection:
+                            TextSelection.collapsed(offset: formatted.length),
+                      );
+                    }),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Nominal Voucher (Rp)',
+                    hintText: 'Cth: 15000',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              _dialogTextField(notesCtrl, 'Catatan (opsional)', ''),
-            ],
+                const SizedBox(height: 12),
+                _dialogTextField(notesCtrl, 'Catatan (opsional)', ''),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Batal', style: GoogleFonts.poppins()),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF069494),
+                  foregroundColor: Colors.white),
+              onPressed: () async {
+                if (processing) return;
+                final name = nameCtrl.text.trim();
+                final inst = instCtrl.text.trim();
+                if (name.isEmpty || inst.isEmpty) return;
+                final nominal =
+                    int.tryParse(nominalCtrl.text.replaceAll('.', '')) ?? 0;
+                setStateDialog(() => processing = true);
+                try {
+                  await VoucherProgramService.createProgram(
+                    programName: name,
+                    institutionName: inst,
+                    defaultNominal: nominal,
+                    notes: notesCtrl.text.trim(),
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await _loadPrograms();
+                } catch (error) {
+                  setStateDialog(() => processing = false);
+                  _showError(
+                      'Gagal membuat program: ${UserMessageService.fromError(error)}');
+                }
+              },
+              child: processing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text('Buat',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Batal', style: GoogleFonts.poppins()),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF069494),
-                foregroundColor: Colors.white),
-            onPressed: () async {
-              final name = nameCtrl.text.trim();
-              final inst = instCtrl.text.trim();
-              if (name.isEmpty || inst.isEmpty) return;
-              final nominal = int.tryParse(nominalCtrl.text.replaceAll('.', '')) ?? 0;
-              Navigator.pop(ctx);
-              await VoucherProgramService.createProgram(
-                programName: name,
-                institutionName: inst,
-                defaultNominal: nominal,
-                notes: notesCtrl.text.trim(),
-              );
-              _loadPrograms();
-            },
-            child: Text('Buat', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-          ),
-        ],
       ),
     );
   }
 
-  void _showEditDialog(
-      String id, String name, String institution, String notes, int defaultNominal) {
+  void _showEditDialog(String id, String name, String institution, String notes,
+      int defaultNominal, int revision, bool isClosed) {
     final nameCtrl = TextEditingController(text: name);
     final instCtrl = TextEditingController(text: institution);
     final nominalCtrl = TextEditingController(
@@ -389,78 +466,102 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
           : '',
     );
     final notesCtrl = TextEditingController(text: notes);
+    var processing = false;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Edit Program',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _dialogTextField(nameCtrl, 'Nama Program', ''),
-              const SizedBox(height: 12),
-              _dialogTextField(instCtrl, 'Nama Institusi', ''),
-              const SizedBox(height: 12),
-              TextField(
-                controller: nominalCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                  TextInputFormatter.withFunction((old, newVal) {
-                    if (newVal.text.isEmpty) return newVal;
-                    final plain = newVal.text.replaceAll('.', '');
-                    if (plain.isEmpty) return newVal;
-                    final formatted =
-                        NumberFormat('#,###', 'id_ID').format(int.parse(plain));
-                    return TextEditingValue(
-                      text: formatted,
-                      selection: TextSelection.collapsed(offset: formatted.length),
-                    );
-                  }),
-                ],
-                decoration: InputDecoration(
-                  labelText: 'Nominal Voucher (Rp)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setStateDialog) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Edit Program',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _dialogTextField(nameCtrl, 'Nama Program', ''),
+                const SizedBox(height: 12),
+                _dialogTextField(instCtrl, 'Nama Institusi', ''),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nominalCtrl,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    TextInputFormatter.withFunction((old, newVal) {
+                      if (newVal.text.isEmpty) return newVal;
+                      final plain = newVal.text.replaceAll('.', '');
+                      if (plain.isEmpty) return newVal;
+                      final formatted = NumberFormat('#,###', 'id_ID')
+                          .format(int.parse(plain));
+                      return TextEditingValue(
+                        text: formatted,
+                        selection:
+                            TextSelection.collapsed(offset: formatted.length),
+                      );
+                    }),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Nominal Voucher (Rp)',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              _dialogTextField(notesCtrl, 'Catatan (opsional)', ''),
-            ],
+                const SizedBox(height: 12),
+                _dialogTextField(notesCtrl, 'Catatan (opsional)', ''),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Batal', style: GoogleFonts.poppins()),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF069494),
+                  foregroundColor: Colors.white),
+              onPressed: () async {
+                if (processing || isClosed) return;
+                final n = nameCtrl.text.trim();
+                final i = instCtrl.text.trim();
+                if (n.isEmpty || i.isEmpty) return;
+                final nominal =
+                    int.tryParse(nominalCtrl.text.replaceAll('.', '')) ?? 0;
+                setStateDialog(() => processing = true);
+                try {
+                  await VoucherProgramService.updateProgram(
+                    id,
+                    {
+                      'programName': n,
+                      'institutionName': i,
+                      'defaultNominal': nominal,
+                      'notes': notesCtrl.text.trim(),
+                    },
+                    expectedRevision: revision,
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await _loadPrograms();
+                } catch (error) {
+                  setStateDialog(() => processing = false);
+                  _showError(
+                      'Gagal menyimpan program: ${UserMessageService.fromError(error)}');
+                }
+              },
+              child: processing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text('Simpan',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Batal', style: GoogleFonts.poppins()),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF069494),
-                foregroundColor: Colors.white),
-            onPressed: () async {
-              final n = nameCtrl.text.trim();
-              final i = instCtrl.text.trim();
-              if (n.isEmpty || i.isEmpty) return;
-              final nominal =
-                  int.tryParse(nominalCtrl.text.replaceAll('.', '')) ?? 0;
-              Navigator.pop(ctx);
-              await VoucherProgramService.updateProgram(id, {
-                'programName': n,
-                'institutionName': i,
-                'defaultNominal': nominal,
-                'notes': notesCtrl.text.trim(),
-              });
-              _loadPrograms();
-            },
-            child: Text('Simpan',
-                style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-          ),
-        ],
       ),
     );
   }
@@ -468,6 +569,7 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
   void _showSettleDialog(String id, String name, int outstanding) {
     final amountCtrl = TextEditingController();
     String selectedMethod = 'Cash';
+    var processing = false;
 
     showDialog(
       context: context,
@@ -508,12 +610,12 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
                       if (newVal.text.isEmpty) return newVal;
                       final plain = newVal.text.replaceAll('.', '');
                       if (plain.isEmpty) return newVal;
-                      final formatted =
-                          NumberFormat('#,###', 'id_ID').format(int.parse(plain));
+                      final formatted = NumberFormat('#,###', 'id_ID')
+                          .format(int.parse(plain));
                       return TextEditingValue(
                         text: formatted,
-                        selection: TextSelection.collapsed(
-                            offset: formatted.length),
+                        selection:
+                            TextSelection.collapsed(offset: formatted.length),
                       );
                     }),
                   ],
@@ -562,30 +664,55 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
                   backgroundColor: const Color(0xFF069494),
                   foregroundColor: Colors.white),
               onPressed: () async {
+                if (processing) return;
                 final plain =
                     amountCtrl.text.replaceAll('.', '').replaceAll(',', '');
                 final amount = int.tryParse(plain) ?? 0;
-                if (amount <= 0) return;
-                Navigator.pop(ctx);
-                await VoucherProgramService.settleProgram(
-                  programId: id,
-                  settledAmount: amount,
-                  paymentMethod: selectedMethod,
-                );
-                _loadPrograms();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(
-                      'Pembayaran ${_fmt2(amount)} via $selectedMethod dicatat',
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                    ),
-                    backgroundColor: Colors.green,
-                  ));
+                if (amount <= 0) {
+                  _showError('Jumlah pembayaran harus lebih dari 0.');
+                  return;
+                }
+                if (amount > outstanding) {
+                  _showError('Pembayaran melebihi sisa piutang.');
+                  return;
+                }
+                setStateDialog(() => processing = true);
+                try {
+                  await VoucherProgramService.settleProgram(
+                    programId: id,
+                    settledAmount: amount,
+                    paymentMethod: selectedMethod,
+                    operationId:
+                        'ui_settlement_${id}_${DateTime.now().microsecondsSinceEpoch}',
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await _loadPrograms();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context)
+                      ..clearSnackBars()
+                      ..showSnackBar(SnackBar(
+                        content: Text(
+                          'Pembayaran ${_fmt2(amount)} via $selectedMethod dicatat',
+                          style:
+                              GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                        ),
+                        backgroundColor: Colors.green,
+                      ));
+                  }
+                } catch (error) {
+                  setStateDialog(() => processing = false);
+                  _showError(
+                      'Gagal mencatat pembayaran: ${UserMessageService.fromError(error)}');
                 }
               },
-              child: Text('Simpan',
-                  style:
-                      GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              child: processing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text('Simpan',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
             ),
           ],
         ),
@@ -593,55 +720,19 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
     );
   }
 
-  void _confirmSettle(String id, String name, int outstanding) {
-    String selectedMethod = 'Cash';
-
+  void _confirmClose(String id, String name) {
+    var processing = false;
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setStateDialog) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('Tutup & Lunasi Program?',
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Tutup Program?',
               style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Program "$name" akan ditutup dan sisa piutang sebesar ${_fmt2(outstanding)} akan dilunasi.',
-                  style: GoogleFonts.poppins(fontSize: 14),
-                ),
-                if (outstanding > 0) ...[
-                  const SizedBox(height: 16),
-                  Text('Metode Pembayaran',
-                      style: GoogleFonts.poppins(
-                          fontSize: 13, color: Colors.grey.shade700)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: ['Cash', 'QRIS', 'Online'].map((m) {
-                      return ChoiceChip(
-                        label: Text(m),
-                        selected: selectedMethod == m,
-                        selectedColor: const Color(0xFFC8E6C9),
-                        labelStyle: GoogleFonts.poppins(
-                          fontSize: 13,
-                          fontWeight: selectedMethod == m
-                              ? FontWeight.w600
-                              : FontWeight.w400,
-                          color: selectedMethod == m
-                              ? const Color(0xFF2E7D32)
-                              : Colors.black87,
-                        ),
-                        onSelected: (_) =>
-                            setStateDialog(() => selectedMethod = m),
-                      );
-                    }).toList(),
-                  ),
-                ],
-              ],
-            ),
+          content: Text(
+            'Program "$name" akan menjadi tidak dapat diubah. Pastikan seluruh piutang sudah lunas.',
+            style: GoogleFonts.poppins(fontSize: 14),
           ),
           actions: [
             TextButton(
@@ -653,22 +744,105 @@ class _VoucherProgramScreenState extends State<VoucherProgramScreen> {
                   backgroundColor: Colors.red.shade600,
                   foregroundColor: Colors.white),
               onPressed: () async {
-                Navigator.pop(ctx);
-                if (outstanding > 0) {
-                  await VoucherProgramService.settleProgram(
-                    programId: id,
-                    settledAmount: outstanding,
-                    paymentMethod: selectedMethod,
+                if (processing) return;
+                setStateDialog(() => processing = true);
+                try {
+                  await VoucherProgramService.closeProgram(
+                    id,
+                    operationId:
+                        'ui_close_${id}_${DateTime.now().microsecondsSinceEpoch}',
                   );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await _loadPrograms();
+                } catch (error) {
+                  setStateDialog(() => processing = false);
+                  _showError(
+                      'Gagal menutup program: ${UserMessageService.fromError(error)}');
                 }
-                await VoucherProgramService.closeProgram(id);
-                _loadPrograms();
               },
-              child: Text('Tutup & Lunasi',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              child: processing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text('Tutup Program',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showAuditDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => FutureBuilder<List<VoucherProgramAuditFinding>>(
+        future: VoucherProgramAuditService.run(),
+        builder: (ctx, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const AlertDialog(
+              title: Text('Audit B2B'),
+              content: SizedBox(
+                height: 70,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            );
+          }
+          if (snapshot.hasError) {
+            return AlertDialog(
+              title: const Text('Audit B2B'),
+              content: Text(
+                  'Audit gagal dijalankan: ${UserMessageService.fromError(snapshot.error)}'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Tutup'),
+                ),
+              ],
+            );
+          }
+          final findings = snapshot.data ?? const [];
+          return AlertDialog(
+            title: Text('Audit B2B (${findings.length})'),
+            content: SizedBox(
+              width: 560,
+              child: findings.isEmpty
+                  ? const Text(
+                      'Tidak ditemukan temuan pada data yang diperiksa.')
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: findings.length,
+                      separatorBuilder: (_, __) => const Divider(height: 12),
+                      itemBuilder: (_, index) {
+                        final finding = findings[index];
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            finding.severity == 'error'
+                                ? Icons.error_outline
+                                : Icons.warning_amber_outlined,
+                            color: finding.severity == 'error'
+                                ? Colors.red
+                                : Colors.orange,
+                          ),
+                          title: Text(finding.message),
+                          subtitle: Text(
+                              '${finding.code}${finding.documentId == null ? '' : ' • ${finding.documentId}'}'),
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Tutup'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

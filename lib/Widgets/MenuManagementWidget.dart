@@ -229,28 +229,32 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
 
       if (mounted) {
         Navigator.pop(context); // Remove loading indicator
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Migrasi menu berhasil diselesaikan',
-              style: GoogleFonts.poppins(),
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Migrasi menu berhasil diselesaikan',
+                style: GoogleFonts.poppins(),
+              ),
+              backgroundColor: Colors.green.shade700,
             ),
-            backgroundColor: Colors.green.shade700,
-          ),
-        );
+          );
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context); // Remove loading indicator
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Gagal melakukan migrasi: ${UserMessageService.fromError(e)}',
-              style: GoogleFonts.poppins(),
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Gagal melakukan migrasi: ${UserMessageService.fromError(e)}',
+                style: GoogleFonts.poppins(),
+              ),
+              backgroundColor: Colors.red.shade700,
             ),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
+          );
       }
     }
   }
@@ -1518,19 +1522,21 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
                 if (mounted) setState(() {});
                 Navigator.pop(context);
 
-                ScaffoldMessenger.of(this.context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'Urutan item di $_selectedCategory berhasil disimpan',
-                      style: GoogleFonts.poppins(),
+                ScaffoldMessenger.of(this.context)
+                  ..clearSnackBars()
+                  ..showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Urutan item di $_selectedCategory berhasil disimpan',
+                        style: GoogleFonts.poppins(),
+                      ),
+                      backgroundColor: const Color(0xFF2E7D32),
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
-                    backgroundColor: const Color(0xFF2E7D32),
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                );
+                  );
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2E7D32),
@@ -1893,13 +1899,15 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
             TextButton(
               onPressed: () {
                 if (group.linkedMenuItems.isNotEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                          'Tidak bisa hapus group yang masih terhubung ke menu'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
+                  ScaffoldMessenger.of(context)
+                    ..clearSnackBars()
+                    ..showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                            'Tidak bisa hapus group yang masih terhubung ke menu'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
                   return;
                 }
                 Navigator.pop(context);
@@ -2146,12 +2154,14 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
         inventoryItems.where((i) => !linkedIds.contains(i.id)).toList();
 
     if (available.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Semua bahan baku sudah ditambahkan.',
-              style: GoogleFonts.poppins()),
-        ),
-      );
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Semua bahan baku sudah ditambahkan.',
+                style: GoogleFonts.poppins()),
+          ),
+        );
       return;
     }
 

@@ -61,7 +61,7 @@ class _EditOrderScreenState extends State<EditOrderScreen> {
                 Icon(Icons.receipt_long, size: 64, color: Colors.grey.shade400),
                 const SizedBox(height: 16),
                 Text(
-                  'Belum ada pesanan hari ini',
+                  'Tidak ada pesanan aktif sekarang',
                   style: GoogleFonts.poppins(color: Colors.grey.shade500),
                 ),
               ],

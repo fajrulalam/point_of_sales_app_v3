@@ -232,14 +232,15 @@ class ShoppingService {
           .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
           .where('date', isLessThanOrEqualTo: Timestamp.fromDate(endDate));
     } else {
-      // Default performance: Only show today's orders
+      // Default performance: Only show the last 7 days of orders
       final now = DateTime.now();
-      final startOfToday = DateTime(now.year, now.month, now.day);
+      final startOfRange = DateTime(now.year, now.month, now.day)
+          .subtract(const Duration(days: 6));
       final endOfToday = DateTime(now.year, now.month, now.day, 23, 59, 59);
 
       query = query
           .where('date',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfRange))
           .where('date', isLessThanOrEqualTo: Timestamp.fromDate(endOfToday));
     }
 

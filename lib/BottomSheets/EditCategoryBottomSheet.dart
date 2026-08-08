@@ -244,13 +244,15 @@ class _EditCategoryBottomSheetState extends State<EditCategoryBottomSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       print("Error saving category: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Gagal menyimpan kategori: ${UserMessageService.fromError(e)}',
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Gagal menyimpan kategori: ${UserMessageService.fromError(e)}',
+            ),
           ),
-        ),
-      );
+        );
     } finally {
       if (mounted) setState(() => isUploading = false);
     }

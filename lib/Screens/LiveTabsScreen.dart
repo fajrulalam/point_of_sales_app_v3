@@ -550,9 +550,11 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
 
   Future<void> _handleSettleOpenBill(OpenBill bill) async {
     if (widget.homeController == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pengendali utama tidak ditemukan')),
-      );
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(content: Text('Pengendali utama tidak ditemukan')),
+        );
       return;
     }
 
@@ -1001,15 +1003,17 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
     if (widget.onAcceptOrder != null) {
       widget.onAcceptOrder!(order);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Fitur terima pesanan sedang dalam pengembangan',
-            style: GoogleFonts.poppins(),
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Fitur terima pesanan sedang dalam pengembangan',
+              style: GoogleFonts.poppins(),
+            ),
+            backgroundColor: Colors.orange,
           ),
-          backgroundColor: Colors.orange,
-        ),
-      );
+        );
     }
   }
 
@@ -1119,36 +1123,40 @@ class _LiveTabsScreenState extends State<LiveTabsScreen>
       await _selfOrderService.declineOrder(order.id, finalReason);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 12),
-                Text(
-                  'Pesanan ${order.orderCode} berhasil ditolak',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                ),
-              ],
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Pesanan ${order.orderCode} berhasil ditolak',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        );
+          );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Gagal menolak pesanan: ${UserMessageService.fromError(e)}',
-              style: GoogleFonts.poppins(),
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Gagal menolak pesanan: ${UserMessageService.fromError(e)}',
+                style: GoogleFonts.poppins(),
+              ),
+              backgroundColor: Colors.red,
             ),
-            backgroundColor: Colors.red,
-          ),
-        );
+          );
       }
     }
   }

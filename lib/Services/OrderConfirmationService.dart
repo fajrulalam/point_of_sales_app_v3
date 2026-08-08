@@ -62,12 +62,14 @@ class OrderConfirmationService {
     final activePesananList =
         pesananList.where((p) => p.totalQuantity > 0).toList();
     if (activePesananList.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tidak ada item pesanan untuk diproses'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Tidak ada item pesanan untuk diproses'),
+            backgroundColor: Colors.red,
+          ),
+        );
       return;
     }
 
@@ -225,12 +227,14 @@ class OrderConfirmationService {
     final activePesananList =
         pesananList.where((p) => p.totalQuantity > 0).toList();
     if (activePesananList.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tidak ada item pesanan untuk diproses'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Tidak ada item pesanan untuk diproses'),
+            backgroundColor: Colors.red,
+          ),
+        );
       return;
     }
 
@@ -373,6 +377,15 @@ class OrderConfirmationService {
     var loaderPopped = false;
     try {
       final subTotal = totalHarga - biayaBungkus;
+      final b2bPayment = voucherProgramId == null
+          ? null
+          : B2BPaymentBreakdown.calculate(
+              billTotal: totalHarga,
+              requestedNominal: programNominal,
+              programId: voucherProgramId,
+              extraPaymentMethod: programExtraPaymentMethod,
+              qrisAmount: programExtraSplitQrisAmount,
+            );
       final itemCounts = <String, int>{};
       for (final item in pesananList) {
         itemCounts[item.namaPesanan] =
@@ -391,22 +404,12 @@ class OrderConfirmationService {
       for (final entry in itemCounts.entries) {
         map[entry.key] = FieldValue.increment(entry.value);
       }
-      if (isSplitPayment) {
+      if (b2bPayment != null) {
+        _addB2BFinancialFields(map, b2bPayment);
+        _addPaymentBreakdown(map, b2bPayment);
+      } else if (isSplitPayment) {
         _incrementPaymentAccumulator(map, 'Cash', splitCashAmount);
         _incrementPaymentAccumulator(map, 'QRIS', splitQrisAmount);
-      } else if (voucherProgramId != null) {
-        final remaining = totalHarga - programNominal;
-        if (remaining > 0 && programExtraPaymentMethod != null) {
-          if (programExtraPaymentMethod == 'Cash + QRIS') {
-            _incrementPaymentAccumulator(
-                map, 'Cash', remaining - programExtraSplitQrisAmount);
-            _incrementPaymentAccumulator(
-                map, 'QRIS', programExtraSplitQrisAmount);
-          } else {
-            _incrementPaymentAccumulator(
-                map, programExtraPaymentMethod, remaining);
-          }
-        }
       } else if (transactionMethod != null) {
         _incrementPaymentAccumulator(map, transactionMethod, totalHarga);
       }
@@ -435,6 +438,19 @@ class OrderConfirmationService {
           return true;
         },
         writeOperation: (transaction, customerNumber, preparation) async {
+          VoucherProgramRedemptionPreparation? redemption;
+          if (b2bPayment != null) {
+            redemption =
+                await VoucherProgramService.prepareRedemptionInTransaction(
+              transaction: transaction,
+              programId: b2bPayment.programId!,
+              requestedNominal: b2bPayment.nominal,
+              billTotal: totalHarga,
+              operationId: stableOperationId,
+              sourceType: 'self_order',
+              sourceId: selfOrder.id,
+            );
+          }
           if (appliedVoucherCode != null) {
             await _appendVoucherToBatchOrTransaction(
               appliedVoucherCode,
@@ -443,11 +459,12 @@ class OrderConfirmationService {
               usedAmount: discountAmount,
             );
           }
-          if (voucherProgramId != null) {
-            VoucherProgramService.addRedemptionToTransaction(
+          if (redemption != null) {
+            VoucherProgramService.commitRedemptionInTransaction(
               transaction: transaction,
-              programId: voucherProgramId,
-              amount: programNominal > 0 ? programNominal : totalHarga,
+              preparation: redemption,
+              sourceType: 'self_order',
+              sourceId: selfOrder.id,
             );
           }
           transaction.update(selfOrderRef, {
@@ -495,17 +512,17 @@ class OrderConfirmationService {
             'inventoryAuditFlags':
                 preparation.auditFlags.map((flag) => flag.toMap()).toList(),
           };
-          if (isSplitPayment) {
+          if (b2bPayment != null) {
+            status.addAll(b2bPayment.toStatusFields(
+              operationId: stableOperationId,
+            ));
+          } else if (isSplitPayment) {
             status['paymentMethod'] = 'Cash/QRIS';
             status['isSplitPayment'] = true;
             status['splitDetails'] = {
               'cashAmount': splitCashAmount,
               'qrisAmount': splitQrisAmount,
             };
-          } else if (voucherProgramId != null) {
-            status['paymentMethod'] = 'Program';
-            status['voucherProgramId'] = voucherProgramId;
-            status['programNominal'] = programNominal;
           } else {
             status['paymentMethod'] = transactionMethod;
           }
@@ -542,12 +559,15 @@ class OrderConfirmationService {
       SelfOrderService.instance.scheduleDeletion(selfOrder.id);
       if (isMember && memberId != null) {
         _incrementMemberPoints(memberId, totalHarga,
-            voucherProgramId: voucherProgramId, programNominal: programNominal);
+            voucherProgramId: voucherProgramId,
+            programNominal: b2bPayment?.nominal ?? 0);
         _updateCompetitionRecord(memberId, totalHarga,
-            voucherProgramId: voucherProgramId, programNominal: programNominal);
+            voucherProgramId: voucherProgramId,
+            programNominal: b2bPayment?.nominal ?? 0);
         _processPeriodicCashbackCampaign(
             memberId, totalHarga, customerNameController.text,
-            voucherProgramId: voucherProgramId, programNominal: programNominal);
+            voucherProgramId: voucherProgramId,
+            programNominal: b2bPayment?.nominal ?? 0);
       }
       await printReceipt(
         customPesananList: pesananList,
@@ -579,23 +599,24 @@ class OrderConfirmationService {
         setJumlahItem: setJumlahItem,
         splitCashAmount: isSplitPayment
             ? splitCashAmount
-            : (voucherProgramId != null &&
-                    programExtraPaymentMethod == 'Cash + QRIS'
-                ? (totalHarga - programNominal) - programExtraSplitQrisAmount
+            : (b2bPayment != null && programExtraPaymentMethod == 'Cash + QRIS'
+                ? b2bPayment.cashAmount
                 : 0),
-        programNominal: programNominal,
+        programNominal: b2bPayment?.nominal ?? 0,
         voucherRemaining: voucherRemaining,
       );
       onOrderCompleted?.call();
     } catch (error) {
       if (context.mounted && !loaderPopped) Navigator.pop(context);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  'Gagal memproses pesanan: ${UserMessageService.fromError(error)}'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+                content: Text(
+                    'Gagal memproses pesanan: ${UserMessageService.fromError(error)}'),
+                backgroundColor: Colors.red),
+          );
       }
     }
   }
@@ -934,11 +955,11 @@ class OrderConfirmationService {
         setJumlahItem: setJumlahItem,
         splitCashAmount: isSplitPayment
             ? splitCashAmount
-            : (voucherProgramId != null &&
+            : (b2bPayment != null &&
                     programExtraPaymentMethod == 'Cash + QRIS'
-                ? (totalHarga - programNominal) - programExtraSplitQrisAmount
+                ? b2bPayment.cashAmount
                 : 0),
-        programNominal: programNominal,
+        programNominal: b2bPayment?.nominal ?? 0,
         voucherRemaining: voucherRemaining,
       );
 
@@ -952,7 +973,7 @@ class OrderConfirmationService {
           .updateStatus(selfOrder.id, SelfOrderStatus.unpaid);
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context)..clearSnackBars()..showSnackBar(
           SnackBar(
             content: Text(
                 'Gagal memproses pesanan: ${UserMessageService.fromError(error)}'),
@@ -1390,6 +1411,15 @@ class OrderConfirmationService {
     var loaderPopped = false;
     try {
       final subTotal = totalHarga - biayaBungkus;
+      final b2bPayment = voucherProgramId == null
+          ? null
+          : B2BPaymentBreakdown.calculate(
+              billTotal: totalHarga,
+              requestedNominal: programNominal,
+              programId: voucherProgramId,
+              extraPaymentMethod: programExtraPaymentMethod,
+              qrisAmount: programExtraSplitQrisAmount,
+            );
       final itemCounts = <String, int>{};
       for (final item in pesananList) {
         itemCounts[item.namaPesanan] =
@@ -1407,22 +1437,12 @@ class OrderConfirmationService {
       for (final entry in itemCounts.entries) {
         map[entry.key] = FieldValue.increment(entry.value);
       }
-      if (isSplitPayment) {
+      if (b2bPayment != null) {
+        _addB2BFinancialFields(map, b2bPayment);
+        _addPaymentBreakdown(map, b2bPayment);
+      } else if (isSplitPayment) {
         _incrementPaymentAccumulator(map, 'Cash', splitCashAmount);
         _incrementPaymentAccumulator(map, 'QRIS', splitQrisAmount);
-      } else if (voucherProgramId != null) {
-        final remaining = totalHarga - programNominal;
-        if (remaining > 0 && programExtraPaymentMethod != null) {
-          if (programExtraPaymentMethod == 'Cash + QRIS') {
-            _incrementPaymentAccumulator(
-                map, 'Cash', remaining - programExtraSplitQrisAmount);
-            _incrementPaymentAccumulator(
-                map, 'QRIS', programExtraSplitQrisAmount);
-          } else {
-            _incrementPaymentAccumulator(
-                map, programExtraPaymentMethod, remaining);
-          }
-        }
       } else if (transactionMethod != null) {
         _incrementPaymentAccumulator(map, transactionMethod, totalHarga);
       }
@@ -1435,6 +1455,19 @@ class OrderConfirmationService {
         menuMap: menuMap,
         optionGroupLookup: optionLookup,
         writeOperation: (transaction, customerNumber, preparation) async {
+          VoucherProgramRedemptionPreparation? redemption;
+          if (b2bPayment != null) {
+            redemption =
+                await VoucherProgramService.prepareRedemptionInTransaction(
+              transaction: transaction,
+              programId: b2bPayment.programId!,
+              requestedNominal: b2bPayment.nominal,
+              billTotal: totalHarga,
+              operationId: stableOperationId,
+              sourceType: 'sale',
+              sourceId: stableOperationId,
+            );
+          }
           if (appliedVoucherCode != null) {
             await _appendVoucherToBatchOrTransaction(
               appliedVoucherCode,
@@ -1443,11 +1476,12 @@ class OrderConfirmationService {
               usedAmount: discountAmount,
             );
           }
-          if (voucherProgramId != null) {
-            VoucherProgramService.addRedemptionToTransaction(
+          if (redemption != null) {
+            VoucherProgramService.commitRedemptionInTransaction(
               transaction: transaction,
-              programId: voucherProgramId,
-              amount: programNominal > 0 ? programNominal : totalHarga,
+              preparation: redemption,
+              sourceType: 'sale',
+              sourceId: stableOperationId,
             );
           }
           InventoryService().queuePreparedStockDeltas(transaction, preparation);
@@ -1489,18 +1523,17 @@ class OrderConfirmationService {
             'inventoryAuditFlags':
                 preparation.auditFlags.map((flag) => flag.toMap()).toList(),
           };
-          if (isSplitPayment) {
+          if (b2bPayment != null) {
+            status.addAll(b2bPayment.toStatusFields(
+              operationId: stableOperationId,
+            ));
+          } else if (isSplitPayment) {
             status['paymentMethod'] = 'Cash/QRIS';
             status['isSplitPayment'] = true;
             status['splitDetails'] = {
               'cashAmount': splitCashAmount,
               'qrisAmount': splitQrisAmount,
             };
-          } else if (voucherProgramId != null) {
-            status['paymentMethod'] = 'Program';
-            status['voucherProgramId'] = voucherProgramId;
-            status['programNominal'] = programNominal;
-            status['programExtraPaymentMethod'] = programExtraPaymentMethod;
           } else {
             status['paymentMethod'] = transactionMethod;
           }
@@ -1538,12 +1571,15 @@ class OrderConfirmationService {
 
       if (isMember && memberId != null) {
         _incrementMemberPoints(memberId, totalHarga,
-            voucherProgramId: voucherProgramId, programNominal: programNominal);
+            voucherProgramId: voucherProgramId,
+            programNominal: b2bPayment?.nominal ?? 0);
         _updateCompetitionRecord(memberId, totalHarga,
-            voucherProgramId: voucherProgramId, programNominal: programNominal);
+            voucherProgramId: voucherProgramId,
+            programNominal: b2bPayment?.nominal ?? 0);
         _processPeriodicCashbackCampaign(
             memberId, totalHarga, customerNameController.text,
-            voucherProgramId: voucherProgramId, programNominal: programNominal);
+            voucherProgramId: voucherProgramId,
+            programNominal: b2bPayment?.nominal ?? 0);
       }
       await printReceipt(
         customPesananList: pesananList,
@@ -1576,23 +1612,24 @@ class OrderConfirmationService {
         setJumlahItem: setJumlahItem,
         splitCashAmount: isSplitPayment
             ? splitCashAmount
-            : (voucherProgramId != null &&
-                    programExtraPaymentMethod == 'Cash + QRIS'
-                ? (totalHarga - programNominal) - programExtraSplitQrisAmount
+            : (b2bPayment != null && programExtraPaymentMethod == 'Cash + QRIS'
+                ? b2bPayment.cashAmount
                 : 0),
-        programNominal: programNominal,
+        programNominal: b2bPayment?.nominal ?? 0,
         voucherRemaining: voucherRemaining,
         onSelectedMemberChanged: onSelectedMemberChanged,
       );
     } catch (error) {
       if (context.mounted && !loaderPopped) Navigator.pop(context);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  'Gagal memproses pesanan: ${UserMessageService.fromError(error)}'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+                content: Text(
+                    'Gagal memproses pesanan: ${UserMessageService.fromError(error)}'),
+                backgroundColor: Colors.red),
+          );
       }
     }
   }
@@ -2000,11 +2037,13 @@ class OrderConfirmationService {
           : 0;
       if (currentTotal + totalHarga > creditLimit) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-                Text('Total tagihan melebihi batas kredit (Rp $creditLimit).'),
-            backgroundColor: Colors.red,
-          ));
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(SnackBar(
+              content: Text(
+                  'Total tagihan melebihi batas kredit (Rp $creditLimit).'),
+              backgroundColor: Colors.red,
+            ));
         }
         return;
       }
@@ -2160,12 +2199,14 @@ class OrderConfirmationService {
     } catch (error) {
       if (context.mounted && !loaderPopped) Navigator.pop(context);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  'Gagal menyimpan tagihan: ${UserMessageService.fromError(error)}'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+                content: Text(
+                    'Gagal menyimpan tagihan: ${UserMessageService.fromError(error)}'),
+                backgroundColor: Colors.red),
+          );
       }
     }
   }
@@ -2244,7 +2285,7 @@ class OrderConfirmationService {
           menu, optionIngredients, pesanan.totalQuantity);
       if (!availability.isAvailable) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          ScaffoldMessenger.of(context)..clearSnackBars()..showSnackBar(SnackBar(
               content: Text('Stok tidak cukup untuk ${pesanan.namaPesanan}'),
               backgroundColor: Colors.red));
         }
@@ -2277,7 +2318,7 @@ class OrderConfirmationService {
       if (newTotal > creditLimit) {
         Navigator.pop(context);
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          ScaffoldMessenger.of(context)..clearSnackBars()..showSnackBar(SnackBar(
             content: Text(
                 'Total tagihan (Rp $newTotal) melebihi batas kredit (Rp $creditLimit). Selesaikan tagihan yang ada terlebih dahulu.'),
             backgroundColor: Colors.red,
@@ -2366,7 +2407,7 @@ class OrderConfirmationService {
     } catch (e) {
       Navigator.pop(context);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context)..clearSnackBars()..showSnackBar(
             SnackBar(
                 content: Text(UserMessageService.fromError(e)),
                 backgroundColor: Colors.red));
@@ -2409,6 +2450,24 @@ class OrderConfirmationService {
     } else if (method == 'Online') {
       map['totalOnline'] = FieldValue.increment(amount);
     }
+  }
+
+  static void _addPaymentBreakdown(
+      Map<String, dynamic> map, B2BPaymentBreakdown breakdown) {
+    if (breakdown.cashAmount > 0) {
+      _incrementPaymentAccumulator(map, 'Cash', breakdown.cashAmount);
+    }
+    if (breakdown.qrisAmount > 0) {
+      _incrementPaymentAccumulator(map, 'QRIS', breakdown.qrisAmount);
+    }
+    if (breakdown.onlineAmount > 0) {
+      _incrementPaymentAccumulator(map, 'Online', breakdown.onlineAmount);
+    }
+  }
+
+  static void _addB2BFinancialFields(
+      Map<String, dynamic> map, B2BPaymentBreakdown breakdown) {
+    map.addAll(breakdown.toFinancialFields());
   }
 
   static Future<void> _showSuccessDialog({
@@ -3397,6 +3456,7 @@ class OrderConfirmationService {
         programExtraPaymentMethod: result['programExtraPaymentMethod'],
         programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
         operationId: 'settlement_${openBill.statusDocId ?? openBill.memberId}',
+        expectedOrderRevision: openBill.orderRevision,
       );
     } else {
       uangYangDiterimaController.clear();
@@ -3441,6 +3501,7 @@ class OrderConfirmationService {
     String? programExtraPaymentMethod,
     int programExtraSplitQrisAmount = 0,
     String? operationId,
+    int? expectedOrderRevision,
   }) async {
     final firestore = FirebaseFirestore.instance;
     final statusDocId = openBill.statusDocId;
@@ -3457,6 +3518,15 @@ class OrderConfirmationService {
             (itemCounts[item.namaPesanan] ?? 0) + item.totalQuantity;
       }
       final subTotal = totalHarga - totalTakeAwayFee;
+      final b2bPayment = voucherProgramId == null
+          ? null
+          : B2BPaymentBreakdown.calculate(
+              billTotal: totalHarga,
+              requestedNominal: programNominal,
+              programId: voucherProgramId,
+              extraPaymentMethod: programExtraPaymentMethod,
+              qrisAmount: programExtraSplitQrisAmount,
+            );
       final map = <String, dynamic>{
         'total': FieldValue.increment(totalHarga),
         'subTotal': FieldValue.increment(subTotal),
@@ -3469,22 +3539,12 @@ class OrderConfirmationService {
       for (final entry in itemCounts.entries) {
         map[entry.key] = FieldValue.increment(entry.value);
       }
-      if (isSplitPayment) {
+      if (b2bPayment != null) {
+        _addB2BFinancialFields(map, b2bPayment);
+        _addPaymentBreakdown(map, b2bPayment);
+      } else if (isSplitPayment) {
         _incrementPaymentAccumulator(map, 'Cash', splitCashAmount);
         _incrementPaymentAccumulator(map, 'QRIS', splitQrisAmount);
-      } else if (voucherProgramId != null) {
-        final remaining = totalHarga - programNominal;
-        if (remaining > 0 && programExtraPaymentMethod != null) {
-          if (programExtraPaymentMethod == 'Cash + QRIS') {
-            _incrementPaymentAccumulator(
-                map, 'Cash', remaining - programExtraSplitQrisAmount);
-            _incrementPaymentAccumulator(
-                map, 'QRIS', programExtraSplitQrisAmount);
-          } else {
-            _incrementPaymentAccumulator(
-                map, programExtraPaymentMethod, remaining);
-          }
-        }
       } else if (transactionMethod != null) {
         _incrementPaymentAccumulator(map, transactionMethod, totalHarga);
       }
@@ -3505,12 +3565,39 @@ class OrderConfirmationService {
         final statusRef =
             firestore.collection(Col.name('Status')).doc(statusDocId);
         final statusSnapshot = await transaction.get(statusRef);
-        if (!statusSnapshot.exists)
+        if (!statusSnapshot.exists) {
           throw Exception('Open bill tidak ditemukan.');
+        }
         final statusData = statusSnapshot.data() ?? <String, dynamic>{};
         if (statusData['isClosed'] == true ||
             statusData['status'] == 'Settled') {
           return const InventoryOperationResult.alreadyApplied();
+        }
+        final currentRevision =
+            InventoryService.toInt(statusData['orderRevision']);
+        if (expectedOrderRevision != null &&
+            currentRevision != expectedOrderRevision) {
+          throw Exception(
+              'Tagihan berubah di perangkat lain. Muat ulang tagihan sebelum menyelesaikan pembayaran.');
+        }
+        final currentFoodTotal = InventoryService.toInt(statusData['total']);
+        if (currentFoodTotal != openBill.totalAmount) {
+          throw Exception(
+              'Total tagihan berubah di perangkat lain. Muat ulang tagihan sebelum menyelesaikan pembayaran.');
+        }
+
+        VoucherProgramRedemptionPreparation? redemption;
+        if (b2bPayment != null) {
+          redemption =
+              await VoucherProgramService.prepareRedemptionInTransaction(
+            transaction: transaction,
+            programId: b2bPayment.programId!,
+            requestedNominal: b2bPayment.nominal,
+            billTotal: totalHarga,
+            operationId: stableOperationId,
+            sourceType: 'open_bill_settlement',
+            sourceId: statusDocId,
+          );
         }
 
         // Voucher reads occur before any transaction write. No inventory
@@ -3524,11 +3611,12 @@ class OrderConfirmationService {
             usedAmount: discountAmount,
           );
         }
-        if (voucherProgramId != null) {
-          VoucherProgramService.addRedemptionToTransaction(
+        if (redemption != null) {
+          VoucherProgramService.commitRedemptionInTransaction(
             transaction: transaction,
-            programId: voucherProgramId,
-            amount: programNominal > 0 ? programNominal : totalHarga,
+            preparation: redemption,
+            sourceType: 'open_bill_settlement',
+            sourceId: statusDocId,
           );
         }
 
@@ -3549,6 +3637,19 @@ class OrderConfirmationService {
           map,
           SetOptions(merge: true),
         );
+        final paymentFields = b2bPayment?.toStatusFields(
+              operationId: stableOperationId,
+            ) ??
+            <String, dynamic>{
+              'paymentMethod': transactionMethod ?? 'Cash',
+              'transactionMethod': transactionMethod ?? 'Cash',
+              if (isSplitPayment) 'isSplitPayment': true,
+              if (isSplitPayment)
+                'splitDetails': {
+                  'cashAmount': splitCashAmount,
+                  'qrisAmount': splitQrisAmount,
+                },
+            };
         transaction.update(statusRef, {
           'isClosed': true,
           'status': 'Settled',
@@ -3559,16 +3660,10 @@ class OrderConfirmationService {
           if (appliedVoucherCode != null) 'voucherCode': appliedVoucherCode,
           'subTotal': subTotal,
           'takeAwayFee': totalTakeAwayFee,
-          'paymentMethod': transactionMethod ?? 'Cash',
-          'transactionMethod': transactionMethod ?? 'Cash',
+          'transactionMethod':
+              b2bPayment != null ? 'Program' : (transactionMethod ?? 'Cash'),
           'total': totalHarga,
-          if (isSplitPayment) 'isSplitPayment': true,
-          if (isSplitPayment)
-            'splitDetails': {
-              'cashAmount': splitCashAmount,
-              'qrisAmount': splitQrisAmount,
-            },
-          if (voucherProgramId != null) 'voucherProgramId': voucherProgramId,
+          ...paymentFields,
           'orderRevision': FieldValue.increment(1),
         });
         transaction.set(
@@ -3608,12 +3703,15 @@ class OrderConfirmationService {
         if (memberQuery.docs.isNotEmpty) memberId = memberQuery.docs.first.id;
       }
       _incrementMemberPoints(memberId, totalHarga,
-          voucherProgramId: voucherProgramId, programNominal: programNominal);
+          voucherProgramId: voucherProgramId,
+          programNominal: b2bPayment?.nominal ?? 0);
       _updateCompetitionRecord(memberId, totalHarga,
-          voucherProgramId: voucherProgramId, programNominal: programNominal);
+          voucherProgramId: voucherProgramId,
+          programNominal: b2bPayment?.nominal ?? 0);
       _processPeriodicCashbackCampaign(
           memberId, totalHarga, openBill.memberName,
-          voucherProgramId: voucherProgramId, programNominal: programNominal);
+          voucherProgramId: voucherProgramId,
+          programNominal: b2bPayment?.nominal ?? 0);
       await printReceipt(
         customPesananList: aggregatedItems,
         overrideTotalHarga: totalHarga,
@@ -3656,10 +3754,12 @@ class OrderConfirmationService {
     } catch (e) {
       if (context.mounted && !loaderPopped) Navigator.pop(context);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                'Gagal menyelesaikan tagihan: ${UserMessageService.fromError(e)}'),
-            backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+              content: Text(
+                  'Gagal menyelesaikan tagihan: ${UserMessageService.fromError(e)}'),
+              backgroundColor: Colors.red));
       }
     }
   }
@@ -3877,7 +3977,7 @@ class OrderConfirmationService {
     } catch (e) {
       Navigator.pop(context);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        ScaffoldMessenger.of(context)..clearSnackBars()..showSnackBar(SnackBar(
             content: Text(
                 'Gagal menyelesaikan tagihan: ${UserMessageService.fromError(e)}'),
             backgroundColor: Colors.red));
@@ -4115,12 +4215,14 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
           sekaliPakai = true;
 
           // Show error message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(voucherError ?? 'Voucher tidak valid'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(
+              SnackBar(
+                content: Text(voucherError ?? 'Voucher tidak valid'),
+                backgroundColor: Colors.red,
+              ),
+            );
         } else if (result != null) {
           voucherName = result['voucherName'];
           voucherValue = result['value'];
@@ -4162,11 +4264,18 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   }
 
   Future<void> _loadPrograms() async {
-    final programs = await VoucherProgramService.getActivePrograms();
-    if (mounted) {
-      setState(() {
-        _activePrograms = programs;
-      });
+    try {
+      final programs = await VoucherProgramService.getActivePrograms();
+      if (mounted) {
+        setState(() {
+          _activePrograms = programs;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        _showTopError(context,
+            'Program voucher gagal dimuat: ${UserMessageService.fromError(error)}');
+      }
     }
   }
 
@@ -4457,16 +4566,18 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                           if (result['isSnackbarError'] ==
                                               true) {
                                             ScaffoldMessenger.of(context)
-                                                .showSnackBar(
-                                              SnackBar(
-                                                content: Text(
-                                                    UserMessageService.fromText(
-                                                  result['error']?.toString(),
-                                                  fallback:
-                                                      'Voucher tidak valid',
-                                                )),
-                                              ),
-                                            );
+                                              ..clearSnackBars()
+                                              ..showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                      UserMessageService
+                                                          .fromText(
+                                                    result['error']?.toString(),
+                                                    fallback:
+                                                        'Voucher tidak valid',
+                                                  )),
+                                                ),
+                                              );
                                           }
                                           voucherError =
                                               UserMessageService.fromText(
@@ -4962,15 +5073,17 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                   (p) => p['id'] == val,
                                   orElse: () => {});
                               final defNominal =
-                                  ((prog['defaultNominal'] ?? 0) as num)
-                                      .toInt();
-                              _programNominal = defNominal;
-                              _baseProgramNominal = defNominal;
+                                  VoucherProgramService.parseAmount(
+                                      prog['defaultNominal']);
+                              _programNominal =
+                                  defNominal.clamp(0, displayTotal).toInt();
+                              _baseProgramNominal = _programNominal;
                               _programMultiplier = 1;
-                              _programNominalController.text = defNominal > 0
-                                  ? NumberFormat('#,###', 'id_ID')
-                                      .format(defNominal)
-                                  : '';
+                              _programNominalController.text =
+                                  _programNominal > 0
+                                      ? NumberFormat('#,###', 'id_ID')
+                                          .format(_programNominal)
+                                      : '';
                               _programExtraPaymentMethod = null;
                               _isProgramExtraSplit = false;
                               _programExtraQrisAmount = 0;
@@ -5024,14 +5137,15 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                   int newTotal =
                                       int.tryParse(val.replaceAll('.', '')) ??
                                           0;
-                                  _programNominal = newTotal;
+                                  _programNominal =
+                                      newTotal.clamp(0, displayTotal).toInt();
 
                                   // Only reset multiplier if the user manually edited the total
                                   // to something other than base * multiplier
                                   if (newTotal !=
                                       _baseProgramNominal *
                                           _programMultiplier) {
-                                    _baseProgramNominal = newTotal;
+                                    _baseProgramNominal = _programNominal;
                                     _programMultiplier = 1;
                                   }
 
@@ -5050,7 +5164,9 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               setState(() {
                                 _programMultiplier++;
                                 _programNominal =
-                                    _baseProgramNominal * _programMultiplier;
+                                    (_baseProgramNominal * _programMultiplier)
+                                        .clamp(0, displayTotal)
+                                        .toInt();
                                 _programNominalController.text =
                                     NumberFormat('#,###', 'id_ID')
                                         .format(_programNominal);
@@ -5060,7 +5176,9 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                               setState(() {
                                 _programMultiplier = 1;
                                 _programNominal =
-                                    _baseProgramNominal * _programMultiplier;
+                                    (_baseProgramNominal * _programMultiplier)
+                                        .clamp(0, displayTotal)
+                                        .toInt();
                                 _programNominalController.text =
                                     NumberFormat('#,###', 'id_ID')
                                         .format(_programNominal);
@@ -5330,6 +5448,11 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                           .isEmpty) {
                                     _showTopError(
                                         context, 'Nama customer wajib diisi');
+                                    return;
+                                  }
+                                  if (_selectedProgramId == null) {
+                                    _showTopError(
+                                        context, 'Pilih program voucher');
                                     return;
                                   }
                                   if (_programNominal <= 0) {
@@ -5606,13 +5729,15 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                     _updateTotal(); // Update the dialog's total display
 
                     // Show confirmation snackbar
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('✅ $itemName ditambahkan ke pesanan'),
-                        duration: const Duration(seconds: 2),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
+                    ScaffoldMessenger.of(context)
+                      ..clearSnackBars()
+                      ..showSnackBar(
+                        SnackBar(
+                          content: Text('✅ $itemName ditambahkan ke pesanan'),
+                          duration: const Duration(seconds: 2),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
                   },
                 ),
               ),
@@ -5717,11 +5842,18 @@ class _SelfOrderConfirmationDialogState
   }
 
   Future<void> _loadPrograms() async {
-    final programs = await VoucherProgramService.getActivePrograms();
-    if (mounted) {
-      setState(() {
-        _activePrograms = programs;
-      });
+    try {
+      final programs = await VoucherProgramService.getActivePrograms();
+      if (mounted) {
+        setState(() {
+          _activePrograms = programs;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        _showTopError(context,
+            'Program voucher gagal dimuat: ${UserMessageService.fromError(error)}');
+      }
     }
   }
 
@@ -5753,12 +5885,14 @@ class _SelfOrderConfirmationDialogState
           sekaliPakai = true;
 
           // Show error message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(voucherError ?? 'Voucher tidak valid'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(
+              SnackBar(
+                content: Text(voucherError ?? 'Voucher tidak valid'),
+                backgroundColor: Colors.red,
+              ),
+            );
         } else if (result != null) {
           voucherName = result['voucherName'];
           voucherValue = result['value'];
@@ -5962,12 +6096,14 @@ class _SelfOrderConfirmationDialogState
         );
         voucherDocId = null;
         if (result?['isSnackbarError'] == true) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(voucherError!),
-              backgroundColor: Colors.red,
-            ),
-          );
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(
+              SnackBar(
+                content: Text(voucherError!),
+                backgroundColor: Colors.red,
+              ),
+            );
         }
       }
     });
@@ -6538,13 +6674,15 @@ class _SelfOrderConfirmationDialogState
                                   (p) => p['id'] == val,
                                   orElse: () => {});
                               final defNominal =
-                                  ((prog['defaultNominal'] ?? 0) as num)
-                                      .toInt();
-                              _programNominal = defNominal;
-                              _programNominalController.text = defNominal > 0
-                                  ? NumberFormat('#,###', 'id_ID')
-                                      .format(defNominal)
-                                  : '';
+                                  VoucherProgramService.parseAmount(
+                                      prog['defaultNominal']);
+                              _programNominal =
+                                  defNominal.clamp(0, displayTotal).toInt();
+                              _programNominalController.text =
+                                  _programNominal > 0
+                                      ? NumberFormat('#,###', 'id_ID')
+                                          .format(_programNominal)
+                                      : '';
                               _programExtraPaymentMethod = null;
                               _isProgramExtraSplit = false;
                               _programExtraQrisAmount = 0;
@@ -6588,7 +6726,9 @@ class _SelfOrderConfirmationDialogState
                         onChanged: (val) {
                           setState(() {
                             _programNominal =
-                                int.tryParse(val.replaceAll('.', '')) ?? 0;
+                                (int.tryParse(val.replaceAll('.', '')) ?? 0)
+                                    .clamp(0, displayTotal)
+                                    .toInt();
                             _programExtraPaymentMethod = null;
                             _isProgramExtraSplit = false;
                             _programExtraQrisAmount = 0;
@@ -6841,6 +6981,11 @@ class _SelfOrderConfirmationDialogState
                               onPressed: _isConfirming
                                   ? null
                                   : () {
+                                      if (_selectedProgramId == null) {
+                                        _showTopError(
+                                            context, 'Pilih program voucher');
+                                        return;
+                                      }
                                       if (_programNominal <= 0) {
                                         _showTopError(context,
                                             'Masukkan nominal voucher');
@@ -7082,13 +7227,15 @@ class _SelfOrderConfirmationDialogState
                     widget.getTotal();
                     _updateTotal();
 
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('$itemName ditambahkan ke pesanan'),
-                        duration: const Duration(seconds: 2),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
+                    ScaffoldMessenger.of(context)
+                      ..clearSnackBars()
+                      ..showSnackBar(
+                        SnackBar(
+                          content: Text('$itemName ditambahkan ke pesanan'),
+                          duration: const Duration(seconds: 2),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
                   },
                 ),
               ),
@@ -7157,11 +7304,18 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
   }
 
   Future<void> _loadPrograms() async {
-    final programs = await VoucherProgramService.getActivePrograms();
-    if (mounted) {
-      setState(() {
-        _activePrograms = programs;
-      });
+    try {
+      final programs = await VoucherProgramService.getActivePrograms();
+      if (mounted) {
+        setState(() {
+          _activePrograms = programs;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        _showTopError(context,
+            'Program voucher gagal dimuat: ${UserMessageService.fromError(error)}');
+      }
     }
   }
 
@@ -7518,11 +7672,13 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                         final prog = _activePrograms.firstWhere(
                             (p) => p['id'] == val,
                             orElse: () => {});
-                        final defNominal =
-                            ((prog['defaultNominal'] ?? 0) as num).toInt();
-                        _programNominal = defNominal;
-                        _programNominalController.text = defNominal > 0
-                            ? NumberFormat('#,###', 'id_ID').format(defNominal)
+                        final defNominal = VoucherProgramService.parseAmount(
+                            prog['defaultNominal']);
+                        _programNominal =
+                            defNominal.clamp(0, displayTotal).toInt();
+                        _programNominalController.text = _programNominal > 0
+                            ? NumberFormat('#,###', 'id_ID')
+                                .format(_programNominal)
                             : '';
                         _programExtraPaymentMethod = null;
                         _isProgramExtraSplit = false;
@@ -7566,7 +7722,9 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                   onChanged: (val) {
                     setState(() {
                       _programNominal =
-                          int.tryParse(val.replaceAll('.', '')) ?? 0;
+                          (int.tryParse(val.replaceAll('.', '')) ?? 0)
+                              .clamp(0, displayTotal)
+                              .toInt();
                       _programExtraPaymentMethod = null;
                       _isProgramExtraSplit = false;
                       _programExtraQrisAmount = 0;

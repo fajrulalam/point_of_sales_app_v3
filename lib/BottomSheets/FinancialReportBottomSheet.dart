@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/BottomSheets/QuickExpenseBottomSheet.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 
 class FinancialReportBottomSheet extends StatefulWidget {
   const FinancialReportBottomSheet({Key? key}) : super(key: key);
@@ -22,6 +23,7 @@ class _FinancialReportBottomSheetState
 
   int? _systemTotal;
   int _totalVoucher = 0;
+  int _totalVoucherSettled = 0;
   bool _isLoadingTotal = true;
 
   // Expenses fetched from Firestore
@@ -87,14 +89,17 @@ class _FinancialReportBottomSheetState
 
       if (doc.exists && doc.data() != null) {
         setState(() {
-          _systemTotal = (doc.data()!['total'] ?? 0) as int;
-          _totalVoucher = (doc.data()!['totalVoucher'] ?? 0) as int;
+          _systemTotal = InventoryService.toInt(doc.data()!['total']);
+          _totalVoucher = InventoryService.toInt(doc.data()!['totalVoucher']);
+          _totalVoucherSettled =
+              InventoryService.toInt(doc.data()!['totalVoucherSettled']);
           _isLoadingTotal = false;
         });
       } else {
         setState(() {
           _systemTotal = 0;
           _totalVoucher = 0;
+          _totalVoucherSettled = 0;
           _isLoadingTotal = false;
         });
       }
@@ -102,6 +107,7 @@ class _FinancialReportBottomSheetState
       setState(() {
         _systemTotal = 0;
         _totalVoucher = 0;
+        _totalVoucherSettled = 0;
         _isLoadingTotal = false;
       });
     }
@@ -200,9 +206,9 @@ class _FinancialReportBottomSheetState
         await fs.collection(Col.name('DailyTransaction')).doc(today).get();
 
     final data = doc.data() ?? {};
-    final totalCash = (data['totalCash'] ?? 0) as int;
-    final totalQris = (data['totalQris'] ?? 0) as int;
-    final totalOnline = (data['totalOnline'] ?? 0) as int;
+    final totalCash = InventoryService.toInt(data['totalCash']);
+    final totalQris = InventoryService.toInt(data['totalQris']);
+    final totalOnline = InventoryService.toInt(data['totalOnline']);
 
     final expensesCash = _expensesCash;
     final expensesQris = _expensesQris;
@@ -225,8 +231,7 @@ class _FinancialReportBottomSheetState
         .limit(1)
         .get();
 
-    final prevData =
-        prevSnap.docs.isNotEmpty ? prevSnap.docs.first.data() : {};
+    final prevData = prevSnap.docs.isNotEmpty ? prevSnap.docs.first.data() : {};
     final prevClosingCash = (prevData['closingCash'] ?? 0) as int;
     final prevClosingQris = (prevData['closingQris'] ?? 0) as int;
     final prevClosingOnline = (prevData['closingOnline'] ?? 0) as int;
@@ -250,6 +255,7 @@ class _FinancialReportBottomSheetState
         systemQris: netExpectedQris,
         totalOnline: totalOnline,
         totalVoucher: _totalVoucher,
+        totalVoucherSettled: _totalVoucherSettled,
         platformCommission: platformCommission,
         allMatch: allMatch,
         cashMatch: cashMatch,
@@ -270,111 +276,142 @@ class _FinancialReportBottomSheetState
       final currentData = currentReportSnap.data() ?? {};
 
       // Calculate deltas to prevent double-counting if submitted multiple times
-      final deltaSysCash = totalCash - ((currentData['systemSalesCash'] ?? 0) as int);
-      final deltaSysQris = totalQris - ((currentData['systemSalesQris'] ?? 0) as int);
-      final deltaSysOnline = totalOnline - ((currentData['systemSalesOnline'] ?? 0) as int);
-      final deltaVoucher = _totalVoucher - ((currentData['totalVoucher'] ?? 0) as int);
+      final deltaSysCash =
+          totalCash - InventoryService.toInt(currentData['systemSalesCash']);
+      final deltaSysQris =
+          totalQris - InventoryService.toInt(currentData['systemSalesQris']);
+      final deltaSysOnline = totalOnline -
+          InventoryService.toInt(currentData['systemSalesOnline']);
+      final deltaVoucher =
+          _totalVoucher - InventoryService.toInt(currentData['totalVoucher']);
+      final deltaVoucherSettled = _totalVoucherSettled -
+          InventoryService.toInt(currentData['totalVoucherSettled']);
 
-      final deltaExpCash = expensesCash - ((currentData['expensesCash'] ?? 0) as int);
-      final deltaExpQris = expensesQris - ((currentData['expensesQris'] ?? 0) as int);
-      final deltaExpOnline = expensesOnline - ((currentData['expensesOnline'] ?? 0) as int);
+      final deltaExpCash =
+          expensesCash - InventoryService.toInt(currentData['expensesCash']);
+      final deltaExpQris =
+          expensesQris - InventoryService.toInt(currentData['expensesQris']);
+      final deltaExpOnline = expensesOnline -
+          InventoryService.toInt(currentData['expensesOnline']);
 
-      final deltaActCash = inputCash - ((currentData['actualCash'] ?? 0) as int);
-      final deltaActQris = inputQris - ((currentData['actualQris'] ?? 0) as int);
-      final deltaActOnline = inputOnline - ((currentData['actualOnline'] ?? 0) as int);
+      final deltaActCash =
+          inputCash - InventoryService.toInt(currentData['actualCash']);
+      final deltaActQris =
+          inputQris - InventoryService.toInt(currentData['actualQris']);
+      final deltaActOnline =
+          inputOnline - InventoryService.toInt(currentData['actualOnline']);
 
-      final deltaDiscCash = discrepancyCash - ((currentData['discrepancyCash'] ?? 0) as int);
-      final deltaDiscQris = discrepancyQris - ((currentData['discrepancyQris'] ?? 0) as int);
-      final deltaDiscOnline = platformCommission - ((currentData['discrepancyOnline'] ?? 0) as int);
+      final deltaDiscCash = discrepancyCash -
+          InventoryService.toInt(currentData['discrepancyCash']);
+      final deltaDiscQris = discrepancyQris -
+          InventoryService.toInt(currentData['discrepancyQris']);
+      final deltaDiscOnline = platformCommission -
+          InventoryService.toInt(currentData['discrepancyOnline']);
 
       final batch = fs.batch();
 
-      batch.set(reportRef, {
-        'date': today,
-        'month': month,
-        'systemSalesCash': totalCash,
-        'systemSalesQris': totalQris,
-        'systemSalesOnline': totalOnline,
-        'totalVoucher': _totalVoucher,
-        'expensesCash': expensesCash,
-        'expensesQris': expensesQris,
-        'expensesOnline': expensesOnline,
-        'actualCash': inputCash,
-        'actualQris': inputQris,
-        'actualOnline': inputOnline,
-        'discrepancyCash': discrepancyCash,
-        'discrepancyQris': discrepancyQris,
-        'discrepancyOnline': platformCommission,
-        'closingCash': closingCash,
-        'closingQris': closingQris,
-        'closingOnline': closingOnline,
-        'timestamp': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      batch.set(
+          reportRef,
+          {
+            'date': today,
+            'month': month,
+            'systemSalesCash': totalCash,
+            'systemSalesQris': totalQris,
+            'systemSalesOnline': totalOnline,
+            'totalVoucher': _totalVoucher,
+            'totalVoucherSettled': _totalVoucherSettled,
+            'expensesCash': expensesCash,
+            'expensesQris': expensesQris,
+            'expensesOnline': expensesOnline,
+            'actualCash': inputCash,
+            'actualQris': inputQris,
+            'actualOnline': inputOnline,
+            'discrepancyCash': discrepancyCash,
+            'discrepancyQris': discrepancyQris,
+            'discrepancyOnline': platformCommission,
+            'closingCash': closingCash,
+            'closingQris': closingQris,
+            'closingOnline': closingOnline,
+            'timestamp': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
 
-      final monthRef = fs.collection(Col.name('MonthlyFinancialReport')).doc(month);
-      batch.set(monthRef, {
-        'month': month,
-        'systemSalesCash': FieldValue.increment(deltaSysCash),
-        'systemSalesQris': FieldValue.increment(deltaSysQris),
-        'systemSalesOnline': FieldValue.increment(deltaSysOnline),
-        'totalVoucher': FieldValue.increment(deltaVoucher),
-        'expensesCash': FieldValue.increment(deltaExpCash),
-        'expensesQris': FieldValue.increment(deltaExpQris),
-        'expensesOnline': FieldValue.increment(deltaExpOnline),
-        'actualCash': FieldValue.increment(deltaActCash),
-        'actualQris': FieldValue.increment(deltaActQris),
-        'actualOnline': FieldValue.increment(deltaActOnline),
-        'discrepancyCash': FieldValue.increment(deltaDiscCash),
-        'discrepancyQris': FieldValue.increment(deltaDiscQris),
-        'discrepancyOnline': FieldValue.increment(deltaDiscOnline),
-        // Closing balances for the month can simply be overwritten by the latest day's values
-        'closingCash': closingCash,
-        'closingQris': closingQris,
-        'closingOnline': closingOnline,
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final monthRef =
+          fs.collection(Col.name('MonthlyFinancialReport')).doc(month);
+      batch.set(
+          monthRef,
+          {
+            'month': month,
+            'systemSalesCash': FieldValue.increment(deltaSysCash),
+            'systemSalesQris': FieldValue.increment(deltaSysQris),
+            'systemSalesOnline': FieldValue.increment(deltaSysOnline),
+            'totalVoucher': FieldValue.increment(deltaVoucher),
+            'totalVoucherSettled': FieldValue.increment(deltaVoucherSettled),
+            'expensesCash': FieldValue.increment(deltaExpCash),
+            'expensesQris': FieldValue.increment(deltaExpQris),
+            'expensesOnline': FieldValue.increment(deltaExpOnline),
+            'actualCash': FieldValue.increment(deltaActCash),
+            'actualQris': FieldValue.increment(deltaActQris),
+            'actualOnline': FieldValue.increment(deltaActOnline),
+            'discrepancyCash': FieldValue.increment(deltaDiscCash),
+            'discrepancyQris': FieldValue.increment(deltaDiscQris),
+            'discrepancyOnline': FieldValue.increment(deltaDiscOnline),
+            // Closing balances for the month can simply be overwritten by the latest day's values
+            'closingCash': closingCash,
+            'closingQris': closingQris,
+            'closingOnline': closingOnline,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
 
-      final yearRef = fs.collection(Col.name('YearlyFinancialReport')).doc(year);
-      batch.set(yearRef, {
-        'year': year,
-        'systemSalesCash': FieldValue.increment(deltaSysCash),
-        'systemSalesQris': FieldValue.increment(deltaSysQris),
-        'systemSalesOnline': FieldValue.increment(deltaSysOnline),
-        'totalVoucher': FieldValue.increment(deltaVoucher),
-        'expensesCash': FieldValue.increment(deltaExpCash),
-        'expensesQris': FieldValue.increment(deltaExpQris),
-        'expensesOnline': FieldValue.increment(deltaExpOnline),
-        'actualCash': FieldValue.increment(deltaActCash),
-        'actualQris': FieldValue.increment(deltaActQris),
-        'actualOnline': FieldValue.increment(deltaActOnline),
-        'discrepancyCash': FieldValue.increment(deltaDiscCash),
-        'discrepancyQris': FieldValue.increment(deltaDiscQris),
-        'discrepancyOnline': FieldValue.increment(deltaDiscOnline),
-        'closingCash': closingCash,
-        'closingQris': closingQris,
-        'closingOnline': closingOnline,
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final yearRef =
+          fs.collection(Col.name('YearlyFinancialReport')).doc(year);
+      batch.set(
+          yearRef,
+          {
+            'year': year,
+            'systemSalesCash': FieldValue.increment(deltaSysCash),
+            'systemSalesQris': FieldValue.increment(deltaSysQris),
+            'systemSalesOnline': FieldValue.increment(deltaSysOnline),
+            'totalVoucher': FieldValue.increment(deltaVoucher),
+            'totalVoucherSettled': FieldValue.increment(deltaVoucherSettled),
+            'expensesCash': FieldValue.increment(deltaExpCash),
+            'expensesQris': FieldValue.increment(deltaExpQris),
+            'expensesOnline': FieldValue.increment(deltaExpOnline),
+            'actualCash': FieldValue.increment(deltaActCash),
+            'actualQris': FieldValue.increment(deltaActQris),
+            'actualOnline': FieldValue.increment(deltaActOnline),
+            'discrepancyCash': FieldValue.increment(deltaDiscCash),
+            'discrepancyQris': FieldValue.increment(deltaDiscQris),
+            'discrepancyOnline': FieldValue.increment(deltaDiscOnline),
+            'closingCash': closingCash,
+            'closingQris': closingQris,
+            'closingOnline': closingOnline,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true));
 
       await batch.commit();
 
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 12),
-                Text(
-                  'Laporan keuangan harian berhasil disimpan',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                ),
-              ],
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Laporan keuangan harian berhasil disimpan',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
             ),
-            backgroundColor: Colors.green,
-          ),
-        );
+          );
       }
     }
   }
@@ -698,8 +735,8 @@ class _FinancialReportBottomSheetState
             ),
             child: Column(
               children: [
-                _expenseSummaryRow(
-                    'Cash', _expensesCash, Icons.payments_outlined, Colors.green),
+                _expenseSummaryRow('Cash', _expensesCash,
+                    Icons.payments_outlined, Colors.green),
                 if (_expensesQris > 0) ...[
                   const SizedBox(height: 6),
                   _expenseSummaryRow(
@@ -850,6 +887,7 @@ class _ValidationDialog extends StatelessWidget {
   final int systemQris;
   final int totalOnline;
   final int totalVoucher;
+  final int totalVoucherSettled;
   final int platformCommission;
   final bool allMatch;
   final bool cashMatch;
@@ -864,6 +902,7 @@ class _ValidationDialog extends StatelessWidget {
     required this.systemQris,
     required this.totalOnline,
     required this.totalVoucher,
+    required this.totalVoucherSettled,
     required this.platformCommission,
     required this.allMatch,
     required this.cashMatch,
@@ -921,6 +960,10 @@ class _ValidationDialog extends StatelessWidget {
               const SizedBox(height: 10),
               _buildVoucherRow(),
             ],
+            if (totalVoucherSettled > 0) ...[
+              const SizedBox(height: 10),
+              _buildVoucherSettledRow(),
+            ],
           ],
         ),
       ),
@@ -950,8 +993,7 @@ class _ValidationDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildComparisonRow(
-      String label, int input, int system, bool match) {
+  Widget _buildComparisonRow(String label, int input, int system, bool match) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -1069,16 +1111,40 @@ class _ValidationDialog extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Piutang Voucher B2B',
+                  'Redemption Voucher B2B (gross)',
                   style: GoogleFonts.poppins(
                       fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 Text(
-                  'Belum masuk kas — menunggu pembayaran institusi: Rp ${_fmt(totalVoucher)}',
+                  'Nilai voucher B2B yang digunakan pada periode ini: Rp ${_fmt(totalVoucher)}',
                   style: GoogleFonts.poppins(
                       fontSize: 12, color: Colors.purple.shade700),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVoucherSettledRow() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.payments_outlined, color: Colors.green.shade700, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Pembayaran B2B yang sudah masuk kas: Rp ${_fmt(totalVoucherSettled)}',
+              style: GoogleFonts.poppins(
+                  fontSize: 12, color: Colors.green.shade700),
             ),
           ),
         ],

@@ -11,6 +11,7 @@ import 'package:point_of_sales_app_v3/Services/InventoryAuditService.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
+import 'package:point_of_sales_app_v3/Services/VoucherProgramAuditService.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({Key? key}) : super(key: key);
@@ -25,6 +26,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   String _searchQuery = '';
   Timer? _debounce;
   bool _auditRunning = false;
+  bool _b2bAuditRunning = false;
 
   /// inventoryItemId → list of display labels ("Menu: X", "Opsi: Y (Group)")
   Map<String, List<String>> _linkedItemsMap = {};
@@ -203,6 +205,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 : const Icon(Icons.fact_check_outlined),
             onPressed: _auditRunning ? null : _runInventoryAudit,
             tooltip: 'Audit integritas inventory',
+          ),
+          IconButton(
+            icon: _b2bAuditRunning
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.account_balance_wallet_outlined),
+            onPressed: _b2bAuditRunning ? null : _runB2BAudit,
+            tooltip: 'Audit Voucher B2B',
           ),
           IconButton(
             icon: const Icon(Icons.nightlight_round),
@@ -426,16 +439,103 @@ class _InventoryScreenState extends State<InventoryScreen> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Audit gagal dijalankan: ${UserMessageService.fromError(e)}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                  'Audit gagal dijalankan: ${UserMessageService.fromError(e)}'),
+              backgroundColor: Colors.red,
+            ),
+          );
       }
     } finally {
       if (mounted) setState(() => _auditRunning = false);
+    }
+  }
+
+  Future<void> _runB2BAudit() async {
+    setState(() => _b2bAuditRunning = true);
+    try {
+      final findings = await VoucherProgramAuditService.run();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.account_balance_wallet_outlined,
+                  color: _addGreen),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Audit Voucher B2B (${findings.length})',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 680,
+            height: 520,
+            child: findings.isEmpty
+                ? Center(
+                    child: Text(
+                      'Tidak ditemukan masalah pada program, ledger, pesanan, atau total keuangan B2B.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.poppins(),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: findings.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, index) {
+                      final finding = findings[index];
+                      final isError = finding.severity == 'error';
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          isError
+                              ? Icons.error_outline
+                              : Icons.warning_amber_outlined,
+                          color: isError ? Colors.red : Colors.orange,
+                        ),
+                        title: Text(
+                          finding.message,
+                          style: GoogleFonts.poppins(fontSize: 12),
+                        ),
+                        subtitle: Text(
+                          '${finding.code}${finding.documentId == null ? '' : ' • ${finding.documentId}'}',
+                          style: GoogleFonts.poppins(
+                              fontSize: 10, color: Colors.grey.shade600),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Tutup'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                  'Audit Voucher B2B gagal dijalankan: ${UserMessageService.fromError(error)}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+      }
+    } finally {
+      if (mounted) setState(() => _b2bAuditRunning = false);
     }
   }
 
@@ -756,11 +856,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         } catch (e) {
                           if (context.mounted) {
                             setDialogState(() => isSaving = false);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                  content: Text(
-                                      'Gagal memperbarui stok: ${UserMessageService.fromError(e)}')),
-                            );
+                            ScaffoldMessenger.of(context)
+                              ..clearSnackBars()
+                              ..showSnackBar(
+                                SnackBar(
+                                    content: Text(
+                                        'Gagal memperbarui stok: ${UserMessageService.fromError(e)}')),
+                              );
                           }
                         }
                       },
@@ -860,10 +962,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   ? null
                   : () async {
                       if (nameController.text.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Nama bahan tidak boleh kosong')),
-                        );
+                        ScaffoldMessenger.of(context)
+                          ..clearSnackBars()
+                          ..showSnackBar(
+                            const SnackBar(
+                                content: Text('Nama bahan tidak boleh kosong')),
+                          );
                         return;
                       }
 
@@ -878,12 +982,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         if (context.mounted) Navigator.pop(context);
                       } catch (e) {
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                  'Gagal menambahkan bahan: ${UserMessageService.fromError(e)}'),
-                            ),
-                          );
+                          ScaffoldMessenger.of(context)
+                            ..clearSnackBars()
+                            ..showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                    'Gagal menambahkan bahan: ${UserMessageService.fromError(e)}'),
+                              ),
+                            );
                           setDialogState(() => isSaving = false);
                         }
                       }
@@ -1105,11 +1211,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         ? null
                         : () async {
                             if (nameController.text.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content:
-                                        Text('Nama bahan tidak boleh kosong')),
-                              );
+                              ScaffoldMessenger.of(context)
+                                ..clearSnackBars()
+                                ..showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          'Nama bahan tidak boleh kosong')),
+                                );
                               return;
                             }
 
@@ -1144,12 +1252,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
                               }
                             } catch (e) {
                               if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                        'Gagal memperbarui bahan: ${UserMessageService.fromError(e)}'),
-                                  ),
-                                );
+                                ScaffoldMessenger.of(context)
+                                  ..clearSnackBars()
+                                  ..showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          'Gagal memperbarui bahan: ${UserMessageService.fromError(e)}'),
+                                    ),
+                                  );
                                 setDialogState(() => isSaving = false);
                               }
                             }
@@ -1363,16 +1473,18 @@ class _InventoryScreenState extends State<InventoryScreen> {
               } catch (e) {
                 if (context.mounted) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(UserMessageService.fromError(
-                        e,
-                        fallback: 'Gagal menghapus bahan. Silakan coba lagi.',
-                      )),
-                      backgroundColor: Colors.red,
-                      duration: const Duration(seconds: 4),
-                    ),
-                  );
+                  ScaffoldMessenger.of(context)
+                    ..clearSnackBars()
+                    ..showSnackBar(
+                      SnackBar(
+                        content: Text(UserMessageService.fromError(
+                          e,
+                          fallback: 'Gagal menghapus bahan. Silakan coba lagi.',
+                        )),
+                        backgroundColor: Colors.red,
+                        duration: const Duration(seconds: 4),
+                      ),
+                    );
                 }
               }
             },

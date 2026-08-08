@@ -481,8 +481,10 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
         (selectedImageIndex == -1 &&
             selectedLocalFile == null &&
             _existingImageUrl == null)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Mohon isi semua field dan pilih gambar menu')));
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(const SnackBar(
+            content: Text('Mohon isi semua field dan pilih gambar menu')));
       return;
     }
 
@@ -538,9 +540,11 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                'Gagal menyimpan menu: ${UserMessageService.fromError(e)}')));
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+              content: Text(
+                  'Gagal menyimpan menu: ${UserMessageService.fromError(e)}')));
       }
     } finally {
       if (mounted) setState(() => isUploading = false);

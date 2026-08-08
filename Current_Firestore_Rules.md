@@ -21,6 +21,24 @@ service cloud.firestore {
       );
     }
 
+    function validVoucherProgramCounters() {
+      return request.resource.data.status in ["active", "paid", "closed"] &&
+        request.resource.data.totalRedeemed is int &&
+        request.resource.data.totalRedeemed >= 0 &&
+        request.resource.data.totalSettled is int &&
+        request.resource.data.totalSettled >= 0 &&
+        request.resource.data.totalSettled <= request.resource.data.totalRedeemed;
+    }
+
+    function validVoucherProgramCreate() {
+      return validVoucherProgramCounters() &&
+        request.resource.data.status == "active" &&
+        request.resource.data.defaultNominal is int &&
+        request.resource.data.defaultNominal >= 0 &&
+        request.resource.data.revision is int &&
+        request.resource.data.revision >= 0;
+    }
+
     // Members doc id may be custom (fullName_phone); field uid == Firebase Auth UID.
     function isMemberProfileOwner() {
       return isAuthenticated() && resource.data.uid == request.auth.uid;
@@ -122,10 +140,43 @@ service cloud.firestore {
     // ── B2B VOUCHER PROGRAMS ─────────────────────────────────────────────────
     match /voucherPrograms/{id} {
       allow read: if isAuthenticated();
-      // POS increments totalRedeemed atomically during order WriteBatch.
-      // Settlement (settleProgram) updates totalSettled and status from POS.
-      allow update: if isAuthenticated();
-      allow create, delete: if isAdmin();
+      // Program counters and the transactional B2B ledgers are POS-admin
+      // mutations.  This prevents an ordinary authenticated client from
+      // changing debt or marking a program paid.
+      allow create: if isAdmin() && validVoucherProgramCreate();
+      allow update: if isAdmin() && resource.data.status != "closed" &&
+        validVoucherProgramCounters();
+      allow delete: if isAdmin() && resource.data.status != "closed";
+      match /redemptions/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed" &&
+          ((request.resource.data.eventType == "redemption" &&
+              request.resource.data.amount is int &&
+              request.resource.data.amount > 0) ||
+            (request.resource.data.eventType == "edit" &&
+              request.resource.data.amountDelta is int &&
+              request.resource.data.amountDelta != 0));
+        allow delete: if false;
+      }
+      match /settlements/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed" &&
+          request.resource.data.amount is int &&
+          request.resource.data.amount > 0 &&
+          request.resource.data.paymentMethod in ["Cash", "QRIS", "Online"];
+        allow delete: if false;
+      }
+      match /closures/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed";
+        allow delete: if false;
+      }
     }
 
     // ── VOUCHER GROUP (CAMPAIGNS) ─────────────────────────────────────────────
@@ -321,7 +372,41 @@ service cloud.firestore {
     }
 
     match /zTesting_voucherPrograms/{id} {
-      allow read, write, update, delete: if true;
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && validVoucherProgramCreate();
+      allow update: if isAdmin() && resource.data.status != "closed" &&
+        validVoucherProgramCounters();
+      allow delete: if isAdmin() && resource.data.status != "closed";
+      match /redemptions/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed" &&
+          ((request.resource.data.eventType == "redemption" &&
+              request.resource.data.amount is int &&
+              request.resource.data.amount > 0) ||
+            (request.resource.data.eventType == "edit" &&
+              request.resource.data.amountDelta is int &&
+              request.resource.data.amountDelta != 0));
+        allow delete: if false;
+      }
+      match /settlements/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed" &&
+          request.resource.data.amount is int &&
+          request.resource.data.amount > 0 &&
+          request.resource.data.paymentMethod in ["Cash", "QRIS", "Online"];
+        allow delete: if false;
+      }
+      match /closures/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed";
+        allow delete: if false;
+      }
     }
 
     match /zTesting_MemberLinks/{id} {

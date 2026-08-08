@@ -69,32 +69,34 @@ class _HomeState extends State<Home> {
     // Set up message callback for showing snackbars
     controller.onShowMessage = (message, {bool isError = false}) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(
-                isError ? Icons.error : Icons.info,
-                color: Colors.white,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  message,
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(
+                  isError ? Icons.error : Icons.info,
+                  color: Colors.white,
                 ),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor:
+                isError ? Colors.red.shade700 : Colors.orange.shade700,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
           ),
-          backgroundColor:
-              isError ? Colors.red.shade700 : Colors.orange.shade700,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      );
+        );
     };
 
     controller.initialize();
@@ -646,12 +648,14 @@ class _HomeState extends State<Home> {
       }
       if (value != null) {
         controller.connectPrinter(value).catchError((e) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Tidak terhubung ke printer'),
-              duration: Duration(seconds: 2),
-            ),
-          );
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(
+              const SnackBar(
+                content: Text('Tidak terhubung ke printer'),
+                duration: Duration(seconds: 2),
+              ),
+            );
         });
       }
     });
@@ -858,10 +862,12 @@ class _HomeState extends State<Home> {
                           );
                           controller.clearEditMode();
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Pesanan berhasil diubah')),
-                            );
+                            ScaffoldMessenger.of(context)
+                              ..clearSnackBars()
+                              ..showSnackBar(
+                                const SnackBar(
+                                    content: Text('Pesanan berhasil diubah')),
+                              );
                           }
                         },
                       );
@@ -902,14 +908,16 @@ class _HomeState extends State<Home> {
     // Switch to POS view
     setState(() => _activeRoute = 'pos_order');
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content:
-            Text('Pesanan ${order.displayShortCode} dimuat ke daftar pesanan'),
-        backgroundColor: Colors.green.shade700,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+              'Pesanan ${order.displayShortCode} dimuat ke daftar pesanan'),
+          backgroundColor: Colors.green.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   void _showQuickExpense() {
@@ -978,9 +986,34 @@ class _HomeState extends State<Home> {
         controller.addListener(_onControllerUpdate);
         controller.onShowMessage = (message, {bool isError = false}) {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message)),
-          );
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    Icon(
+                      isError ? Icons.error : Icons.info,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        message,
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+                backgroundColor:
+                    isError ? Colors.red.shade700 : Colors.orange.shade700,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            );
         };
         controller.initialize();
         _initBadgeSubscriptions();

@@ -151,12 +151,14 @@ class _MarketingScreenState extends State<MarketingScreen>
       await _memberService.forceSync();
       await _loadMembers();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              'Gagal memperbarui data member: ${UserMessageService.fromError(e)}'),
-        ),
-      );
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+                'Gagal memperbarui data member: ${UserMessageService.fromError(e)}'),
+          ),
+        );
     } finally {
       setState(() => _isLoadingMembers = false);
     }
@@ -277,11 +279,13 @@ class _MarketingScreenState extends State<MarketingScreen>
                   'https://canteen-375-registration.vercel.app/register');
               if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content:
-                            Text('Tidak dapat membuka halaman pendaftaran')),
-                  );
+                  ScaffoldMessenger.of(context)
+                    ..clearSnackBars()
+                    ..showSnackBar(
+                      const SnackBar(
+                          content:
+                              Text('Tidak dapat membuka halaman pendaftaran')),
+                    );
                 }
               }
             },
@@ -462,26 +466,30 @@ class _MarketingScreenState extends State<MarketingScreen>
                 await _loadCampaigns();
 
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Row(
-                      children: [
-                        const Icon(Icons.check_circle, color: Colors.white),
-                        const SizedBox(width: 12),
-                        const Text('Campaign berhasil dibuat'),
-                      ],
+                ScaffoldMessenger.of(context)
+                  ..clearSnackBars()
+                  ..showSnackBar(
+                    SnackBar(
+                      content: Row(
+                        children: [
+                          const Icon(Icons.check_circle, color: Colors.white),
+                          const SizedBox(width: 12),
+                          const Text('Campaign berhasil dibuat'),
+                        ],
+                      ),
+                      backgroundColor: Colors.green,
                     ),
-                    backgroundColor: Colors.green,
-                  ),
-                );
+                  );
               } catch (e) {
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                        'Gagal membuat kampanye: ${UserMessageService.fromError(e)}'),
-                  ),
-                );
+                ScaffoldMessenger.of(context)
+                  ..clearSnackBars()
+                  ..showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          'Gagal membuat kampanye: ${UserMessageService.fromError(e)}'),
+                    ),
+                  );
               } finally {
                 if (mounted) {
                   setState(() => _isLoadingCampaigns = false);
@@ -1223,23 +1231,29 @@ class _MarketingScreenState extends State<MarketingScreen>
       await _loadCampaigns();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              !currentStatus ? 'Campaign diaktifkan' : 'Campaign dinonaktifkan',
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                !currentStatus
+                    ? 'Campaign diaktifkan'
+                    : 'Campaign dinonaktifkan',
+              ),
+              backgroundColor: !currentStatus ? Colors.green : Colors.orange,
             ),
-            backgroundColor: !currentStatus ? Colors.green : Colors.orange,
-          ),
-        );
+          );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Gagal mengubah status: ${UserMessageService.fromError(e)}'),
-          ),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                  'Gagal mengubah status: ${UserMessageService.fromError(e)}'),
+            ),
+          );
       }
     }
   }
@@ -1270,21 +1284,25 @@ class _MarketingScreenState extends State<MarketingScreen>
                 await _loadCampaigns();
 
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Campaign berhasil dihapus'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
+                  ScaffoldMessenger.of(context)
+                    ..clearSnackBars()
+                    ..showSnackBar(
+                      const SnackBar(
+                        content: Text('Campaign berhasil dihapus'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
                 }
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                          'Gagal menghapus kampanye: ${UserMessageService.fromError(e)}'),
-                    ),
-                  );
+                  ScaffoldMessenger.of(context)
+                    ..clearSnackBars()
+                    ..showSnackBar(
+                      SnackBar(
+                        content: Text(
+                            'Gagal menghapus kampanye: ${UserMessageService.fromError(e)}'),
+                      ),
+                    );
                 }
               }
             },

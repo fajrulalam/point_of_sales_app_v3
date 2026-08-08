@@ -1,0 +1,259 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() { return request.auth != null; }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.email == "gnavsih1@gmail.com" ||
+        request.auth.token.email == "admin@canteen375.com" ||
+        request.auth.token.email == "siti@canteen375.com" ||
+        request.auth.token.email == "amalia@canteen375.com" ||
+        request.auth.token.email == "eka@canteen375.com" ||
+        request.auth.token.email == "widya@canteen375.com"
+      );
+    }
+
+    function validVoucherProgramCounters() {
+      return request.resource.data.status in ["active", "paid", "closed"] &&
+        request.resource.data.totalRedeemed is int &&
+        request.resource.data.totalRedeemed >= 0 &&
+        request.resource.data.totalSettled is int &&
+        request.resource.data.totalSettled >= 0 &&
+        request.resource.data.totalSettled <= request.resource.data.totalRedeemed;
+    }
+
+    function validVoucherProgramFields() {
+      return request.resource.data.programName is string &&
+        request.resource.data.programName.size() > 0 &&
+        request.resource.data.institutionName is string &&
+        request.resource.data.institutionName.size() > 0 &&
+        request.resource.data.defaultNominal is int &&
+        request.resource.data.defaultNominal >= 0 &&
+        request.resource.data.revision is int &&
+        request.resource.data.revision >= 0;
+    }
+
+    function validVoucherProgramCreate() {
+      return validVoucherProgramCounters() &&
+        request.resource.data.status == "active" &&
+        validVoucherProgramFields();
+    }
+
+    function isMemberProfileOwner() {
+      return isAuthenticated() && resource.data.uid == request.auth.uid;
+    }
+
+    function memberIdRefersToAuthUser(memberDocId) {
+      return memberDocId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/Members/$(memberDocId)) &&
+          get(/databases/$(database)/documents/Members/$(memberDocId)).data.uid == request.auth.uid);
+    }
+
+    match /Categories/{id} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+    match /assets/{id} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+    match /config/{id} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+    match /DailyTransaction/{id} { allow read, write: if isAuthenticated(); }
+    match /MonthlyTransaction/{id} { allow read, write: if isAuthenticated(); }
+    match /YearlyTransaction/{id} { allow read, write: if isAuthenticated(); }
+    match /DailyFinancialReport/{id} {
+      allow read, write, update, delete: if true;
+      match /Expenses/{expenseId} { allow read, write, update, delete: if true; }
+    }
+    match /MonthlyFinancialReport/{id} { allow read, write, update, delete: if true; }
+    match /YearlyFinancialReport/{id} { allow read, write, update, delete: if true; }
+    match /Status/{id} { allow read, write, delete, update: if true; }
+    match /Expenses/{id} { allow read, write: if isAuthenticated(); }
+    match /CashflowSettings/{id} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+    match /RecentlyServed/{id} { allow read, write, delete, update: if true; }
+
+    match /MemberLinks/{authUid} {
+      allow read: if isAuthenticated() && request.auth.uid == authUid;
+      allow create: if isAuthenticated() && request.auth.uid == authUid
+                    && request.resource.data.memberDocId is string
+                    && request.resource.data.memberDocId.size() > 0;
+      allow update, delete: if isAdmin();
+    }
+    match /Members/{memberDocId} {
+      allow get: if !exists(/databases/$(database)/documents/Members/$(memberDocId)) || isAuthenticated();
+      allow list: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.role == "member";
+      allow update: if isAdmin() || isMemberProfileOwner();
+      allow delete: if isAdmin();
+    }
+
+    match /voucher/{id} {
+      allow read: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.userId));
+      allow write: if isAdmin();
+    }
+    match /vouchers/{id} {
+      allow read: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.userId));
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.userId));
+      allow delete: if isAdmin();
+    }
+
+    // B2B programs, counters, and operation ledgers are POS-admin mutations.
+    // Cashier accounts must therefore be members of isAdmin(), even though
+    // other operational collections retain their existing POS permissions.
+    match /voucherPrograms/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && validVoucherProgramCreate();
+      allow update: if isAdmin() && resource.data.status != "closed" &&
+        validVoucherProgramCounters() && validVoucherProgramFields();
+      allow delete: if isAdmin() && resource.data.status != "closed";
+      match /redemptions/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed" &&
+          ((request.resource.data.eventType == "redemption" &&
+              request.resource.data.amount is int &&
+              request.resource.data.amount > 0) ||
+            (request.resource.data.eventType == "edit" &&
+              request.resource.data.amountDelta is int &&
+              request.resource.data.amountDelta != 0));
+        allow delete: if false;
+      }
+      match /settlements/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed" &&
+          request.resource.data.amount is int &&
+          request.resource.data.amount > 0 &&
+          request.resource.data.paymentMethod in ["Cash", "QRIS", "Online"];
+        allow delete: if false;
+      }
+      match /closures/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed";
+        allow delete: if false;
+      }
+    }
+    match /voucherGroup/{groupId} {
+      allow read: if isAuthenticated();
+      allow create, delete: if isAdmin();
+      allow update: if isAuthenticated();
+    }
+    match /competitionRecords/{monthId} { allow read, write: if isAuthenticated(); }
+    match /SelfOrders/{orderId} { allow read, write: if true; }
+    match /pointTransactions/{id} {
+      allow read: if isAuthenticated() && memberIdRefersToAuthUser(resource.data.memberId);
+      allow write: if isAdmin();
+    }
+    match /feedbacks/{feedbackId} {
+      allow create: if isAuthenticated() && memberIdRefersToAuthUser(request.resource.data.memberId);
+      allow read: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.memberId));
+      allow update, delete: if isAdmin();
+    }
+
+    match /Canteens/{canteenId} {
+      allow read: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow create, delete: if isAdmin();
+      match /Inventory/{id} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+      match /DailyStockLogs/{id} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+      match /MenuCollection/{menuId} { allow read: if true; allow write: if isAdmin(); }
+      match /Metadata/{configId} {
+        allow read: if isAuthenticated();
+        allow write: if isAdmin() || (isAuthenticated() && configId == 'SelfOrderCounter');
+      }
+      match /Metadata/Settings { allow read: if isAuthenticated(); }
+      match /OptionGroups/{groupId} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+      match /suppliers/{supplierId} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+      match /shoppingOrders/{orderId} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+      match /Status/{orderId} { allow read, write, update, delete: if true; }
+      match /RecentlyServed/{orderId} { allow read, write, update, delete: if true; }
+      match /SelfOrders/{orderId} {
+        allow read: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.memberId));
+        allow create: if isAuthenticated() && memberIdRefersToAuthUser(request.resource.data.memberId);
+        allow update, delete: if isAdmin();
+      }
+      match /OpenBills/{memberId} {
+        allow read, write, update, delete: if isAuthenticated();
+        match /Orders/{tabOrderId} { allow read, write, update, delete: if isAuthenticated(); }
+      }
+      match /SettledBills/{billId} { allow read, write, update, delete: if isAuthenticated(); }
+      match /Orders/{orderID} { allow read, write, update, delete: if isAuthenticated(); }
+    }
+
+    match /products/{productId} { allow read: if true; allow write: if isAdmin(); }
+    match /products_test/{productId} { allow read: if true; allow write: if isAdmin(); }
+
+    // Testing-mode data is intentionally open only in the local/test project.
+    // B2B program and ledger writes remain admin-only so a misconfigured test
+    // client cannot exercise an unauthorised mutation against a shared project.
+    match /zTesting_Categories/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_DailyTransaction/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_MonthlyTransaction/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_YearlyTransaction/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_DailyFinancialReport/{id} {
+      allow read, write, update, delete: if true;
+      match /Expenses/{expenseId} { allow read, write, update, delete: if true; }
+    }
+    match /zTesting_MonthlyFinancialReport/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_YearlyFinancialReport/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_Expenses/{id} { allow read, write: if true; }
+    match /zTesting_Status/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_RecentlyServed/{id} { allow read, write, delete, update: if true; }
+    match /zTesting_Members/{uid} { allow read, write, update, delete: if true; }
+    match /zTesting_CashflowSettings/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_competitionRecords/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_voucher/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_vouchers/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_voucherGroup/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_voucherPrograms/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && validVoucherProgramCreate();
+      allow update: if isAdmin() && resource.data.status != "closed" &&
+        validVoucherProgramCounters() && validVoucherProgramFields();
+      allow delete: if isAdmin() && resource.data.status != "closed";
+      match /redemptions/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed" &&
+          ((request.resource.data.eventType == "redemption" &&
+              request.resource.data.amount is int &&
+              request.resource.data.amount > 0) ||
+            (request.resource.data.eventType == "edit" &&
+              request.resource.data.amountDelta is int &&
+              request.resource.data.amountDelta != 0));
+        allow delete: if false;
+      }
+      match /settlements/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed" &&
+          request.resource.data.amount is int &&
+          request.resource.data.amount > 0 &&
+          request.resource.data.paymentMethod in ["Cash", "QRIS", "Online"];
+        allow delete: if false;
+      }
+      match /closures/{operationId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin() &&
+          request.resource.data.operationId == operationId &&
+          request.resource.data.status == "completed";
+        allow delete: if false;
+      }
+    }
+    match /zTesting_MemberLinks/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_Canteens/{canteenId} {
+      allow read, write, update, delete: if true;
+      match /{subcollection=**} { allow read, write, update, delete: if true; }
+    }
+    match /zTesting_pointTransactions/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_SelfOrders/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_feedbacks/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_assets/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_config/{id} { allow read, write, update, delete: if true; }
+  }
+}

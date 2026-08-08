@@ -21,7 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
   static const String _correctPin = '375375';
   static const String _adminEmail = 'admin@canteen375.com';
   static const String _adminPassword = 'password123';
-  static const List<String> _employees = ['Ghinan', 'Amel', 'Eka', 'Dina'];
+  static const List<String> _employees = ['Ghinan', 'Amel', 'Riyah', 'Widya'];
 
   String? _selectedEmployee;
   bool _dropdownOpen = false;

@@ -89,10 +89,12 @@ class _ShoppingScreenState extends State<ShoppingScreen>
               'https://sentra-distribusi-rejoso-gemilang.vercel.app/pos');
           if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Could not launch Sentra Distribusi')),
-              );
+              ScaffoldMessenger.of(context)
+                ..clearSnackBars()
+                ..showSnackBar(
+                  const SnackBar(
+                      content: Text('Could not launch Sentra Distribusi')),
+                );
             }
           }
         },
@@ -1002,8 +1004,10 @@ class _SuppliersViewState extends State<SuppliersView> {
   Future<void> _showCreateOrderDialog(
       BuildContext context, Supplier supplier) async {
     if (supplier.items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Supplier tidak mempunyai barang.')));
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+            const SnackBar(content: Text('Supplier tidak mempunyai barang.')));
       return;
     }
 
@@ -1097,8 +1101,10 @@ class _SuppliersViewState extends State<SuppliersView> {
               }
 
               if (borderItems.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Tidak ada item yang dipesan')));
+                ScaffoldMessenger.of(context)
+                  ..clearSnackBars()
+                  ..showSnackBar(const SnackBar(
+                      content: Text('Tidak ada item yang dipesan')));
                 return;
               }
 
@@ -1158,11 +1164,13 @@ class _SuppliersViewState extends State<SuppliersView> {
                             );
                           } catch (e) {
                             if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                    content: Text(
-                                        'Gagal membagikan gambar: ${UserMessageService.fromError(e)}')),
-                              );
+                              ScaffoldMessenger.of(context)
+                                ..clearSnackBars()
+                                ..showSnackBar(
+                                  SnackBar(
+                                      content: Text(
+                                          'Gagal membagikan gambar: ${UserMessageService.fromError(e)}')),
+                                );
                             }
                           }
                         },
@@ -1231,7 +1239,7 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
               Text(
                 _startDate != null && _endDate != null
                     ? '${DateFormat('dd MMM yyyy').format(_startDate!)} - ${DateFormat('dd MMM yyyy').format(_endDate!)}'
-                    : 'Hari Ini (${DateFormat('dd MMM yyyy').format(DateTime.now())})',
+                    : '7 Hari Terakhir (${DateFormat('dd MMM yyyy').format(DateTime.now().subtract(const Duration(days: 6)))} - ${DateFormat('dd MMM yyyy').format(DateTime.now())})',
                 style: GoogleFonts.poppins(
                     fontWeight: FontWeight.bold,
                     color: const Color(0xFF2E7D32)),
@@ -1464,18 +1472,22 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
               try {
                 await ShoppingService.deleteOrder(order.id);
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Pesanan berhasil dihapus')),
-                  );
+                  ScaffoldMessenger.of(context)
+                    ..clearSnackBars()
+                    ..showSnackBar(
+                      const SnackBar(content: Text('Pesanan berhasil dihapus')),
+                    );
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text(
-                            'Gagal menghapus pesanan: ${UserMessageService.fromError(e)}'),
-                        backgroundColor: Colors.red),
-                  );
+                  ScaffoldMessenger.of(context)
+                    ..clearSnackBars()
+                    ..showSnackBar(
+                      SnackBar(
+                          content: Text(
+                              'Gagal menghapus pesanan: ${UserMessageService.fromError(e)}'),
+                          backgroundColor: Colors.red),
+                    );
                 }
               }
             },
@@ -1498,11 +1510,13 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
       );
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  'Gagal membagikan gambar: ${UserMessageService.fromError(e)}')),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+                content: Text(
+                    'Gagal membagikan gambar: ${UserMessageService.fromError(e)}')),
+          );
       }
     }
   }
@@ -1588,19 +1602,22 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                             order.id, correctedItems);
                         if (context.mounted) {
                           Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Pesanan berhasil dikoreksi')));
+                          ScaffoldMessenger.of(context)
+                            ..clearSnackBars()
+                            ..showSnackBar(const SnackBar(
+                                content: Text('Pesanan berhasil dikoreksi')));
                         }
                       } catch (e) {
                         if (context.mounted) {
                           setDialogState(() => isSaving = false);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text(
-                                    'Gagal mengoreksi pesanan: ${UserMessageService.fromError(e)}'),
-                                backgroundColor: Colors.red),
-                          );
+                          ScaffoldMessenger.of(context)
+                            ..clearSnackBars()
+                            ..showSnackBar(
+                              SnackBar(
+                                  content: Text(
+                                      'Gagal mengoreksi pesanan: ${UserMessageService.fromError(e)}'),
+                                  backgroundColor: Colors.red),
+                            );
                         }
                       }
                     },
@@ -1648,24 +1665,28 @@ class _ShoppingOrdersViewState extends State<ShoppingOrdersView> {
                               await ShoppingService.completeOrder(order);
                           if (dialogContext.mounted) {
                             Navigator.pop(dialogContext);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(result.wasAlreadyApplied
-                                    ? 'Pesanan ini sudah pernah diselesaikan'
-                                    : 'Stok berhasil ditambahkan ke Inventory'),
-                              ),
-                            );
+                            ScaffoldMessenger.of(context)
+                              ..clearSnackBars()
+                              ..showSnackBar(
+                                SnackBar(
+                                  content: Text(result.wasAlreadyApplied
+                                      ? 'Pesanan ini sudah pernah diselesaikan'
+                                      : 'Stok berhasil ditambahkan ke Inventory'),
+                                ),
+                              );
                           }
                         } catch (e) {
                           if (dialogContext.mounted) {
                             setDialogState(() => isSaving = false);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                    'Gagal menyelesaikan pesanan: ${UserMessageService.fromError(e)}'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
+                            ScaffoldMessenger.of(context)
+                              ..clearSnackBars()
+                              ..showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      'Gagal menyelesaikan pesanan: ${UserMessageService.fromError(e)}'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
                           }
                         }
                       },

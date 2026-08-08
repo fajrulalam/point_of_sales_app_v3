@@ -53,6 +53,27 @@ void main() {
     expect(result.single.stockUsedChange, 7);
   });
 
+  test('classifies restored edit stock as added stock', () {
+    final restored = InventoryService.coalesceStockDeltas([
+      const StockDelta(
+        inventoryItemId: 'sauce',
+        inventoryItemName: 'Sauce',
+        stockChange: 4,
+        stockAddedChange: 4,
+      ),
+      const StockDelta(
+        inventoryItemId: 'sauce',
+        inventoryItemName: 'Sauce',
+        stockChange: -1,
+        stockUsedChange: 1,
+      ),
+    ]).single;
+
+    expect(restored.stockChange, 3);
+    expect(restored.stockAddedChange, 4);
+    expect(restored.stockUsedChange, 1);
+  });
+
   test('does not invent stock usage for non-positive ingredient quantities',
       () {
     final result = StockRequirementCalculator.aggregateIngredients(

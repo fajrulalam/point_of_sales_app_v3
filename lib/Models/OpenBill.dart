@@ -15,8 +15,8 @@ class OpenBillOrder {
   });
 
   factory OpenBillOrder.fromMap(Map<String, dynamic> map) {
-    DateTime parsedTimestamp = map['timestamp'] != null 
-        ? (map['timestamp'] as Timestamp).toDate() 
+    DateTime parsedTimestamp = map['timestamp'] != null
+        ? (map['timestamp'] as Timestamp).toDate()
         : DateTime.now();
 
     List<SelfOrderItem> parsedItems = [];
@@ -54,6 +54,7 @@ class OpenBill {
   final String? statusDocId;
   final int customerNumber;
   final int takeAwayFee;
+  final int orderRevision;
 
   OpenBill({
     required this.memberId,
@@ -65,11 +66,14 @@ class OpenBill {
     this.statusDocId,
     this.customerNumber = 0,
     this.takeAwayFee = 0,
+    this.orderRevision = 0,
   });
 
   /// Parse from a root Status doc (NEW data flow)
   factory OpenBill.fromStatusDoc(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    int parseInt(dynamic value) =>
+        value is num ? value.toInt() : int.tryParse('$value') ?? 0;
 
     DateTime parsedCreatedAt = data['waktuPesan'] != null
         ? (data['waktuPesan'] as Timestamp).toDate()
@@ -79,7 +83,9 @@ class OpenBill {
 
     // Parse order history if available; fall back to flat orderItems for legacy docs
     List<OpenBillOrder> parsedOrders = [];
-    if (data['orderHistory'] != null && data['orderHistory'] is List && (data['orderHistory'] as List).isNotEmpty) {
+    if (data['orderHistory'] != null &&
+        data['orderHistory'] is List &&
+        (data['orderHistory'] as List).isNotEmpty) {
       parsedOrders = (data['orderHistory'] as List)
           .map((o) => OpenBillOrder.fromMap(o as Map<String, dynamic>))
           .toList();
@@ -111,17 +117,20 @@ class OpenBill {
       orders: parsedOrders,
       status: (data['isClosed'] == true) ? 'settled' : 'open',
       statusDocId: doc.id,
-      customerNumber: (data['customerNumber'] ?? 0).toInt(),
+      customerNumber: parseInt(data['customerNumber']),
       takeAwayFee: storedTakeAwayFee,
+      orderRevision: parseInt(data['orderRevision']),
     );
   }
 
   /// Parse from deeply nested OpenBills doc (LEGACY — kept for backwards compat)
   factory OpenBill.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    int parseInt(dynamic value) =>
+        value is num ? value.toInt() : int.tryParse('$value') ?? 0;
 
-    DateTime parsedCreatedAt = data['createdAt'] != null 
-        ? (data['createdAt'] as Timestamp).toDate() 
+    DateTime parsedCreatedAt = data['createdAt'] != null
+        ? (data['createdAt'] as Timestamp).toDate()
         : DateTime.now();
 
     List<OpenBillOrder> parsedOrders = [];
@@ -139,7 +148,8 @@ class OpenBill {
       orders: parsedOrders,
       status: data['status'] ?? 'open',
       statusDocId: data['statusDocId'] as String?,
-      customerNumber: (data['customerNumber'] ?? 0).toInt(),
+      customerNumber: parseInt(data['customerNumber']),
+      orderRevision: parseInt(data['orderRevision']),
     );
   }
 
@@ -154,9 +164,10 @@ class OpenBill {
       if (statusDocId != null) 'statusDocId': statusDocId,
       'customerNumber': customerNumber,
       'takeAwayFee': takeAwayFee,
+      'orderRevision': orderRevision,
     };
   }
-  
+
   bool get isOpen => status == 'open';
   bool get isFlagged => status == 'flagged';
 }
@@ -180,17 +191,18 @@ class SettledBill extends OpenBill {
     required this.discountAmount,
     this.voucherCode,
     super.status = 'settled',
+    super.orderRevision = 0,
   });
 
   factory SettledBill.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
-    
+
     // Parse base OpenBill fields
     final baseBill = OpenBill.fromFirestore(doc);
 
     // Parse SettledBill specific fields
-    DateTime parsedSettledAt = data['settledAt'] != null 
-        ? (data['settledAt'] as Timestamp).toDate() 
+    DateTime parsedSettledAt = data['settledAt'] != null
+        ? (data['settledAt'] as Timestamp).toDate()
         : DateTime.now();
 
     return SettledBill(
@@ -204,6 +216,7 @@ class SettledBill extends OpenBill {
       finalTotal: (data['finalTotal'] ?? baseBill.totalAmount).toInt(),
       discountAmount: (data['discountAmount'] ?? 0).toInt(),
       voucherCode: data['voucherCode'],
+      orderRevision: baseBill.orderRevision,
     );
   }
 

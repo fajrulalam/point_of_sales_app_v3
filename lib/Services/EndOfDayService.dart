@@ -149,15 +149,17 @@ class EndOfDayService {
 
     if (perishablesSnapshot.docs.isEmpty) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Tidak ada item perishable yang perlu direset',
-              style: GoogleFonts.poppins(),
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Tidak ada item perishable yang perlu direset',
+                style: GoogleFonts.poppins(),
+              ),
+              backgroundColor: Colors.blue,
             ),
-            backgroundColor: Colors.blue,
-          ),
-        );
+          );
       }
       return;
     }
@@ -311,33 +313,37 @@ class _EndOfDayDialogState extends State<_EndOfDayDialog> {
 
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 12),
-                Text(
-                  'Penutupan hari berhasil diselesaikan',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                ),
-              ],
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Penutupan hari berhasil diselesaikan',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
             ),
-            backgroundColor: Colors.green,
-          ),
-        );
+          );
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isProcessing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Gagal menyelesaikan penutupan hari: ${UserMessageService.fromError(e)}',
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Gagal menyelesaikan penutupan hari: ${UserMessageService.fromError(e)}',
+              ),
+              backgroundColor: Colors.red,
             ),
-            backgroundColor: Colors.red,
-          ),
-        );
+          );
       }
     }
   }

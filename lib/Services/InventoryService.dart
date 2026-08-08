@@ -508,7 +508,8 @@ class InventoryService {
           inventoryItemId: resolvedId ?? '',
           inventoryItemName: name,
           stockChange: deduct ? -required : required,
-          stockUsedChange: deduct ? required : -required,
+          stockUsedChange: deduct ? required : 0,
+          stockAddedChange: deduct ? 0 : required,
         ));
       }
     }

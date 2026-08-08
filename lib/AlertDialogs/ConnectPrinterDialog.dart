@@ -699,43 +699,47 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
     try {
       await widget.controller.reprintFromOrder(data);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 12),
-                Text(
-                  'Struk berhasil dicetak ulang',
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                ),
-              ],
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Struk berhasil dicetak ulang',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
             ),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+          );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error, color: Colors.white),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Gagal mencetak: ${UserMessageService.fromError(e)}',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.error, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Gagal mencetak: ${UserMessageService.fromError(e)}',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
             ),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+          );
       }
     } finally {
       if (mounted) {
@@ -782,13 +786,15 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
       if (e.toString().contains("already connected")) {
         await checkIfPrinterIsConnected();
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Gagal menghubungkan printer: ${UserMessageService.fromError(e)}'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                  'Gagal menghubungkan printer: ${UserMessageService.fromError(e)}'),
+              backgroundColor: Colors.red,
+            ),
+          );
       }
     }
   }
@@ -829,26 +835,30 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
         });
         widget.controller.printerIsConnected = false;
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                  'Koneksi printer terputus: ${UserMessageService.fromError(e)}'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(
+              SnackBar(
+                content: Text(
+                    'Koneksi printer terputus: ${UserMessageService.fromError(e)}'),
+                backgroundColor: Colors.red,
+              ),
+            );
         }
       }
     } else {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Printer belum terhubung',
-              style: GoogleFonts.poppins(),
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Printer belum terhubung',
+                style: GoogleFonts.poppins(),
+              ),
+              backgroundColor: Colors.orange,
             ),
-            backgroundColor: Colors.orange,
-          ),
-        );
+          );
       }
     }
   }
