@@ -290,15 +290,26 @@ class MemberProgramService {
     required String memberId,
     required DateTime eventAt,
   }) async {
-    final groups = await _fs
-        .collection(Col.name('voucherGroup'))
-        .where('type', isEqualTo: _campaignType)
-        .get();
-
-    final vouchers = await _fs
-        .collection(Col.name('vouchers'))
-        .where('userId', isEqualTo: memberId)
-        .get();
+    // Both queries are independent, so issue them concurrently. Filters are
+    // tightened to match exactly what selectCampaignCandidate/_isCampaignActive
+    // already require client-side (isActive/status=='active' for groups,
+    // type==_campaignType for vouchers) — this only reduces bytes transferred,
+    // it cannot change which candidate is ultimately selected.
+    final results = await Future.wait([
+      _fs
+          .collection(Col.name('voucherGroup'))
+          .where('type', isEqualTo: _campaignType)
+          .where('isActive', isEqualTo: true)
+          .where('status', isEqualTo: _activeCampaignStatus)
+          .get(),
+      _fs
+          .collection(Col.name('vouchers'))
+          .where('userId', isEqualTo: memberId)
+          .where('type', isEqualTo: _campaignType)
+          .get(),
+    ]);
+    final groups = results[0];
+    final vouchers = results[1];
     final byGroup = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
     for (final voucher in vouchers.docs) {
       final groupId = voucher.data()['voucherGroupId']?.toString();
@@ -380,9 +391,11 @@ class MemberProgramService {
     if (preparation.memberId.isNotEmpty) {
       await transaction.get(competitionMemberRef);
     }
-    final legacySnapshot = _isSafeLegacyMemberKey(preparation.memberId)
-        ? await transaction.get(legacyRef)
-        : null;
+    // legacyRef and periodRef are the same document (_legacyCompetitionRef
+    // just aliases _competitionPeriodRef), so reuse periodSnapshot instead of
+    // fetching it a second time.
+    final legacySnapshot =
+        _isSafeLegacyMemberKey(preparation.memberId) ? periodSnapshot : null;
     final campaignGroupSnapshot = campaignGroupRef == null
         ? null
         : await transaction.get(campaignGroupRef);
@@ -912,9 +925,11 @@ class MemberProgramService {
     final periodSnapshot = await transaction.get(periodRef);
     final memberSnapshot = await transaction.get(memberRef!);
     await transaction.get(competitionMemberRef);
-    final legacySnapshot = _isSafeLegacyMemberKey(newPreparation.memberId)
-        ? await transaction.get(_legacyCompetitionRef(periodId))
-        : null;
+    // _legacyCompetitionRef(periodId) is the same document as periodRef here
+    // (periodId == newPreparation.periodId, checked above), so reuse
+    // periodSnapshot instead of fetching it a second time.
+    final legacySnapshot =
+        _isSafeLegacyMemberKey(newPreparation.memberId) ? periodSnapshot : null;
 
     final oldCampaignGroupId = oldData['campaignGroupId']?.toString();
     final oldCampaignVoucherId = oldData['campaignVoucherId']?.toString();

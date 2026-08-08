@@ -387,22 +387,31 @@ class OrderConfirmationService {
               extraPaymentMethod: programExtraPaymentMethod,
               qrisAmount: programExtraSplitQrisAmount,
             );
-      final memberPreparation = await MemberProgramService.prepareOrder(
-        operationId: stableOperationId,
-        sourceType: 'self_order',
-        sourceId: selfOrder.id,
-        memberId: isMember ? memberId : null,
-        grossTotal: originalTotal,
-        finalBill: totalHarga,
-        b2bNominal: b2bPayment?.nominal ?? 0,
-      );
       final isExternalVoucher = appliedVoucherCode != null && !isPosVoucher;
-      if (isExternalVoucher) {
-        await MemberProgramService.reserveExternalVoucher(
+      // prepareOrder (local project, read-only) and reserveExternalVoucher
+      // (separate e-santren project) have no data dependency on each other —
+      // run them concurrently. Future.wait still awaits/observes both even if
+      // one throws, so this preserves the original all-or-nothing behavior.
+      final preparationResults = await Future.wait<dynamic>([
+        MemberProgramService.prepareOrder(
           operationId: stableOperationId,
-          voucherCode: appliedVoucherCode!,
-          amount: discountAmount,
-        );
+          sourceType: 'self_order',
+          sourceId: selfOrder.id,
+          memberId: isMember ? memberId : null,
+          grossTotal: originalTotal,
+          finalBill: totalHarga,
+          b2bNominal: b2bPayment?.nominal ?? 0,
+        ),
+        if (isExternalVoucher)
+          MemberProgramService.reserveExternalVoucher(
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+            amount: discountAmount,
+          ),
+      ]);
+      final memberPreparation =
+          preparationResults[0] as MemberProgramPreparation;
+      if (isExternalVoucher) {
         externalVoucherReserved = true;
       }
       final itemCounts = <String, int>{};
@@ -592,7 +601,13 @@ class OrderConfirmationService {
         },
       );
       posTransactionCommitted = true;
-      if (isExternalVoucher) {
+      // Sale is already durably committed at this point regardless of outcome
+      // below, and failure here only marks a status flag + shows a snackbar
+      // (never rolls back the sale) — an admin retry/reconciliation flow
+      // already exists for this failure mode. Run it after the loader is
+      // popped instead of blocking "Mohon tunggu" on two more round trips.
+      Future<void> finalizeExternalVoucherIfNeeded() async {
+        if (!isExternalVoucher) return;
         try {
           await MemberProgramService.finalizeExternalVoucher(
             operationId: stableOperationId,
@@ -619,11 +634,13 @@ class OrderConfirmationService {
           }
         }
       }
+
       if (result.wasAlreadyApplied) {
         if (context.mounted) {
           loaderPopped = true;
           Navigator.pop(context);
         }
+        unawaited(finalizeExternalVoucherIfNeeded());
         basketToClear.clear();
         uangYangDiterimaController.clear();
         customerNameController.clear();
@@ -647,6 +664,7 @@ class OrderConfirmationService {
         loaderPopped = true;
         Navigator.pop(context);
       }
+      unawaited(finalizeExternalVoucherIfNeeded());
       final inputText = uangYangDiterimaController.text.replaceAll('.', '');
       await _showSelfOrderSuccessDialog(
         context: context,
@@ -1519,22 +1537,31 @@ class OrderConfirmationService {
               extraPaymentMethod: programExtraPaymentMethod,
               qrisAmount: programExtraSplitQrisAmount,
             );
-      final memberPreparation = await MemberProgramService.prepareOrder(
-        operationId: stableOperationId,
-        sourceType: 'sale',
-        sourceId: stableOperationId,
-        memberId: isMember ? memberId : null,
-        grossTotal: originalTotal,
-        finalBill: totalHarga,
-        b2bNominal: b2bPayment?.nominal ?? 0,
-      );
       final isExternalVoucher = appliedVoucherCode != null && !isPosVoucher;
-      if (isExternalVoucher) {
-        await MemberProgramService.reserveExternalVoucher(
+      // prepareOrder (local project, read-only) and reserveExternalVoucher
+      // (separate e-santren project) have no data dependency on each other —
+      // run them concurrently. Future.wait still awaits/observes both even if
+      // one throws, so this preserves the original all-or-nothing behavior.
+      final preparationResults = await Future.wait<dynamic>([
+        MemberProgramService.prepareOrder(
           operationId: stableOperationId,
-          voucherCode: appliedVoucherCode!,
-          amount: discountAmount,
-        );
+          sourceType: 'sale',
+          sourceId: stableOperationId,
+          memberId: isMember ? memberId : null,
+          grossTotal: originalTotal,
+          finalBill: totalHarga,
+          b2bNominal: b2bPayment?.nominal ?? 0,
+        ),
+        if (isExternalVoucher)
+          MemberProgramService.reserveExternalVoucher(
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+            amount: discountAmount,
+          ),
+      ]);
+      final memberPreparation =
+          preparationResults[0] as MemberProgramPreparation;
+      if (isExternalVoucher) {
         externalVoucherReserved = true;
       }
       final itemCounts = <String, int>{};
@@ -1701,7 +1728,13 @@ class OrderConfirmationService {
         },
       );
       posTransactionCommitted = true;
-      if (isExternalVoucher) {
+      // Sale is already durably committed at this point regardless of outcome
+      // below, and failure here only marks a status flag + shows a snackbar
+      // (never rolls back the sale) — an admin retry/reconciliation flow
+      // already exists for this failure mode. Run it after the loader is
+      // popped instead of blocking "Mohon tunggu" on two more round trips.
+      Future<void> finalizeExternalVoucherIfNeeded() async {
+        if (!isExternalVoucher) return;
         try {
           await MemberProgramService.finalizeExternalVoucher(
             operationId: stableOperationId,
@@ -1734,6 +1767,7 @@ class OrderConfirmationService {
           loaderPopped = true;
           Navigator.pop(context);
         }
+        unawaited(finalizeExternalVoucherIfNeeded());
         basketToClear.clear();
         uangYangDiterimaController.clear();
         customerNameController.clear();
@@ -1757,6 +1791,7 @@ class OrderConfirmationService {
         loaderPopped = true;
         Navigator.pop(context);
       }
+      unawaited(finalizeExternalVoucherIfNeeded());
       final inputText = uangYangDiterimaController.text.replaceAll('.', '');
       final uangYangDiterima = int.tryParse(inputText) ?? 0;
       await _showSuccessDialog(
@@ -3901,22 +3936,31 @@ class OrderConfirmationService {
           resolvedMemberId = memberQuery.docs.first.id;
         }
       }
-      final memberPreparation = await MemberProgramService.prepareOrder(
-        operationId: stableOperationId,
-        sourceType: 'open_bill_settlement',
-        sourceId: statusDocId,
-        memberId: resolvedMemberId,
-        grossTotal: originalTotal,
-        finalBill: totalHarga,
-        b2bNominal: b2bPayment?.nominal ?? 0,
-      );
       final isExternalVoucher = appliedVoucherCode != null && !isPosVoucher;
-      if (isExternalVoucher) {
-        await MemberProgramService.reserveExternalVoucher(
+      // prepareOrder (local project, read-only) and reserveExternalVoucher
+      // (separate e-santren project) have no data dependency on each other —
+      // run them concurrently. Future.wait still awaits/observes both even if
+      // one throws, so this preserves the original all-or-nothing behavior.
+      final preparationResults = await Future.wait<dynamic>([
+        MemberProgramService.prepareOrder(
           operationId: stableOperationId,
-          voucherCode: appliedVoucherCode!,
-          amount: discountAmount,
-        );
+          sourceType: 'open_bill_settlement',
+          sourceId: statusDocId,
+          memberId: resolvedMemberId,
+          grossTotal: originalTotal,
+          finalBill: totalHarga,
+          b2bNominal: b2bPayment?.nominal ?? 0,
+        ),
+        if (isExternalVoucher)
+          MemberProgramService.reserveExternalVoucher(
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+            amount: discountAmount,
+          ),
+      ]);
+      final memberPreparation =
+          preparationResults[0] as MemberProgramPreparation;
+      if (isExternalVoucher) {
         externalVoucherReserved = true;
       }
       final map = <String, dynamic>{
@@ -4108,7 +4152,13 @@ class OrderConfirmationService {
         return InventoryOperationResult.applied();
       });
       posTransactionCommitted = true;
-      if (isExternalVoucher) {
+      // Sale is already durably committed at this point regardless of outcome
+      // below, and failure here only marks a status flag + shows a snackbar
+      // (never rolls back the sale) — an admin retry/reconciliation flow
+      // already exists for this failure mode. Run it after the loader is
+      // popped instead of blocking "Mohon tunggu" on two more round trips.
+      Future<void> finalizeExternalVoucherIfNeeded() async {
+        if (!isExternalVoucher) return;
         try {
           await MemberProgramService.finalizeExternalVoucher(
             operationId: stableOperationId,
@@ -4135,11 +4185,13 @@ class OrderConfirmationService {
           }
         }
       }
+
       if (result.wasAlreadyApplied) {
         if (context.mounted) {
           loaderPopped = true;
           Navigator.pop(context);
         }
+        unawaited(finalizeExternalVoucherIfNeeded());
         return;
       }
 
@@ -4157,6 +4209,7 @@ class OrderConfirmationService {
         loaderPopped = true;
         Navigator.pop(context);
       }
+      unawaited(finalizeExternalVoucherIfNeeded());
       await _showSuccessDialog(
         context: context,
         nomorBerikutnya: openBill.customerNumber,
