@@ -16,6 +16,7 @@ import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
+import 'package:point_of_sales_app_v3/Services/LiveBasketService.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
@@ -656,6 +657,16 @@ class HomeController extends ChangeNotifier {
         totalPackages; // Use this to track total physical packages for takeaway
     biayaBungkus = (totalPackages ~/ 4) * 1000;
     totalHarga = subtotal + biayaBungkus;
+
+    // Mirror the in-progress basket to the customer-facing tablet so the
+    // customer can cross-check their order while the cashier is building it.
+    LiveBasketService.instance.publish(
+      items: pesananList,
+      total: totalHarga,
+      packagingFee: biayaBungkus,
+      isTakeAway: isTakeAway,
+    );
+
     notifyListeners();
   }
 

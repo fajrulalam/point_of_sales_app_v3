@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "liveBasket": {
+      "current": {
+        ".read": "auth != null && (auth.token.admin === true || auth.token.posOperator === true || auth.token.email === 'gnavsih1@gmail.com' || auth.token.email === 'admin@canteen375.com' || auth.token.email === 'siti@canteen375.com' || auth.token.email === 'amalia@canteen375.com' || auth.token.email === 'eka@canteen375.com' || auth.token.email === 'widya@canteen375.com')",
+        ".write": "auth != null && (auth.token.admin === true || auth.token.posOperator === true || auth.token.email === 'gnavsih1@gmail.com' || auth.token.email === 'admin@canteen375.com' || auth.token.email === 'siti@canteen375.com' || auth.token.email === 'amalia@canteen375.com' || auth.token.email === 'eka@canteen375.com' || auth.token.email === 'widya@canteen375.com')"
+      }
+    },
+    "zTesting_liveBasket": {
+      "current": {
+        ".read": "auth != null && (auth.token.admin === true || auth.token.posOperator === true || auth.token.email === 'gnavsih1@gmail.com' || auth.token.email === 'admin@canteen375.com' || auth.token.email === 'siti@canteen375.com' || auth.token.email === 'amalia@canteen375.com' || auth.token.email === 'eka@canteen375.com' || auth.token.email === 'widya@canteen375.com')",
+        ".write": "auth != null && (auth.token.admin === true || auth.token.posOperator === true || auth.token.email === 'gnavsih1@gmail.com' || auth.token.email === 'admin@canteen375.com' || auth.token.email === 'siti@canteen375.com' || auth.token.email === 'amalia@canteen375.com' || auth.token.email === 'eka@canteen375.com' || auth.token.email === 'widya@canteen375.com')"
+      }
+    }
+  }
+}
