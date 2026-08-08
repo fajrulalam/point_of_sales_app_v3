@@ -90,6 +90,10 @@ class HomeController extends ChangeNotifier {
 
     // Check for missed perishable resets from previous days
     EndOfDayService.checkAndAutoResetPerishables();
+
+    // Publish the (empty) basket on startup so the customer-facing tablet
+    // never keeps showing a stale order left over from a previous session.
+    getTotal();
   }
 
   // Menu Management
@@ -662,6 +666,7 @@ class HomeController extends ChangeNotifier {
     // customer can cross-check their order while the cashier is building it.
     LiveBasketService.instance.publish(
       items: pesananList,
+      menuList: menuObjectList,
       total: totalHarga,
       packagingFee: biayaBungkus,
       isTakeAway: isTakeAway,
