@@ -49,7 +49,56 @@ service cloud.firestore {
     function memberIdRefersToAuthUser(memberDocId) {
       return memberDocId == request.auth.uid ||
         (exists(/databases/$(database)/documents/Members/$(memberDocId)) &&
-          get(/databases/$(database)/documents/Members/$(memberDocId)).data.uid == request.auth.uid);
+          get(/databases/$(database)/documents/Members/$(memberDocId)).data.uid == request.auth.uid) ||
+        (exists(/databases/$(database)/documents/zTesting_Members/$(memberDocId)) &&
+          get(/databases/$(database)/documents/zTesting_Members/$(memberDocId)).data.uid == request.auth.uid);
+    }
+
+    function memberProfileFieldsOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "fullName", "name", "nama", "phoneNumber", "phone", "email",
+        "photoUrl", "address", "updatedAt"
+      ]);
+    }
+
+    function validMemberPointLedger() {
+      return request.resource.data.operationId is string &&
+        request.resource.data.operationId.size() > 0 &&
+        request.resource.data.eventType in ["earn", "reverse", "manual_adjustment"] &&
+        request.resource.data.status in ["completed", "pending"] &&
+        request.resource.data.pointsDelta is int &&
+        request.resource.data.memberId is string &&
+        request.resource.data.memberId.size() > 0;
+    }
+
+    function validMemberProgramOperation() {
+      return request.resource.data.operationId is string &&
+        request.resource.data.operationId.size() > 0 &&
+        request.resource.data.status in ["completed", "pending", "skipped"];
+    }
+
+    function validMemberCampaign() {
+      return request.resource.data.type == "cashbackCampaign" &&
+        request.resource.data.status in ["active", "archived"] &&
+        request.resource.data.isActive is bool &&
+        ((request.resource.data.status == "active" && request.resource.data.isActive == true) ||
+          (request.resource.data.status == "archived" && request.resource.data.isActive == false)) &&
+        request.resource.data.threshold is int &&
+        request.resource.data.threshold > 0 &&
+        request.resource.data.value is int &&
+        request.resource.data.value > 0 &&
+        request.resource.data.transactionRequirement is int &&
+        request.resource.data.transactionRequirement >= 0 &&
+        request.resource.data.activeDate is timestamp &&
+        request.resource.data.expireDate is timestamp &&
+        request.resource.data.expireDate >= request.resource.data.activeDate &&
+        request.resource.data.totalParticipants is int &&
+        request.resource.data.totalParticipants >= 0 &&
+        request.resource.data.totalClaimed is int &&
+        request.resource.data.totalClaimed >= 0 &&
+        request.resource.data.totalClaimed <= request.resource.data.totalParticipants &&
+        request.resource.data.totalRedemptions is int &&
+        request.resource.data.totalRedemptions >= request.resource.data.totalClaimed;
     }
 
     match /Categories/{id} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
@@ -81,7 +130,8 @@ service cloud.firestore {
       allow list: if isAuthenticated();
       allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid
                     && request.resource.data.role == "member";
-      allow update: if isAdmin() || isMemberProfileOwner();
+      allow update: if isAdmin() ||
+        (isMemberProfileOwner() && memberProfileFieldsOnly());
       allow delete: if isAdmin();
     }
 
@@ -91,9 +141,8 @@ service cloud.firestore {
     }
     match /vouchers/{id} {
       allow read: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.userId));
-      allow create: if isAuthenticated();
-      allow update: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.userId));
-      allow delete: if isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if false;
     }
 
     // B2B programs, counters, and operation ledgers are POS-admin mutations.
@@ -138,14 +187,58 @@ service cloud.firestore {
     }
     match /voucherGroup/{groupId} {
       allow read: if isAuthenticated();
-      allow create, delete: if isAdmin();
-      allow update: if isAuthenticated();
+      allow create: if isAdmin() && request.resource.data.voucherGroupId == groupId &&
+        validMemberCampaign();
+      allow update: if isAdmin() && request.resource.data.voucherGroupId == groupId &&
+        validMemberCampaign() &&
+        (resource.data.status != "archived" ||
+          request.resource.data.status == "archived");
+      allow delete: if false;
     }
-    match /competitionRecords/{monthId} { allow read, write: if isAuthenticated(); }
+    match /competitionRecords/{monthId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+      match /members/{memberId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin();
+        allow delete: if false;
+      }
+    }
     match /SelfOrders/{orderId} { allow read, write: if true; }
     match /pointTransactions/{id} {
-      allow read: if isAuthenticated() && memberIdRefersToAuthUser(resource.data.memberId);
-      allow write: if isAdmin();
+      allow read: if isAdmin() ||
+        (isAuthenticated() && memberIdRefersToAuthUser(resource.data.memberId));
+      allow create: if isAdmin() &&
+        request.resource.data.operationId == id && validMemberPointLedger();
+      allow update: if isAdmin() &&
+        resource.data.operationId == id &&
+        request.resource.data.operationId == id && validMemberPointLedger();
+      allow delete: if false;
+    }
+    match /memberProgramOperations/{id} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() &&
+        request.resource.data.operationId == id &&
+        validMemberProgramOperation();
+      allow delete: if false;
+    }
+    match /competitionPrizes/{periodId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+      match /winners/{winnerId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin();
+        allow delete: if false;
+      }
+    }
+    match /externalVoucherClaims/{id} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() &&
+        request.resource.data.operationId == id &&
+        request.resource.data.status in ["pending", "failed", "completed"];
+      allow delete: if false;
     }
     match /feedbacks/{feedbackId} {
       allow create: if isAuthenticated() && memberIdRefersToAuthUser(request.resource.data.memberId);
@@ -202,12 +295,45 @@ service cloud.firestore {
     match /zTesting_Expenses/{id} { allow read, write: if true; }
     match /zTesting_Status/{id} { allow read, write, update, delete: if true; }
     match /zTesting_RecentlyServed/{id} { allow read, write, delete, update: if true; }
-    match /zTesting_Members/{uid} { allow read, write, update, delete: if true; }
+    match /zTesting_Members/{uid} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.resource.data.uid == request.auth.uid);
+      allow update: if isAdmin() ||
+        (isAuthenticated() && resource.data.uid == request.auth.uid && memberProfileFieldsOnly());
+      allow delete: if isAdmin();
+    }
     match /zTesting_CashflowSettings/{id} { allow read, write, update, delete: if true; }
-    match /zTesting_competitionRecords/{id} { allow read, write, update, delete: if true; }
-    match /zTesting_voucher/{id} { allow read, write, update, delete: if true; }
-    match /zTesting_vouchers/{id} { allow read, write, update, delete: if true; }
-    match /zTesting_voucherGroup/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_competitionRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+      match /members/{memberId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin();
+        allow delete: if false;
+      }
+    }
+    match /zTesting_voucher/{id} {
+      allow read: if isAdmin() ||
+        (isAuthenticated() && memberIdRefersToAuthUser(resource.data.userId));
+      allow write: if isAdmin();
+    }
+    match /zTesting_vouchers/{id} {
+      allow read: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.userId));
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+    match /zTesting_voucherGroup/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && request.resource.data.voucherGroupId == id &&
+        validMemberCampaign();
+      allow update: if isAdmin() && request.resource.data.voucherGroupId == id &&
+        validMemberCampaign() &&
+        (resource.data.status != "archived" ||
+          request.resource.data.status == "archived");
+      allow delete: if false;
+    }
     match /zTesting_voucherPrograms/{id} {
       allow read: if isAuthenticated();
       allow create: if isAdmin() && validVoucherProgramCreate();
@@ -245,12 +371,50 @@ service cloud.firestore {
         allow delete: if false;
       }
     }
-    match /zTesting_MemberLinks/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_MemberLinks/{authUid} {
+      allow read: if isAuthenticated() && request.auth.uid == authUid;
+      allow create: if isAuthenticated() && request.auth.uid == authUid
+                    && request.resource.data.memberDocId is string
+                    && request.resource.data.memberDocId.size() > 0;
+      allow update, delete: if isAdmin();
+    }
     match /zTesting_Canteens/{canteenId} {
       allow read, write, update, delete: if true;
       match /{subcollection=**} { allow read, write, update, delete: if true; }
     }
-    match /zTesting_pointTransactions/{id} { allow read, write, update, delete: if true; }
+    match /zTesting_pointTransactions/{id} {
+      allow read: if isAdmin() ||
+        (isAuthenticated() && memberIdRefersToAuthUser(resource.data.memberId));
+      allow create: if isAdmin() &&
+        request.resource.data.operationId == id && validMemberPointLedger();
+      allow update: if isAdmin() &&
+        resource.data.operationId == id &&
+        request.resource.data.operationId == id && validMemberPointLedger();
+      allow delete: if false;
+    }
+    match /zTesting_memberProgramOperations/{id} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() &&
+        request.resource.data.operationId == id && validMemberProgramOperation();
+      allow delete: if false;
+    }
+    match /zTesting_competitionPrizes/{id} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+      match /winners/{winnerId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAdmin();
+        allow delete: if false;
+      }
+    }
+    match /zTesting_externalVoucherClaims/{id} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() &&
+        request.resource.data.operationId == id &&
+        request.resource.data.status in ["pending", "failed", "completed"];
+      allow delete: if false;
+    }
     match /zTesting_SelfOrders/{id} { allow read, write, update, delete: if true; }
     match /zTesting_feedbacks/{id} { allow read, write, update, delete: if true; }
     match /zTesting_assets/{id} { allow read, write, update, delete: if true; }

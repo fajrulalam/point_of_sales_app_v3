@@ -10,6 +10,8 @@ import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Services/LoaderWidget.dart';
 import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 import 'package:point_of_sales_app_v3/Services/VoucherProgramService.dart';
+import 'package:point_of_sales_app_v3/Models/MemberProgramModels.dart';
+import 'package:point_of_sales_app_v3/Services/MemberProgramService.dart';
 
 class EditOrderService {
   static Future<void> processEditOrder({
@@ -468,6 +470,48 @@ class EditOrderService {
       LoaderWidget.showLoaderDialog(context, message: 'Menyimpan perubahan...');
     }
     var loaderPopped = false;
+    final memberIdForProgram = originalStatusData['isMember'] == true
+        ? originalStatusData['memberId']?.toString()
+        : null;
+    final isUnsettledOpenBill =
+        originalStatusData['transactionMethod']?.toString() == 'Open Bill' &&
+            originalStatusData['isClosed'] != true;
+    final originalFinalTotal =
+        InventoryService.toInt(originalStatusData['total']);
+    final originalProgramNominal =
+        InventoryService.toInt(originalStatusData['programNominal']);
+    final preparationB2BNominal =
+        originalStatusData['paymentMethod'] == 'Program'
+            ? (originalProgramNominal < newTotalHarga
+                ? originalProgramNominal
+                : newTotalHarga)
+            : 0;
+    final originalEventAt = originalStatusData['waktuPesan'] is Timestamp
+        ? (originalStatusData['waktuPesan'] as Timestamp).toDate()
+        : DateTime.now();
+    final originalPointOperationId =
+        originalStatusData['memberProgramOperationId']?.toString() ??
+            originalStatusData['pointsOperationId']?.toString() ??
+            '';
+    MemberProgramPreparation? memberPreparation;
+    if (memberIdForProgram != null &&
+        memberIdForProgram.trim().isNotEmpty &&
+        !isUnsettledOpenBill) {
+      memberPreparation = await MemberProgramService.prepareOrder(
+        operationId: operationId,
+        sourceType: 'edit',
+        sourceId: statusDocId,
+        memberId: memberIdForProgram,
+        grossTotal: InventoryService.toInt(
+          originalStatusData['grossTotal'] ??
+              originalStatusData['originalTotal'] ??
+              originalFinalTotal,
+        ),
+        finalBill: newTotalHarga,
+        b2bNominal: preparationB2BNominal,
+        eventAt: originalEventAt,
+      );
+    }
     try {
       await InventoryService().refreshInventoryCache();
       final result = await firestore
@@ -535,6 +579,21 @@ class EditOrderService {
           optionGroupLookup: optionGroupLookup,
           statusDocId: statusDocId,
         );
+
+        MemberProgramOperationResult? memberProgramResult;
+        if (memberPreparation != null) {
+          if (originalPointOperationId.isEmpty) {
+            throw const MemberProgramException(
+                'Pesanan member lama tidak memiliki ledger poin. Edit aman diblokir dan perlu penyesuaian administrator.');
+          }
+          memberProgramResult =
+              await MemberProgramService.queueOrderEditInTransaction(
+            transaction: transaction,
+            editOperationId: operationId,
+            originalPointOperationId: originalPointOperationId,
+            newPreparation: memberPreparation!,
+          );
+        }
 
         final oldSubTotal = InventoryService.toInt(current['subTotal']);
         final oldTakeAwayFee = InventoryService.toInt(current['takeAwayFee']);
@@ -653,6 +712,19 @@ class EditOrderService {
           statusUpdates['isSplitPayment'] = false;
           statusUpdates['splitDetails'] = FieldValue.delete();
         }
+        if (memberPreparation != null && memberProgramResult != null) {
+          statusUpdates.addAll({
+            'memberProgramOperationId': operationId,
+            'pointsOperationId': operationId,
+            'competitionPeriodId': memberPreparation!.periodId,
+            'pointsAwarded': memberPreparation!.points.pointsDelta,
+            'eligibleAmountForPoints': memberPreparation!.points.eligibleAmount,
+            'memberProgramStatus':
+                memberProgramResult!.pending ? 'pending' : 'completed',
+            'memberProgramAuditFlags': memberProgramResult!.auditFlags,
+            'memberProgramSchemaVersion': 2,
+          });
+        }
         transaction.update(statusRef, statusUpdates);
         transaction.set(
             operationRef,
@@ -663,6 +735,8 @@ class EditOrderService {
               'completedAt': FieldValue.serverTimestamp(),
               'auditFlags':
                   preparation.auditFlags.map((flag) => flag.toMap()).toList(),
+              if (memberProgramResult != null)
+                'memberProgramAuditFlags': memberProgramResult!.auditFlags,
             },
             SetOptions(merge: true));
         return InventoryOperationResult.applied(flags: preparation.auditFlags);

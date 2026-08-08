@@ -24,6 +24,8 @@ class _FinancialReportBottomSheetState
   int? _systemTotal;
   int _totalVoucher = 0;
   int _totalVoucherSettled = 0;
+  int _totalB2BRedeemed = 0;
+  int _totalB2BSettled = 0;
   bool _isLoadingTotal = true;
 
   // Expenses fetched from Firestore
@@ -90,9 +92,17 @@ class _FinancialReportBottomSheetState
       if (doc.exists && doc.data() != null) {
         setState(() {
           _systemTotal = InventoryService.toInt(doc.data()!['total']);
-          _totalVoucher = InventoryService.toInt(doc.data()!['totalVoucher']);
-          _totalVoucherSettled =
-              InventoryService.toInt(doc.data()!['totalVoucherSettled']);
+          _totalB2BRedeemed = InventoryService.toInt(
+            doc.data()!['totalB2BRedeemed'] ?? doc.data()!['totalVoucher'],
+          );
+          _totalB2BSettled = InventoryService.toInt(
+            doc.data()!['totalB2BSettled'] ??
+                doc.data()!['totalVoucherSettled'],
+          );
+          // Keep the old fields populated for the existing validation dialog
+          // and historical report documents.
+          _totalVoucher = _totalB2BRedeemed;
+          _totalVoucherSettled = _totalB2BSettled;
           _isLoadingTotal = false;
         });
       } else {
@@ -100,6 +110,8 @@ class _FinancialReportBottomSheetState
           _systemTotal = 0;
           _totalVoucher = 0;
           _totalVoucherSettled = 0;
+          _totalB2BRedeemed = 0;
+          _totalB2BSettled = 0;
           _isLoadingTotal = false;
         });
       }
@@ -108,6 +120,8 @@ class _FinancialReportBottomSheetState
         _systemTotal = 0;
         _totalVoucher = 0;
         _totalVoucherSettled = 0;
+        _totalB2BRedeemed = 0;
+        _totalB2BSettled = 0;
         _isLoadingTotal = false;
       });
     }
@@ -286,6 +300,12 @@ class _FinancialReportBottomSheetState
           _totalVoucher - InventoryService.toInt(currentData['totalVoucher']);
       final deltaVoucherSettled = _totalVoucherSettled -
           InventoryService.toInt(currentData['totalVoucherSettled']);
+      final deltaB2BRedeemed = _totalB2BRedeemed -
+          InventoryService.toInt(
+              currentData['totalB2BRedeemed'] ?? currentData['totalVoucher']);
+      final deltaB2BSettled = _totalB2BSettled -
+          InventoryService.toInt(currentData['totalB2BSettled'] ??
+              currentData['totalVoucherSettled']);
 
       final deltaExpCash =
           expensesCash - InventoryService.toInt(currentData['expensesCash']);
@@ -320,6 +340,8 @@ class _FinancialReportBottomSheetState
             'systemSalesOnline': totalOnline,
             'totalVoucher': _totalVoucher,
             'totalVoucherSettled': _totalVoucherSettled,
+            'totalB2BRedeemed': _totalB2BRedeemed,
+            'totalB2BSettled': _totalB2BSettled,
             'expensesCash': expensesCash,
             'expensesQris': expensesQris,
             'expensesOnline': expensesOnline,
@@ -347,6 +369,8 @@ class _FinancialReportBottomSheetState
             'systemSalesOnline': FieldValue.increment(deltaSysOnline),
             'totalVoucher': FieldValue.increment(deltaVoucher),
             'totalVoucherSettled': FieldValue.increment(deltaVoucherSettled),
+            'totalB2BRedeemed': FieldValue.increment(deltaB2BRedeemed),
+            'totalB2BSettled': FieldValue.increment(deltaB2BSettled),
             'expensesCash': FieldValue.increment(deltaExpCash),
             'expensesQris': FieldValue.increment(deltaExpQris),
             'expensesOnline': FieldValue.increment(deltaExpOnline),
@@ -375,6 +399,8 @@ class _FinancialReportBottomSheetState
             'systemSalesOnline': FieldValue.increment(deltaSysOnline),
             'totalVoucher': FieldValue.increment(deltaVoucher),
             'totalVoucherSettled': FieldValue.increment(deltaVoucherSettled),
+            'totalB2BRedeemed': FieldValue.increment(deltaB2BRedeemed),
+            'totalB2BSettled': FieldValue.increment(deltaB2BSettled),
             'expensesCash': FieldValue.increment(deltaExpCash),
             'expensesQris': FieldValue.increment(deltaExpQris),
             'expensesOnline': FieldValue.increment(deltaExpOnline),
@@ -624,7 +650,7 @@ class _FinancialReportBottomSheetState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Piutang Voucher B2B (hari ini)',
+                  'Redemption Voucher B2B (hari ini)',
                   style: GoogleFonts.poppins(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -632,7 +658,7 @@ class _FinancialReportBottomSheetState
                   ),
                 ),
                 Text(
-                  'Transaksi ini belum masuk kas — menunggu pembayaran dari institusi.',
+                  'Nilai sponsor B2B belum menjadi uang tunai/online yang diterima.',
                   style: GoogleFonts.poppins(
                     fontSize: 11,
                     color: Colors.purple.shade400,
@@ -643,7 +669,7 @@ class _FinancialReportBottomSheetState
           ),
           const SizedBox(width: 8),
           Text(
-            'Rp ${_fmt(_totalVoucher)}',
+            'Rp ${_fmt(_totalB2BRedeemed)}',
             style: GoogleFonts.poppins(
               fontSize: 15,
               fontWeight: FontWeight.bold,
@@ -1111,12 +1137,12 @@ class _ValidationDialog extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Redemption Voucher B2B (gross)',
+                  'Redemption Voucher B2B (tidak masuk kas)',
                   style: GoogleFonts.poppins(
                       fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 Text(
-                  'Nilai voucher B2B yang digunakan pada periode ini: Rp ${_fmt(totalVoucher)}',
+                  'Nilai sponsor B2B pada periode ini: Rp ${_fmt(totalVoucher)}',
                   style: GoogleFonts.poppins(
                       fontSize: 12, color: Colors.purple.shade700),
                 ),
@@ -1142,7 +1168,7 @@ class _ValidationDialog extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Pembayaran B2B yang sudah masuk kas: Rp ${_fmt(totalVoucherSettled)}',
+              'Settlement B2B yang benar-benar masuk kas/online: Rp ${_fmt(totalVoucherSettled)}',
               style: GoogleFonts.poppins(
                   fontSize: 12, color: Colors.green.shade700),
             ),

@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Widgets/MarketingProgressCard.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/MemberProgramService.dart';
+import 'package:point_of_sales_app_v3/Models/MemberProgramModels.dart';
 
 class MemberProgressBottomSheet extends StatelessWidget {
   final Member member;
@@ -82,8 +84,10 @@ class MemberProgressBottomSheet extends StatelessWidget {
                   vouchers.sort((a, b) {
                     final aData = a.data() as Map<String, dynamic>;
                     final bData = b.data() as Map<String, dynamic>;
-                    final aTime = aData['lastUpdatedAt'] as Timestamp?;
-                    final bTime = bData['lastUpdatedAt'] as Timestamp?;
+                    final aTime =
+                        MemberProgramValues.dateValue(aData['lastUpdatedAt']);
+                    final bTime =
+                        MemberProgramValues.dateValue(bData['lastUpdatedAt']);
                     if (aTime == null && bTime == null) return 0;
                     if (aTime == null) return 1;
                     if (bTime == null) return -1;
@@ -115,10 +119,15 @@ class MemberProgressBottomSheet extends StatelessWidget {
                       else
                         ...vouchers.take(3).map((v) {
                           final data = v.data() as Map<String, dynamic>;
-                          final status = data['status'] ?? 'UNKNOWN';
-                          final points = data['userPoints'] ?? 0;
-                          final threshold = data['threshold'] ?? 0;
-                          final progress = (points / threshold).clamp(0.0, 1.0);
+                          final status =
+                              data['status']?.toString() ?? 'UNKNOWN';
+                          final points =
+                              MemberProgramService.parseInt(data['userPoints']);
+                          final threshold =
+                              MemberProgramService.parseInt(data['threshold']);
+                          final progress = threshold <= 0
+                              ? 0.0
+                              : (points / threshold).clamp(0.0, 1.0);
 
                           Color statusColor;
                           IconData statusIcon;

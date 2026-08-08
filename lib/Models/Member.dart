@@ -1,3 +1,5 @@
+import 'package:point_of_sales_app_v3/Models/MemberProgramModels.dart';
+
 class Member {
   final String id;
   final String name; // maps from fullName
@@ -5,7 +7,7 @@ class Member {
   final String? memberId;
   final int points;
   final DateTime? createdAt;
-  
+
   // New fields
   final String category;
   final String asrama;
@@ -42,24 +44,22 @@ class Member {
   factory Member.fromFirestore(String id, Map<String, dynamic> data) {
     return Member(
       id: id,
-      name: data['fullName'] ?? (data['name'] ?? ''),
-      phoneNumber: data['phoneNumber'] ?? '',
-      memberId: data['memberId'],
-      points: data['points'] ?? 0,
-      createdAt: data['createdAt'] != null 
-          ? (data['createdAt'] as dynamic).toDate() 
-          : null,
-      category: data['category'] ?? '',
-      asrama: data['asrama'] ?? '',
-      dateOfBirth: data['dateOfBirth'] ?? '',
-      email: data['email'] ?? '',
-      faculty: data['faculty'] ?? '',
-      gender: data['gender'] ?? '',
-      institution: data['institution'] ?? '',
-      major: data['major'] ?? '',
-      residence: data['residence'] ?? '',
-      unitEducation: data['unitEducation'] ?? '',
-      workLocation: data['workLocation'] ?? '',
+      name: (data['fullName'] ?? data['name'] ?? '').toString(),
+      phoneNumber: (data['phoneNumber'] ?? '').toString(),
+      memberId: data['memberId']?.toString(),
+      points: MemberProgramValues.intValue(data['points']),
+      createdAt: MemberProgramValues.dateValue(data['createdAt']),
+      category: (data['category'] ?? '').toString(),
+      asrama: (data['asrama'] ?? '').toString(),
+      dateOfBirth: (data['dateOfBirth'] ?? '').toString(),
+      email: (data['email'] ?? '').toString(),
+      faculty: (data['faculty'] ?? '').toString(),
+      gender: (data['gender'] ?? '').toString(),
+      institution: (data['institution'] ?? '').toString(),
+      major: (data['major'] ?? '').toString(),
+      residence: (data['residence'] ?? '').toString(),
+      unitEducation: (data['unitEducation'] ?? '').toString(),
+      workLocation: (data['workLocation'] ?? '').toString(),
     );
   }
 
@@ -87,25 +87,23 @@ class Member {
 
   factory Member.fromMap(Map<String, dynamic> map) {
     return Member(
-      id: map['id'],
-      name: map['name'],
-      phoneNumber: map['phoneNumber'],
-      memberId: map['memberId'],
-      points: map['points'] ?? 0,
-      createdAt: map['createdAt'] != null 
-          ? DateTime.parse(map['createdAt']) 
-          : null,
-      category: map['category'] ?? '',
-      asrama: map['asrama'] ?? '',
-      dateOfBirth: map['dateOfBirth'] ?? '',
-      email: map['email'] ?? '',
-      faculty: map['faculty'] ?? '',
-      gender: map['gender'] ?? '',
-      institution: map['institution'] ?? '',
-      major: map['major'] ?? '',
-      residence: map['residence'] ?? '',
-      unitEducation: map['unitEducation'] ?? '',
-      workLocation: map['workLocation'] ?? '',
+      id: (map['id'] ?? '').toString(),
+      name: (map['name'] ?? '').toString(),
+      phoneNumber: (map['phoneNumber'] ?? '').toString(),
+      memberId: map['memberId']?.toString(),
+      points: MemberProgramValues.intValue(map['points']),
+      createdAt: MemberProgramValues.dateValue(map['createdAt']),
+      category: (map['category'] ?? '').toString(),
+      asrama: (map['asrama'] ?? '').toString(),
+      dateOfBirth: (map['dateOfBirth'] ?? '').toString(),
+      email: (map['email'] ?? '').toString(),
+      faculty: (map['faculty'] ?? '').toString(),
+      gender: (map['gender'] ?? '').toString(),
+      institution: (map['institution'] ?? '').toString(),
+      major: (map['major'] ?? '').toString(),
+      residence: (map['residence'] ?? '').toString(),
+      unitEducation: (map['unitEducation'] ?? '').toString(),
+      workLocation: (map['workLocation'] ?? '').toString(),
     );
   }
 }

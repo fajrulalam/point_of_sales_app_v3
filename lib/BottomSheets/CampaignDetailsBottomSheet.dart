@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Widgets/MarketingProgressCard.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
+import 'package:point_of_sales_app_v3/Services/MemberProgramService.dart';
 
 class CampaignDetailsBottomSheet extends StatelessWidget {
   final QueryDocumentSnapshot campaignDoc;
@@ -101,10 +102,14 @@ class CampaignDetailsBottomSheet extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final v = vouchers[index];
                       final data = v.data() as Map<String, dynamic>;
-                      final status = data['status'] ?? 'UNKNOWN';
-                      final points = data['userPoints'] ?? 0;
-                      final threshold = data['threshold'] ?? 0;
-                      final progress = (points / threshold).clamp(0.0, 1.0);
+                      final status = data['status']?.toString() ?? 'UNKNOWN';
+                      final points =
+                          MemberProgramService.parseInt(data['userPoints']);
+                      final threshold =
+                          MemberProgramService.parseInt(data['threshold']);
+                      final progress = threshold <= 0
+                          ? 0.0
+                          : (points / threshold).clamp(0.0, 1.0);
 
                       // Fallback: If 'nama' is missing in voucher, find it from our local members list
                       final userId = data['userId'];

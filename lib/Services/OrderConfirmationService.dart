@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -10,7 +9,6 @@ import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 import 'package:point_of_sales_app_v3/Models/RecommendationModels.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 import 'package:point_of_sales_app_v3/Services/LoaderWidget.dart';
-import 'package:point_of_sales_app_v3/Services/RecommendationService.dart';
 import 'package:point_of_sales_app_v3/Services/SelfOrderService.dart';
 import 'package:point_of_sales_app_v3/Services/OpenBillService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
@@ -20,11 +18,12 @@ import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
-import 'package:dropdown_search/dropdown_search.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Services/MemberService.dart';
 import 'package:point_of_sales_app_v3/Services/VoucherProgramService.dart';
 import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
+import 'package:point_of_sales_app_v3/Models/MemberProgramModels.dart';
+import 'package:point_of_sales_app_v3/Services/MemberProgramService.dart';
 
 class OrderConfirmationService {
   static Future<void> showOrderConfirmationDialog({
@@ -375,6 +374,8 @@ class OrderConfirmationService {
       LoaderWidget.showLoaderDialog(context, message: "Memproses pesanan...");
     }
     var loaderPopped = false;
+    var externalVoucherReserved = false;
+    var posTransactionCommitted = false;
     try {
       final subTotal = totalHarga - biayaBungkus;
       final b2bPayment = voucherProgramId == null
@@ -386,6 +387,24 @@ class OrderConfirmationService {
               extraPaymentMethod: programExtraPaymentMethod,
               qrisAmount: programExtraSplitQrisAmount,
             );
+      final memberPreparation = await MemberProgramService.prepareOrder(
+        operationId: stableOperationId,
+        sourceType: 'self_order',
+        sourceId: selfOrder.id,
+        memberId: isMember ? memberId : null,
+        grossTotal: originalTotal,
+        finalBill: totalHarga,
+        b2bNominal: b2bPayment?.nominal ?? 0,
+      );
+      final isExternalVoucher = appliedVoucherCode != null && !isPosVoucher;
+      if (isExternalVoucher) {
+        await MemberProgramService.reserveExternalVoucher(
+          operationId: stableOperationId,
+          voucherCode: appliedVoucherCode!,
+          amount: discountAmount,
+        );
+        externalVoucherReserved = true;
+      }
       final itemCounts = <String, int>{};
       for (final item in pesananList) {
         itemCounts[item.namaPesanan] =
@@ -439,6 +458,8 @@ class OrderConfirmationService {
         },
         writeOperation: (transaction, customerNumber, preparation) async {
           VoucherProgramRedemptionPreparation? redemption;
+          LocalVoucherClaimPreparation? localVoucherClaim;
+          DocumentSnapshot<Map<String, dynamic>>? externalClaimSnapshot;
           if (b2bPayment != null) {
             redemption =
                 await VoucherProgramService.prepareRedemptionInTransaction(
@@ -451,12 +472,42 @@ class OrderConfirmationService {
               sourceId: selfOrder.id,
             );
           }
-          if (appliedVoucherCode != null) {
-            await _appendVoucherToBatchOrTransaction(
-              appliedVoucherCode,
-              isPosVoucher,
+          if (appliedVoucherCode != null && isPosVoucher) {
+            localVoucherClaim = await MemberProgramService
+                .prepareLocalVoucherClaimInTransaction(
               transaction: transaction,
+              voucherId: appliedVoucherCode,
               usedAmount: discountAmount,
+              operationId: stableOperationId,
+            );
+          }
+          if (isExternalVoucher) {
+            externalClaimSnapshot = await transaction.get(
+              firestore
+                  .collection(Col.name('externalVoucherClaims'))
+                  .doc(stableOperationId),
+            );
+          }
+          final memberProgramResult =
+              await MemberProgramService.queueOrderInTransaction(
+            transaction: transaction,
+            preparation: memberPreparation,
+          );
+          if (isExternalVoucher) {
+            MemberProgramService.queueExternalClaimInTransaction(
+              transaction: transaction,
+              operationId: stableOperationId,
+              voucherCode: appliedVoucherCode!,
+              amount: discountAmount,
+              sourceType: 'self_order',
+              sourceId: selfOrder.id,
+              existingSnapshot: externalClaimSnapshot,
+            );
+          }
+          if (localVoucherClaim != null) {
+            MemberProgramService.commitLocalVoucherClaimInTransaction(
+              transaction: transaction,
+              preparation: localVoucherClaim,
             );
           }
           if (redemption != null) {
@@ -511,6 +562,10 @@ class OrderConfirmationService {
             'orderRevision': 0,
             'inventoryAuditFlags':
                 preparation.auditFlags.map((flag) => flag.toMap()).toList(),
+            ..._memberProgramStatusFields(
+              memberPreparation,
+              memberProgramResult,
+            ),
           };
           if (b2bPayment != null) {
             status.addAll(b2bPayment.toStatusFields(
@@ -536,12 +591,33 @@ class OrderConfirmationService {
           );
         },
       );
-      if (appliedVoucherCode != null && !isPosVoucher) {
-        await _claimExternalVoucherIdempotently(
-          voucherCode: appliedVoucherCode,
-          operationId: stableOperationId,
-          usedAmount: discountAmount,
-        );
+      posTransactionCommitted = true;
+      if (isExternalVoucher) {
+        try {
+          await MemberProgramService.finalizeExternalVoucher(
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+            amount: discountAmount,
+          );
+          await MemberProgramService.markExternalClaimStatus(
+            stableOperationId,
+            status: 'completed',
+          );
+        } catch (error) {
+          await MemberProgramService.markExternalClaimStatus(
+            stableOperationId,
+            status: 'failed',
+            error: error.toString(),
+          );
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Penjualan tersimpan, tetapi klaim voucher e-santren tertunda. Silakan lakukan rekonsiliasi.'),
+              ),
+            );
+          }
+        }
       }
       if (result.wasAlreadyApplied) {
         if (context.mounted) {
@@ -557,18 +633,6 @@ class OrderConfirmationService {
       }
       nomorBerikutnya = result.customerNumber ?? nomorBerikutnya;
       SelfOrderService.instance.scheduleDeletion(selfOrder.id);
-      if (isMember && memberId != null) {
-        _incrementMemberPoints(memberId, totalHarga,
-            voucherProgramId: voucherProgramId,
-            programNominal: b2bPayment?.nominal ?? 0);
-        _updateCompetitionRecord(memberId, totalHarga,
-            voucherProgramId: voucherProgramId,
-            programNominal: b2bPayment?.nominal ?? 0);
-        _processPeriodicCashbackCampaign(
-            memberId, totalHarga, customerNameController.text,
-            voucherProgramId: voucherProgramId,
-            programNominal: b2bPayment?.nominal ?? 0);
-      }
       await printReceipt(
         customPesananList: pesananList,
         overrideNomorBerikutnya: nomorBerikutnya,
@@ -607,6 +671,14 @@ class OrderConfirmationService {
       );
       onOrderCompleted?.call();
     } catch (error) {
+      if (externalVoucherReserved && !posTransactionCommitted) {
+        try {
+          await MemberProgramService.releaseExternalVoucher(
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+          );
+        } catch (_) {}
+      }
       if (context.mounted && !loaderPopped) Navigator.pop(context);
       if (context.mounted) {
         ScaffoldMessenger.of(context)
@@ -1223,6 +1295,31 @@ class OrderConfirmationService {
     );
   }
 
+  static Map<String, dynamic> _memberProgramStatusFields(
+    MemberProgramPreparation preparation,
+    MemberProgramOperationResult result,
+  ) {
+    final status = result.skipped
+        ? 'skipped'
+        : result.pending
+            ? 'pending'
+            : 'completed';
+    return {
+      'memberProgramOperationId': preparation.operationId,
+      'pointsOperationId': preparation.operationId,
+      'competitionPeriodId': preparation.periodId,
+      'grossTotal': preparation.grossTotal,
+      'finalBillForPoints': preparation.finalBill,
+      'ordinaryVoucherDiscount': preparation.ordinaryVoucherDiscount,
+      'b2bSponsoredNominal': preparation.points.b2bNominal,
+      'pointsAwarded': preparation.points.pointsDelta,
+      'eligibleAmountForPoints': preparation.points.eligibleAmount,
+      'memberProgramStatus': status,
+      'memberProgramAuditFlags': result.auditFlags,
+      'memberProgramSchemaVersion': 2,
+    };
+  }
+
   static Future<InventoryOperationResult> _runIdempotentSaleTransaction({
     required String operationId,
     required String sourceType,
@@ -1409,6 +1506,8 @@ class OrderConfirmationService {
       LoaderWidget.showLoaderDialog(context, message: "Mohon tunggu...");
     }
     var loaderPopped = false;
+    var externalVoucherReserved = false;
+    var posTransactionCommitted = false;
     try {
       final subTotal = totalHarga - biayaBungkus;
       final b2bPayment = voucherProgramId == null
@@ -1420,6 +1519,24 @@ class OrderConfirmationService {
               extraPaymentMethod: programExtraPaymentMethod,
               qrisAmount: programExtraSplitQrisAmount,
             );
+      final memberPreparation = await MemberProgramService.prepareOrder(
+        operationId: stableOperationId,
+        sourceType: 'sale',
+        sourceId: stableOperationId,
+        memberId: isMember ? memberId : null,
+        grossTotal: originalTotal,
+        finalBill: totalHarga,
+        b2bNominal: b2bPayment?.nominal ?? 0,
+      );
+      final isExternalVoucher = appliedVoucherCode != null && !isPosVoucher;
+      if (isExternalVoucher) {
+        await MemberProgramService.reserveExternalVoucher(
+          operationId: stableOperationId,
+          voucherCode: appliedVoucherCode!,
+          amount: discountAmount,
+        );
+        externalVoucherReserved = true;
+      }
       final itemCounts = <String, int>{};
       for (final item in pesananList) {
         itemCounts[item.namaPesanan] =
@@ -1456,6 +1573,8 @@ class OrderConfirmationService {
         optionGroupLookup: optionLookup,
         writeOperation: (transaction, customerNumber, preparation) async {
           VoucherProgramRedemptionPreparation? redemption;
+          LocalVoucherClaimPreparation? localVoucherClaim;
+          DocumentSnapshot<Map<String, dynamic>>? externalClaimSnapshot;
           if (b2bPayment != null) {
             redemption =
                 await VoucherProgramService.prepareRedemptionInTransaction(
@@ -1468,12 +1587,42 @@ class OrderConfirmationService {
               sourceId: stableOperationId,
             );
           }
-          if (appliedVoucherCode != null) {
-            await _appendVoucherToBatchOrTransaction(
-              appliedVoucherCode,
-              isPosVoucher,
+          if (appliedVoucherCode != null && isPosVoucher) {
+            localVoucherClaim = await MemberProgramService
+                .prepareLocalVoucherClaimInTransaction(
               transaction: transaction,
+              voucherId: appliedVoucherCode,
               usedAmount: discountAmount,
+              operationId: stableOperationId,
+            );
+          }
+          if (isExternalVoucher) {
+            externalClaimSnapshot = await transaction.get(
+              firestore
+                  .collection(Col.name('externalVoucherClaims'))
+                  .doc(stableOperationId),
+            );
+          }
+          final memberProgramResult =
+              await MemberProgramService.queueOrderInTransaction(
+            transaction: transaction,
+            preparation: memberPreparation,
+          );
+          if (isExternalVoucher) {
+            MemberProgramService.queueExternalClaimInTransaction(
+              transaction: transaction,
+              operationId: stableOperationId,
+              voucherCode: appliedVoucherCode!,
+              amount: discountAmount,
+              sourceType: 'sale',
+              sourceId: stableOperationId,
+              existingSnapshot: externalClaimSnapshot,
+            );
+          }
+          if (localVoucherClaim != null) {
+            MemberProgramService.commitLocalVoucherClaimInTransaction(
+              transaction: transaction,
+              preparation: localVoucherClaim,
             );
           }
           if (redemption != null) {
@@ -1522,6 +1671,10 @@ class OrderConfirmationService {
             'orderRevision': 0,
             'inventoryAuditFlags':
                 preparation.auditFlags.map((flag) => flag.toMap()).toList(),
+            ..._memberProgramStatusFields(
+              memberPreparation,
+              memberProgramResult,
+            ),
           };
           if (b2bPayment != null) {
             status.addAll(b2bPayment.toStatusFields(
@@ -1547,12 +1700,33 @@ class OrderConfirmationService {
           );
         },
       );
-      if (appliedVoucherCode != null && !isPosVoucher) {
-        await _claimExternalVoucherIdempotently(
-          voucherCode: appliedVoucherCode,
-          operationId: stableOperationId,
-          usedAmount: discountAmount,
-        );
+      posTransactionCommitted = true;
+      if (isExternalVoucher) {
+        try {
+          await MemberProgramService.finalizeExternalVoucher(
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+            amount: discountAmount,
+          );
+          await MemberProgramService.markExternalClaimStatus(
+            stableOperationId,
+            status: 'completed',
+          );
+        } catch (error) {
+          await MemberProgramService.markExternalClaimStatus(
+            stableOperationId,
+            status: 'failed',
+            error: error.toString(),
+          );
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Penjualan tersimpan, tetapi klaim voucher e-santren tertunda. Silakan lakukan rekonsiliasi.'),
+              ),
+            );
+          }
+        }
       }
 
       if (result.wasAlreadyApplied) {
@@ -1569,18 +1743,6 @@ class OrderConfirmationService {
       }
       nomorBerikutnya = result.customerNumber ?? nomorBerikutnya;
 
-      if (isMember && memberId != null) {
-        _incrementMemberPoints(memberId, totalHarga,
-            voucherProgramId: voucherProgramId,
-            programNominal: b2bPayment?.nominal ?? 0);
-        _updateCompetitionRecord(memberId, totalHarga,
-            voucherProgramId: voucherProgramId,
-            programNominal: b2bPayment?.nominal ?? 0);
-        _processPeriodicCashbackCampaign(
-            memberId, totalHarga, customerNameController.text,
-            voucherProgramId: voucherProgramId,
-            programNominal: b2bPayment?.nominal ?? 0);
-      }
       await printReceipt(
         customPesananList: pesananList,
         overrideNomorBerikutnya: nomorBerikutnya,
@@ -1620,6 +1782,14 @@ class OrderConfirmationService {
         onSelectedMemberChanged: onSelectedMemberChanged,
       );
     } catch (error) {
+      if (externalVoucherReserved && !posTransactionCommitted) {
+        try {
+          await MemberProgramService.releaseExternalVoucher(
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+          );
+        } catch (_) {}
+      }
       if (context.mounted && !loaderPopped) Navigator.pop(context);
       if (context.mounted) {
         ScaffoldMessenger.of(context)
@@ -2703,9 +2873,15 @@ class OrderConfirmationService {
     }
   }
 
+  /* Legacy voucher and member-program helpers are retained below only as
+     historical reference.  They are intentionally not compiled or callable;
+     all current flows use the transactional coordinators. */
+  /*
   static Future<void> _appendVoucherToBatchOrTransaction(
       String voucherCode, bool isPosVoucher,
       {WriteBatch? batch, Transaction? transaction, int usedAmount = 0}) async {
+    throw const MemberProgramException(
+        'Legacy voucher mutation path is disabled; use the transactional member-program coordinator.');
     try {
       if (batch == null && transaction == null) return;
       // A transaction callback can be replayed by Firestore. A different
@@ -2832,6 +3008,8 @@ class OrderConfirmationService {
     required String operationId,
     required int usedAmount,
   }) async {
+    throw const MemberProgramException(
+        'Legacy external voucher mutation path is disabled; use the reservation protocol.');
     try {
       final fs = FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
       final operationRef = fs
@@ -2909,8 +3087,179 @@ class OrderConfirmationService {
     }
   }
 
+  */
+
   static Future<Map<String, dynamic>?> _validateVoucher(
       String voucherCode, int currentTotal) async {
+    final code = voucherCode.trim();
+    if (code.isEmpty || currentTotal < 0) {
+      return {'error': 'Kode voucher atau total transaksi tidak valid'};
+    }
+    try {
+      final localFs = FirebaseFirestore.instance;
+      DocumentSnapshot<Map<String, dynamic>>? localSnapshot =
+          await localFs.collection(Col.name('vouchers')).doc(code).get();
+      var isPosVoucher = localSnapshot.exists;
+      var actualDocId = code;
+      Map<String, dynamic>? data = localSnapshot.data();
+
+      if (!isPosVoucher) {
+        final byField = await localFs
+            .collection(Col.name('vouchers'))
+            .where('voucherId', isEqualTo: code)
+            .limit(1)
+            .get();
+        if (byField.docs.isNotEmpty) {
+          localSnapshot = byField.docs.first;
+          actualDocId = localSnapshot.id;
+          data = localSnapshot.data();
+          isPosVoucher = true;
+        }
+      }
+
+      if (data == null) {
+        final externalFs =
+            FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
+        final externalSnapshot =
+            await externalFs.collection(Col.name('vouchers')).doc(code).get();
+        if (externalSnapshot.exists) {
+          data = externalSnapshot.data();
+          actualDocId = externalSnapshot.id;
+        }
+      }
+      if (data == null) return {'error': 'Voucher tidak ditemukan'};
+
+      final now = DateTime.now();
+      final activeDate = MemberProgramValues.dateValue(data['activeDate']);
+      final expireDate = MemberProgramValues.dateValue(data['expireDate']);
+      if (activeDate == null ||
+          expireDate == null ||
+          expireDate.isBefore(activeDate)) {
+        return {'error': 'Data masa berlaku voucher tidak valid'};
+      }
+      if (now.isBefore(activeDate) || now.isAfter(expireDate)) {
+        return {'error': 'Voucher sudah tidak berlaku'};
+      }
+      if (data['isActive'] != true) return {'error': 'Voucher tidak aktif'};
+      if (data['sekaliPakai'] is! bool) {
+        return {'error': 'Data tipe penggunaan voucher tidak valid'};
+      }
+      final sekaliPakai = data['sekaliPakai'] as bool;
+      final status = data['status']?.toString().toUpperCase() ?? '';
+      if (status == 'CLAIMED' || data['isClaimed'] == true) {
+        return {'error': 'Voucher sudah digunakan'};
+      }
+      if (status == 'DISABLED' || status == 'EXPIRED') {
+        return {'error': 'Voucher tidak aktif'};
+      }
+      final faceValue = MemberProgramService.parseInt(data['value']);
+      if (faceValue <= 0) return {'error': 'Nilai voucher tidak valid'};
+      final remaining = MemberProgramService.parseInt(
+        data['valueRemaining'],
+        faceValue,
+      );
+      if (!sekaliPakai && remaining <= 0) {
+        return {'error': 'Saldo voucher sudah habis'};
+      }
+
+      final groupId = data['voucherGroupId']?.toString();
+      if (groupId != null && groupId.isNotEmpty) {
+        try {
+          final groupFs = isPosVoucher
+              ? localFs
+              : FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
+          final groupSnapshot = await groupFs
+              .collection(Col.name('voucherGroup'))
+              .doc(groupId)
+              .get();
+          final groupData = groupSnapshot.data();
+          final groupActive = MemberProgramValues.dateValue(
+            groupData?['activeDate'],
+          );
+          final groupExpiry = MemberProgramValues.dateValue(
+            groupData?['expireDate'],
+          );
+          final groupStatus =
+              groupData?['status']?.toString().toLowerCase() ?? '';
+          if (groupData == null ||
+              groupData['isActive'] != true ||
+              groupStatus != 'active' ||
+              groupActive == null ||
+              groupExpiry == null ||
+              groupExpiry.isBefore(groupActive) ||
+              now.isBefore(groupActive) ||
+              now.isAfter(groupExpiry)) {
+            return {'error': 'Kampanye voucher ini sedang tidak aktif'};
+          }
+        } catch (_) {
+          return {'error': 'Kampanye voucher tidak dapat diverifikasi'};
+        }
+      }
+
+      final requirement =
+          MemberProgramService.parseInt(data['transactionRequirement']);
+      if (requirement < 0)
+        return {'error': 'Syarat transaksi voucher tidak valid'};
+      if (requirement > 0 && currentTotal < requirement) {
+        return {
+          'error':
+              'Transaksi belum mencapai syarat minimal Rp ${NumberFormat.decimalPattern().format(requirement).replaceAll(',', '.')} untuk voucher ini',
+          'isSnackbarError': true,
+        };
+      }
+
+      if (isPosVoucher && data['type']?.toString() == 'cashbackCampaign') {
+        final campaignStatus = status;
+        if (campaignStatus != 'READY_TO_CLAIM') {
+          return {'error': 'Voucher campaign belum siap digunakan'};
+        }
+        final userPoints = MemberProgramService.parseInt(data['userPoints']);
+        final threshold = MemberProgramService.parseInt(data['threshold']);
+        if (threshold <= 0 || userPoints < threshold) {
+          return {
+            'error':
+                'Poin member belum cukup: tersedia $userPoints poin, sedangkan diperlukan $threshold poin',
+            'isSnackbarError': true,
+          };
+        }
+      }
+      if (isPosVoucher &&
+          data['type']?.toString() == 'competitionPrize' &&
+          status != 'READY_TO_CLAIM') {
+        return {'error': 'Voucher hadiah belum siap digunakan'};
+      }
+
+      final effectiveValue = sekaliPakai
+          ? (faceValue < currentTotal ? faceValue : currentTotal)
+          : (remaining < currentTotal ? remaining : currentTotal);
+      if (effectiveValue <= 0)
+        return {'error': 'Nilai voucher tidak dapat digunakan'};
+      return {
+        'success': true,
+        'nama': data['nama'],
+        'voucherName': data['voucherName'] ?? 'Voucher',
+        'value': effectiveValue,
+        'originalValue': faceValue,
+        'valueRemaining': remaining,
+        'isPosVoucher': isPosVoucher,
+        'sekaliPakai': sekaliPakai,
+        'userId': data['userId'],
+        'docId': actualDocId,
+        'voucherGroupId': groupId,
+        'voucherSource': isPosVoucher ? 'local' : 'e_santren',
+      };
+    } catch (_) {
+      return {'error': 'Terjadi kesalahan saat memvalidasi voucher'};
+    }
+  }
+
+  /*
+  static Future<Map<String, dynamic>?> _validateVoucherLegacy(
+      String voucherCode, int currentTotal) async {
+    return const {
+      'error':
+          'Validasi voucher legacy dinonaktifkan. Silakan gunakan validator transaksi terbaru.',
+    };
     try {
       FirebaseFirestore fs = FirebaseFirestore.instance;
       DocumentSnapshot doc =
@@ -3124,12 +3473,15 @@ class OrderConfirmationService {
     }
   }
 
-  static void _incrementMemberPoints(
+  @Deprecated('Use MemberProgramService.queueOrderInTransaction.')
+  static Future<void> _incrementMemberPoints(
     String memberId,
     int totalHarga, {
     String? voucherProgramId,
     int programNominal = 0,
   }) async {
+    throw const MemberProgramException(
+        'Mutasi poin legacy dinonaktifkan; gunakan MemberProgramService.');
     try {
       int pointsCalculationBase = totalHarga;
       if (voucherProgramId != null) {
@@ -3152,12 +3504,15 @@ class OrderConfirmationService {
     }
   }
 
-  static void _updateCompetitionRecord(
+  @Deprecated('Use MemberProgramService.queueOrderInTransaction.')
+  static Future<void> _updateCompetitionRecord(
     String memberId,
     int totalHarga, {
     String? voucherProgramId,
     int programNominal = 0,
   }) async {
+    throw const MemberProgramException(
+        'Mutasi kompetisi legacy dinonaktifkan; gunakan MemberProgramService.');
     try {
       FirebaseFirestore fs = FirebaseFirestore.instance;
       DateTime now = DateTime.now();
@@ -3194,13 +3549,16 @@ class OrderConfirmationService {
         4, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
   }
 
-  static void _processPeriodicCashbackCampaign(
+  @Deprecated('Use MemberProgramService.queueOrderInTransaction.')
+  static Future<void> _processPeriodicCashbackCampaign(
     String memberId,
     int totalHarga,
     String customerName, {
     String? voucherProgramId,
     int programNominal = 0,
   }) async {
+    throw const MemberProgramException(
+        'Mutasi campaign legacy dinonaktifkan; gunakan MemberProgramService.');
     try {
       int pointsCalculationBase = totalHarga;
       if (voucherProgramId != null) {
@@ -3329,6 +3687,8 @@ class OrderConfirmationService {
       print('❌ Failed to process periodic cashback campaign: $e');
     }
   }
+
+  */
 
   /// Show settlement dialog for an existing Open Bill
   static Future<void> showOpenBillSettlementDialog({
@@ -3511,6 +3871,8 @@ class OrderConfirmationService {
     final stableOperationId = operationId ?? 'settlement_$statusDocId';
     LoaderWidget.showLoaderDialog(context, message: "Menyelesaikan tagihan...");
     var loaderPopped = false;
+    var externalVoucherReserved = false;
+    var posTransactionCommitted = false;
     try {
       final itemCounts = <String, int>{};
       for (final item in aggregatedItems) {
@@ -3527,6 +3889,36 @@ class OrderConfirmationService {
               extraPaymentMethod: programExtraPaymentMethod,
               qrisAmount: programExtraSplitQrisAmount,
             );
+      var resolvedMemberId = openBill.memberId;
+      if (resolvedMemberId == statusDocId ||
+          resolvedMemberId.endsWith('_plazaUnipdu')) {
+        final memberQuery = await firestore
+            .collection(Col.name('Members'))
+            .where('nama', isEqualTo: openBill.memberName)
+            .limit(1)
+            .get();
+        if (memberQuery.docs.isNotEmpty) {
+          resolvedMemberId = memberQuery.docs.first.id;
+        }
+      }
+      final memberPreparation = await MemberProgramService.prepareOrder(
+        operationId: stableOperationId,
+        sourceType: 'open_bill_settlement',
+        sourceId: statusDocId,
+        memberId: resolvedMemberId,
+        grossTotal: originalTotal,
+        finalBill: totalHarga,
+        b2bNominal: b2bPayment?.nominal ?? 0,
+      );
+      final isExternalVoucher = appliedVoucherCode != null && !isPosVoucher;
+      if (isExternalVoucher) {
+        await MemberProgramService.reserveExternalVoucher(
+          operationId: stableOperationId,
+          voucherCode: appliedVoucherCode!,
+          amount: discountAmount,
+        );
+        externalVoucherReserved = true;
+      }
       final map = <String, dynamic>{
         'total': FieldValue.increment(totalHarga),
         'subTotal': FieldValue.increment(subTotal),
@@ -3600,15 +3992,48 @@ class OrderConfirmationService {
           );
         }
 
-        // Voucher reads occur before any transaction write. No inventory
-        // movement is queued here: open-bill stock was deducted when items
-        // were added, and settlement must never deduct it again.
-        if (appliedVoucherCode != null) {
-          await _appendVoucherToBatchOrTransaction(
-            appliedVoucherCode,
-            isPosVoucher,
+        // Voucher and member-program reads occur before any transaction
+        // write. No inventory movement is queued here: open-bill stock was
+        // deducted when items were added, and settlement must never deduct it
+        // again.
+        LocalVoucherClaimPreparation? localVoucherClaim;
+        DocumentSnapshot<Map<String, dynamic>>? externalClaimSnapshot;
+        if (appliedVoucherCode != null && isPosVoucher) {
+          localVoucherClaim =
+              await MemberProgramService.prepareLocalVoucherClaimInTransaction(
             transaction: transaction,
+            voucherId: appliedVoucherCode,
             usedAmount: discountAmount,
+            operationId: stableOperationId,
+          );
+        }
+        if (isExternalVoucher) {
+          externalClaimSnapshot = await transaction.get(
+            firestore
+                .collection(Col.name('externalVoucherClaims'))
+                .doc(stableOperationId),
+          );
+        }
+        final memberProgramResult =
+            await MemberProgramService.queueOrderInTransaction(
+          transaction: transaction,
+          preparation: memberPreparation,
+        );
+        if (isExternalVoucher) {
+          MemberProgramService.queueExternalClaimInTransaction(
+            transaction: transaction,
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+            amount: discountAmount,
+            sourceType: 'open_bill_settlement',
+            sourceId: statusDocId,
+            existingSnapshot: externalClaimSnapshot,
+          );
+        }
+        if (localVoucherClaim != null) {
+          MemberProgramService.commitLocalVoucherClaimInTransaction(
+            transaction: transaction,
+            preparation: localVoucherClaim,
           );
         }
         if (redemption != null) {
@@ -3665,6 +4090,10 @@ class OrderConfirmationService {
           'total': totalHarga,
           ...paymentFields,
           'orderRevision': FieldValue.increment(1),
+          ..._memberProgramStatusFields(
+            memberPreparation,
+            memberProgramResult,
+          ),
         });
         transaction.set(
             operationRef,
@@ -3678,12 +4107,33 @@ class OrderConfirmationService {
             SetOptions(merge: true));
         return InventoryOperationResult.applied();
       });
-      if (appliedVoucherCode != null && !isPosVoucher) {
-        await _claimExternalVoucherIdempotently(
-          voucherCode: appliedVoucherCode,
-          operationId: stableOperationId,
-          usedAmount: discountAmount,
-        );
+      posTransactionCommitted = true;
+      if (isExternalVoucher) {
+        try {
+          await MemberProgramService.finalizeExternalVoucher(
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+            amount: discountAmount,
+          );
+          await MemberProgramService.markExternalClaimStatus(
+            stableOperationId,
+            status: 'completed',
+          );
+        } catch (error) {
+          await MemberProgramService.markExternalClaimStatus(
+            stableOperationId,
+            status: 'failed',
+            error: error.toString(),
+          );
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Tagihan tersimpan, tetapi klaim voucher e-santren tertunda. Silakan lakukan rekonsiliasi.'),
+              ),
+            );
+          }
+        }
       }
       if (result.wasAlreadyApplied) {
         if (context.mounted) {
@@ -3693,25 +4143,6 @@ class OrderConfirmationService {
         return;
       }
 
-      String memberId = openBill.memberId;
-      if (memberId == statusDocId || memberId.endsWith('_plazaUnipdu')) {
-        final memberQuery = await firestore
-            .collection(Col.name('Members'))
-            .where('nama', isEqualTo: openBill.memberName)
-            .limit(1)
-            .get();
-        if (memberQuery.docs.isNotEmpty) memberId = memberQuery.docs.first.id;
-      }
-      _incrementMemberPoints(memberId, totalHarga,
-          voucherProgramId: voucherProgramId,
-          programNominal: b2bPayment?.nominal ?? 0);
-      _updateCompetitionRecord(memberId, totalHarga,
-          voucherProgramId: voucherProgramId,
-          programNominal: b2bPayment?.nominal ?? 0);
-      _processPeriodicCashbackCampaign(
-          memberId, totalHarga, openBill.memberName,
-          voucherProgramId: voucherProgramId,
-          programNominal: b2bPayment?.nominal ?? 0);
       await printReceipt(
         customPesananList: aggregatedItems,
         overrideTotalHarga: totalHarga,
@@ -3752,6 +4183,14 @@ class OrderConfirmationService {
         voucherRemaining: voucherRemaining,
       );
     } catch (e) {
+      if (externalVoucherReserved && !posTransactionCommitted) {
+        try {
+          await MemberProgramService.releaseExternalVoucher(
+            operationId: stableOperationId,
+            voucherCode: appliedVoucherCode!,
+          );
+        } catch (_) {}
+      }
       if (context.mounted && !loaderPopped) Navigator.pop(context);
       if (context.mounted) {
         ScaffoldMessenger.of(context)
@@ -4055,7 +4494,6 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
       final snapshot = await FirebaseFirestore.instance
           .collection(Col.name('vouchers'))
           .where('userId', isEqualTo: memberId)
-          .where('status', isEqualTo: 'READY_TO_CLAIM')
           .get();
 
       // Collect all unique voucherGroupIds
@@ -5943,7 +6381,6 @@ class _SelfOrderConfirmationDialogState
       final snapshot = await FirebaseFirestore.instance
           .collection(Col.name('vouchers'))
           .where('userId', isEqualTo: memberId)
-          .where('status', isEqualTo: 'READY_TO_CLAIM')
           .get();
 
       // Collect all unique voucherGroupIds

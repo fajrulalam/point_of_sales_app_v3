@@ -3,12 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:point_of_sales_app_v3/Models/Member.dart';
 import 'package:point_of_sales_app_v3/Services/MemberService.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
+import 'package:point_of_sales_app_v3/Services/MemberProgramService.dart';
+import 'package:point_of_sales_app_v3/Services/MemberProgramAuditService.dart';
+import 'package:point_of_sales_app_v3/Models/MemberProgramModels.dart';
 
 class MarketingScreen extends StatefulWidget {
   const MarketingScreen({Key? key}) : super(key: key);
@@ -37,6 +41,8 @@ class _MarketingScreenState extends State<MarketingScreen>
   // Competition Points State (cached for local filtering)
   Map<String, int> _competitionPoints = {};
   Map<String, Map<String, dynamic>> _competitionRecords = {};
+  String? _competitionCategoryFilter;
+  bool _isProcessingProgramAction = false;
 
   @override
   void initState() {
@@ -87,29 +93,19 @@ class _MarketingScreenState extends State<MarketingScreen>
     try {
       final members = await _memberService.getCachedMembers();
 
-      // Fetch competition points for current month
-      final now = DateTime.now();
-      final monthDocId = DateFormat('yyyy-MM').format(now);
-      final competitionDoc = await FirebaseFirestore.instance
-          .collection(Col.name('competitionRecords'))
-          .doc(monthDocId)
-          .get();
-
-      Map<String, int> pointsMap = {};
-      Map<String, Map<String, dynamic>> recordsMap = {};
-      if (competitionDoc.exists) {
-        final data = competitionDoc.data() as Map<String, dynamic>;
-        data.forEach((key, value) {
-          if (value is Map && value.containsKey('customerPoints')) {
-            recordsMap[key] = {
-              'customerPoints': (value['customerPoints'] as num?)?.toInt() ?? 0,
-              'amountSpent': (value['amountSpent'] as num?)?.toInt() ?? 0,
-              'numberOfTransaction':
-                  (value['numberOfTransaction'] as num?)?.toInt() ?? 0,
-            };
-            pointsMap[key] = (value['customerPoints'] as num?)?.toInt() ?? 0;
-          }
-        });
+      final monthDocId = MemberProgramService.periodIdFor(DateTime.now());
+      final competitionMembers =
+          await MemberProgramService.loadCompetitionMembers(monthDocId);
+      final pointsMap = <String, int>{};
+      final recordsMap = <String, Map<String, dynamic>>{};
+      for (final record in competitionMembers) {
+        recordsMap[record.memberId] = {
+          'customerPoints': record.customerPoints,
+          'amountSpent': record.amountSpent,
+          'numberOfTransaction': record.numberOfTransaction,
+          'category': record.category,
+        };
+        pointsMap[record.memberId] = record.customerPoints;
       }
 
       // Sort members by competition points descending
@@ -128,8 +124,10 @@ class _MarketingScreenState extends State<MarketingScreen>
             recordB['amountSpent'].compareTo(recordA['amountSpent']);
         if (amountCompare != 0) return amountCompare;
 
-        return recordB['numberOfTransaction']
+        final transactionCompare = recordB['numberOfTransaction']
             .compareTo(recordA['numberOfTransaction']);
+        if (transactionCompare != 0) return transactionCompare;
+        return a.id.compareTo(b.id);
       });
 
       setState(() {
@@ -209,40 +207,13 @@ class _MarketingScreenState extends State<MarketingScreen>
 
       final docs = snapshot.docs;
 
-      // Data Integrity: If forceRefresh is on, verify counts to fix "Data Mismatch"
-      if (forceRefresh) {
-        for (var doc in docs) {
-          final participants = await FirebaseFirestore.instance
-              .collection(Col.name('vouchers'))
-              .where('voucherGroupId', isEqualTo: doc.id)
-              .count()
-              .get();
-
-          final claimed = await FirebaseFirestore.instance
-              .collection(Col.name('vouchers'))
-              .where('voucherGroupId', isEqualTo: doc.id)
-              .where('status', isEqualTo: 'CLAIMED')
-              .count()
-              .get();
-
-          // Sync the document if there's a mismatch
-          if (doc['totalParticipants'] != participants.count ||
-              doc['totalClaimed'] != claimed.count) {
-            await doc.reference.update({
-              'totalParticipants': participants.count,
-              'totalClaimed': claimed.count,
-            });
-          }
-        }
-      }
-
       setState(() {
         _campaigns = docs;
         _campaigns.sort((a, b) {
           final aData = a.data() as Map<String, dynamic>;
           final bData = b.data() as Map<String, dynamic>;
-          final aTime = aData['createdAt'] as Timestamp?;
-          final bTime = bData['createdAt'] as Timestamp?;
+          final aTime = MemberProgramValues.dateValue(aData['createdAt']);
+          final bTime = MemberProgramValues.dateValue(bData['createdAt']);
           if (aTime == null && bTime == null) return 0;
           if (aTime == null) return 1;
           if (bTime == null) return -1;
@@ -315,6 +286,7 @@ class _MarketingScreenState extends State<MarketingScreen>
     String? valueError;
     String? requirementsError;
     String? dateError;
+    var isSubmitting = false;
 
     showModalBottomSheet(
       context: context,
@@ -379,6 +351,7 @@ class _MarketingScreenState extends State<MarketingScreen>
             }
 
             void validateAndSubmit() async {
+              if (isSubmitting) return;
               // Reset errors
               setModalState(() {
                 nameError = null;
@@ -435,35 +408,23 @@ class _MarketingScreenState extends State<MarketingScreen>
 
               if (hasError) return;
 
-              Navigator.pop(modalContext);
+              setModalState(() => isSubmitting = true);
               setState(() => _isLoadingCampaigns = true);
 
               try {
-                String safeName =
-                    nameController.text.trim().replaceAll(' ', '_');
-                String voucherGroupId =
-                    'campaign_${DateFormat('yyyy-MM-dd').format(DateTime.now())}_${safeName}_${DateTime.now().millisecondsSinceEpoch}';
-
-                await FirebaseFirestore.instance
-                    .collection(Col.name('voucherGroup'))
-                    .doc(voucherGroupId)
-                    .set({
-                  'activeDate': Timestamp.fromDate(startDate!),
-                  'createdAt': FieldValue.serverTimestamp(),
-                  'expireDate': Timestamp.fromDate(endDate!),
-                  'isActive': true,
-                  'threshold': int.parse(thresholdController.text),
-                  'totalClaimed': 0,
-                  'totalParticipants': 0,
-                  'type': 'cashbackCampaign',
-                  'value': parseCurrency(valueController.text),
-                  'transactionRequirement':
+                await MemberProgramService.createCampaign(
+                  name: nameController.text,
+                  threshold: int.parse(thresholdController.text),
+                  value: parseCurrency(valueController.text),
+                  transactionRequirement:
                       parseCurrency(requirementsController.text),
-                  'voucherGroupId': voucherGroupId,
-                  'voucherName': nameController.text.trim(),
-                });
+                  activeDate: startDate!,
+                  expireDate: endDate!,
+                );
 
                 await _loadCampaigns();
+
+                if (modalContext.mounted) Navigator.pop(modalContext);
 
                 if (!mounted) return;
                 ScaffoldMessenger.of(context)
@@ -493,6 +454,9 @@ class _MarketingScreenState extends State<MarketingScreen>
               } finally {
                 if (mounted) {
                   setState(() => _isLoadingCampaigns = false);
+                }
+                if (modalContext.mounted) {
+                  setModalState(() => isSubmitting = false);
                 }
               }
             }
@@ -729,7 +693,9 @@ class _MarketingScreenState extends State<MarketingScreen>
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: () => Navigator.pop(modalContext),
+                            onPressed: isSubmitting
+                                ? null
+                                : () => Navigator.pop(modalContext),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               side: BorderSide(color: Colors.grey.shade400),
@@ -743,15 +709,22 @@ class _MarketingScreenState extends State<MarketingScreen>
                         Expanded(
                           flex: 2,
                           child: ElevatedButton(
-                            onPressed: validateAndSubmit,
+                            onPressed: isSubmitting ? null : validateAndSubmit,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF2E7D32),
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                             ),
-                            child: Text('Buat Campaign',
-                                style: GoogleFonts.poppins(
-                                    fontWeight: FontWeight.w600)),
+                            child: isSubmitting
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : Text('Buat Campaign',
+                                    style: GoogleFonts.poppins(
+                                        fontWeight: FontWeight.w600)),
                           ),
                         ),
                       ],
@@ -819,8 +792,59 @@ class _MarketingScreenState extends State<MarketingScreen>
   }
 
   Widget _buildMembersTab() {
+    final visibleMembers = _competitionCategoryFilter == null
+        ? _members
+        : _members.where((member) {
+            final recordCategory = _competitionRecords[member.id]?['category'];
+            final category = MemberProgramService.normalizeCategory(
+              recordCategory ?? member.category,
+            );
+            return category == _competitionCategoryFilter;
+          }).toList();
+    const competitionCategories = [
+      ('', 'Semua'),
+      ('santri', 'Santri'),
+      ('mahasiswa', 'Mahasiswa'),
+      ('staff_guru_dosen', 'Staff/Guru/Dosen'),
+    ];
     return Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Peringkat kompetisi ${MemberProgramService.periodIdFor(DateTime.now())}',
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 48,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            scrollDirection: Axis.horizontal,
+            itemCount: competitionCategories.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final category = competitionCategories[index];
+              final selected = _competitionCategoryFilter ==
+                  (category.$1.isEmpty ? null : category.$1);
+              return ChoiceChip(
+                label: Text(category.$2),
+                selected: selected,
+                onSelected: (_) => setState(() {
+                  _competitionCategoryFilter =
+                      category.$1.isEmpty ? null : category.$1;
+                }),
+              );
+            },
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.all(16.0),
           child: TextField(
@@ -846,22 +870,24 @@ class _MarketingScreenState extends State<MarketingScreen>
         Expanded(
           child: _isLoadingMembers
               ? const Center(child: CircularProgressIndicator())
-              : _members.isEmpty
+              : visibleMembers.isEmpty
                   ? _buildMemberEmptyState()
                   : RefreshIndicator(
                       onRefresh: _handleRefreshMembers,
                       color: const Color(0xFF2E7D32),
                       child: ListView.builder(
-                        itemCount: _members.length,
+                        itemCount: visibleMembers.length,
                         itemBuilder: (context, index) {
-                          final member = _members[index];
+                          final member = visibleMembers[index];
                           return Card(
                             margin: const EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 4),
                             child: ListTile(
                               leading: CircleAvatar(
                                 backgroundColor: const Color(0xFFE8F5E9),
-                                child: Text(member.name[0].toUpperCase()),
+                                child: Text(member.name.isEmpty
+                                    ? '?'
+                                    : member.name[0].toUpperCase()),
                               ),
                               title: Text(member.name,
                                   style: GoogleFonts.poppins(
@@ -922,7 +948,8 @@ class _MarketingScreenState extends State<MarketingScreen>
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
-            onPressed: _showAddCampaignModal,
+            onPressed:
+                _isProcessingProgramAction ? null : _showAddCampaignModal,
             icon: const Icon(Icons.add),
             label: const Text('Buat Campaign'),
             style: ElevatedButton.styleFrom(
@@ -951,15 +978,20 @@ class _MarketingScreenState extends State<MarketingScreen>
                     final campaignDoc = _campaigns[index];
                     final campaign = campaignDoc.data() as Map<String, dynamic>;
                     final startDate =
-                        (campaign['activeDate'] as Timestamp).toDate();
+                        MemberProgramValues.dateValue(campaign['activeDate']);
                     final endDate =
-                        (campaign['expireDate'] as Timestamp).toDate();
-                    final isActive = campaign['isActive'] ?? false;
+                        MemberProgramValues.dateValue(campaign['expireDate']);
+                    final campaignStatus =
+                        campaign['status']?.toString().toLowerCase() ?? '';
+                    final isActive = campaign['isActive'] == true &&
+                        campaignStatus == 'active';
 
                     final now = DateTime.now();
                     final isCurrentlyRunning = isActive &&
-                        now.isAfter(startDate) &&
-                        now.isBefore(endDate);
+                        startDate != null &&
+                        endDate != null &&
+                        !now.isBefore(startDate) &&
+                        !now.isAfter(endDate);
 
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
@@ -1029,7 +1061,7 @@ class _MarketingScreenState extends State<MarketingScreen>
                                             color: Colors.orange.shade700),
                                         const SizedBox(width: 6),
                                         Text(
-                                          'Rp ${NumberFormat.decimalPattern().format(campaign['value'] ?? 0)}',
+                                          'Rp ${NumberFormat.decimalPattern().format(MemberProgramService.parseInt(campaign['value']))}',
                                           style: GoogleFonts.poppins(
                                             color: Colors.orange.shade800,
                                             fontWeight: FontWeight.bold,
@@ -1047,7 +1079,7 @@ class _MarketingScreenState extends State<MarketingScreen>
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
-                                      '${campaign['threshold'] ?? 0} pts',
+                                      '${MemberProgramService.parseInt(campaign['threshold'])} pts',
                                       style: GoogleFonts.poppins(
                                         color: const Color(0xFF1B5E20),
                                         fontWeight: FontWeight.w600,
@@ -1066,10 +1098,15 @@ class _MarketingScreenState extends State<MarketingScreen>
                                       size: 14, color: Colors.grey.shade600),
                                   const SizedBox(width: 6),
                                   Text(
-                                    '${DateFormat('dd MMM').format(startDate)} - ${DateFormat('dd MMM yyyy').format(endDate)}',
+                                    startDate != null && endDate != null
+                                        ? '${DateFormat('dd MMM').format(startDate)} - ${DateFormat('dd MMM yyyy').format(endDate)}'
+                                        : 'Tanggal campaign tidak valid',
                                     style: GoogleFonts.poppins(
                                       fontSize: 12,
-                                      color: Colors.grey.shade700,
+                                      color:
+                                          startDate != null && endDate != null
+                                              ? Colors.grey.shade700
+                                              : Colors.red.shade700,
                                     ),
                                   ),
                                 ],
@@ -1083,7 +1120,7 @@ class _MarketingScreenState extends State<MarketingScreen>
                                       size: 14, color: Colors.grey.shade600),
                                   const SizedBox(width: 6),
                                   Text(
-                                    'Min. transaksi Rp ${NumberFormat.decimalPattern().format(campaign['transactionRequirement'] ?? 0)}',
+                                    'Min. transaksi Rp ${NumberFormat.decimalPattern().format(MemberProgramService.parseInt(campaign['transactionRequirement']))}',
                                     style: GoogleFonts.poppins(
                                       fontSize: 12,
                                       color: Colors.grey.shade700,
@@ -1099,12 +1136,12 @@ class _MarketingScreenState extends State<MarketingScreen>
                                 children: [
                                   _buildCampaignStat(
                                       Icons.people,
-                                      '${campaign['totalParticipants'] ?? 0}',
+                                      '${MemberProgramService.parseInt(campaign['totalParticipants'])}',
                                       'Peserta'),
                                   const SizedBox(width: 24),
                                   _buildCampaignStat(
                                       Icons.check_circle,
-                                      '${campaign['totalClaimed'] ?? 0}',
+                                      '${MemberProgramService.parseInt(campaign['totalClaimed'])}',
                                       'Diklaim'),
                                   const Spacer(),
                                   Icon(Icons.chevron_right,
@@ -1149,6 +1186,9 @@ class _MarketingScreenState extends State<MarketingScreen>
 
   void _showCampaignOptionsMenu(QueryDocumentSnapshot campaignDoc) {
     final campaign = campaignDoc.data() as Map<String, dynamic>;
+    final isArchived =
+        campaign['status']?.toString().toLowerCase() == 'archived' ||
+            campaign['isActive'] != true;
 
     showModalBottomSheet(
       context: context,
@@ -1187,34 +1227,17 @@ class _MarketingScreenState extends State<MarketingScreen>
                 _showCampaignDetailsSheet(campaignDoc);
               },
             ),
-            ListTile(
-              leading: Icon(
-                campaign['isActive'] == true
-                    ? Icons.pause_circle
-                    : Icons.play_circle,
-                color:
-                    campaign['isActive'] == true ? Colors.orange : Colors.green,
+            if (!isArchived)
+              ListTile(
+                leading:
+                    const Icon(Icons.archive_outlined, color: Colors.orange),
+                title: Text('Arsipkan Campaign',
+                    style: GoogleFonts.poppins(color: Colors.orange.shade800)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _confirmArchiveCampaign(campaignDoc);
+                },
               ),
-              title: Text(
-                campaign['isActive'] == true
-                    ? 'Nonaktifkan Campaign'
-                    : 'Aktifkan Campaign',
-                style: GoogleFonts.poppins(),
-              ),
-              onTap: () async {
-                Navigator.pop(context);
-                await _toggleCampaignStatus(campaignDoc);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: Text('Hapus Campaign',
-                  style: GoogleFonts.poppins(color: Colors.red)),
-              onTap: () {
-                Navigator.pop(context);
-                _confirmDeleteCampaign(campaignDoc);
-              },
-            ),
             const SizedBox(height: 16),
           ],
         ),
@@ -1222,52 +1245,16 @@ class _MarketingScreenState extends State<MarketingScreen>
     );
   }
 
-  Future<void> _toggleCampaignStatus(QueryDocumentSnapshot campaignDoc) async {
-    final campaign = campaignDoc.data() as Map<String, dynamic>;
-    final currentStatus = campaign['isActive'] ?? false;
-
-    try {
-      await campaignDoc.reference.update({'isActive': !currentStatus});
-      await _loadCampaigns();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-          ..clearSnackBars()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(
-                !currentStatus
-                    ? 'Campaign diaktifkan'
-                    : 'Campaign dinonaktifkan',
-              ),
-              backgroundColor: !currentStatus ? Colors.green : Colors.orange,
-            ),
-          );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-          ..clearSnackBars()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(
-                  'Gagal mengubah status: ${UserMessageService.fromError(e)}'),
-            ),
-          );
-      }
-    }
-  }
-
-  void _confirmDeleteCampaign(QueryDocumentSnapshot campaignDoc) {
+  void _confirmArchiveCampaign(QueryDocumentSnapshot campaignDoc) {
     final campaign = campaignDoc.data() as Map<String, dynamic>;
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Hapus Campaign?',
+        title: Text('Arsipkan Campaign?',
             style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         content: Text(
-          'Campaign "${campaign['voucherName']}" akan dihapus permanen. Voucher peserta yang sudah ada akan tetap tersimpan.',
+          'Campaign "${campaign['voucherName']}" akan dihentikan. Riwayat tetap disimpan dan voucher yang belum digunakan akan dinonaktifkan.',
           style: GoogleFonts.poppins(),
         ),
         actions: [
@@ -1278,9 +1265,11 @@ class _MarketingScreenState extends State<MarketingScreen>
           ),
           ElevatedButton(
             onPressed: () async {
+              if (_isProcessingProgramAction) return;
+              setState(() => _isProcessingProgramAction = true);
               Navigator.pop(context);
               try {
-                await campaignDoc.reference.delete();
+                await MemberProgramService.archiveCampaign(campaignDoc.id);
                 await _loadCampaigns();
 
                 if (mounted) {
@@ -1288,7 +1277,7 @@ class _MarketingScreenState extends State<MarketingScreen>
                     ..clearSnackBars()
                     ..showSnackBar(
                       const SnackBar(
-                        content: Text('Campaign berhasil dihapus'),
+                        content: Text('Campaign berhasil diarsipkan'),
                         backgroundColor: Colors.green,
                       ),
                     );
@@ -1300,17 +1289,18 @@ class _MarketingScreenState extends State<MarketingScreen>
                     ..showSnackBar(
                       SnackBar(
                         content: Text(
-                            'Gagal menghapus kampanye: ${UserMessageService.fromError(e)}'),
+                            'Gagal mengarsipkan kampanye: ${UserMessageService.fromError(e)}'),
                       ),
                     );
                 }
               }
+              if (mounted) setState(() => _isProcessingProgramAction = false);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: Colors.orange.shade800,
               foregroundColor: Colors.white,
             ),
-            child: Text('Hapus', style: GoogleFonts.poppins()),
+            child: Text('Arsipkan', style: GoogleFonts.poppins()),
           ),
         ],
       ),
@@ -1406,10 +1396,14 @@ class _MarketingScreenState extends State<MarketingScreen>
                       itemBuilder: (context, index) {
                         final v = vouchers[index];
                         final data = v.data() as Map<String, dynamic>;
-                        final status = data['status'] ?? 'UNKNOWN';
-                        final points = data['userPoints'] ?? 0;
-                        final threshold = data['threshold'] ?? 0;
-                        final progress = (points / threshold).clamp(0.0, 1.0);
+                        final status = data['status']?.toString() ?? 'UNKNOWN';
+                        final points =
+                            MemberProgramService.parseInt(data['userPoints']);
+                        final threshold =
+                            MemberProgramService.parseInt(data['threshold']);
+                        final progress = threshold <= 0
+                            ? 0.0
+                            : (points / threshold).clamp(0.0, 1.0);
 
                         // Fallback: If 'nama' is missing in voucher, find it from our local members list
                         final userId = data['userId'];
@@ -1466,6 +1460,128 @@ class _MarketingScreenState extends State<MarketingScreen>
     );
   }
 
+  void _showMemberAdjustmentDialog(Member member) {
+    final pointsController = TextEditingController();
+    final reasonController = TextEditingController();
+    String? errorText;
+    var isSubmitting = false;
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Penyesuaian Poin Administrator',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Member: ${member.name}',
+                  style: GoogleFonts.poppins(fontSize: 12)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: pointsController,
+                enabled: !isSubmitting,
+                keyboardType:
+                    const TextInputType.numberWithOptions(signed: true),
+                decoration: InputDecoration(
+                  labelText: 'Perubahan poin (+/-)',
+                  hintText: 'Contoh: 10 atau -5',
+                  errorText: errorText,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (_) => setDialogState(() => errorText = null),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonController,
+                enabled: !isSubmitting,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Alasan wajib diisi',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed:
+                  isSubmitting ? null : () => Navigator.pop(dialogContext),
+              child: Text('Batal', style: GoogleFonts.poppins()),
+            ),
+            ElevatedButton(
+              onPressed: isSubmitting
+                  ? null
+                  : () async {
+                      final delta = int.tryParse(
+                          pointsController.text.trim().replaceAll('.', ''));
+                      final reason = reasonController.text.trim();
+                      if (delta == null || delta == 0) {
+                        setDialogState(() =>
+                            errorText = 'Masukkan perubahan poin selain nol.');
+                        return;
+                      }
+                      if (reason.isEmpty) {
+                        setDialogState(() => errorText = 'Alasan wajib diisi.');
+                        return;
+                      }
+                      if (_isProcessingProgramAction) return;
+                      setDialogState(() => isSubmitting = true);
+                      setState(() => _isProcessingProgramAction = true);
+                      Navigator.pop(dialogContext);
+                      try {
+                        final user = FirebaseAuth.instance.currentUser;
+                        final actorId = user?.uid ?? user?.email ?? '';
+                        if (actorId.isEmpty) {
+                          throw const MemberProgramException(
+                              'Identitas administrator tidak tersedia.');
+                        }
+                        await MemberProgramService.applyAdministratorAdjustment(
+                          operationId:
+                              'manual_${member.id}_${DateTime.now().microsecondsSinceEpoch}',
+                          memberId: member.id,
+                          pointsDelta: delta,
+                          reason: reason,
+                          sourceId: member.id,
+                          actorId: actorId,
+                        );
+                        await _loadMembers();
+                        if (mounted) {
+                          ScaffoldMessenger.of(context)
+                            ..clearSnackBars()
+                            ..showSnackBar(const SnackBar(
+                                content: Text(
+                                    'Penyesuaian poin berhasil disimpan.')));
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context)
+                            ..clearSnackBars()
+                            ..showSnackBar(SnackBar(
+                                content: Text(
+                                    'Penyesuaian gagal: ${UserMessageService.fromError(e)}')));
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() => _isProcessingProgramAction = false);
+                        }
+                        pointsController.dispose();
+                        reasonController.dispose();
+                      }
+                    },
+              child: isSubmitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text('Simpan', style: GoogleFonts.poppins()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showMemberProgressSheet(Member member) async {
     showModalBottomSheet(
       context: context,
@@ -1498,7 +1614,10 @@ class _MarketingScreenState extends State<MarketingScreen>
                     CircleAvatar(
                       radius: 24,
                       backgroundColor: const Color(0xFFE8F5E9),
-                      child: Text(member.name[0].toUpperCase(),
+                      child: Text(
+                          member.name.isEmpty
+                              ? '?'
+                              : member.name[0].toUpperCase(),
                           style: const TextStyle(fontWeight: FontWeight.bold)),
                     ),
                     const SizedBox(width: 16),
@@ -1514,6 +1633,13 @@ class _MarketingScreenState extends State<MarketingScreen>
                                   color: Colors.grey.shade600, fontSize: 13)),
                         ],
                       ),
+                    ),
+                    IconButton(
+                      tooltip: 'Penyesuaian poin administrator',
+                      onPressed: _isProcessingProgramAction
+                          ? null
+                          : () => _showMemberAdjustmentDialog(member),
+                      icon: const Icon(Icons.tune),
                     ),
                   ],
                 ),
@@ -1536,8 +1662,10 @@ class _MarketingScreenState extends State<MarketingScreen>
                     vouchers.sort((a, b) {
                       final aData = a.data() as Map<String, dynamic>;
                       final bData = b.data() as Map<String, dynamic>;
-                      final aTime = aData['lastUpdatedAt'] as Timestamp?;
-                      final bTime = bData['lastUpdatedAt'] as Timestamp?;
+                      final aTime =
+                          MemberProgramValues.dateValue(aData['lastUpdatedAt']);
+                      final bTime =
+                          MemberProgramValues.dateValue(bData['lastUpdatedAt']);
                       if (aTime == null && bTime == null) return 0;
                       if (aTime == null) return 1;
                       if (bTime == null) return -1;
@@ -1569,11 +1697,15 @@ class _MarketingScreenState extends State<MarketingScreen>
                         else
                           ...vouchers.take(3).map((v) {
                             final data = v.data() as Map<String, dynamic>;
-                            final status = data['status'] ?? 'UNKNOWN';
-                            final points = data['userPoints'] ?? 0;
-                            final threshold = data['threshold'] ?? 0;
-                            final progress =
-                                (points / threshold).clamp(0.0, 1.0);
+                            final status =
+                                data['status']?.toString() ?? 'UNKNOWN';
+                            final points = MemberProgramService.parseInt(
+                                data['userPoints']);
+                            final threshold = MemberProgramService.parseInt(
+                                data['threshold']);
+                            final progress = threshold <= 0
+                                ? 0.0
+                                : (points / threshold).clamp(0.0, 1.0);
 
                             Color statusColor;
                             IconData statusIcon;
@@ -1744,6 +1876,219 @@ class _MarketingScreenState extends State<MarketingScreen>
     );
   }
 
+  Future<void> _showMemberProgramAudit() async {
+    if (_isProcessingProgramAction) return;
+    setState(() => _isProcessingProgramAction = true);
+    List<MemberProgramAuditFinding> findings = const [];
+    String? error;
+    try {
+      findings = await MemberProgramAuditService().runAudit();
+    } catch (e) {
+      error = UserMessageService.fromError(e);
+    } finally {
+      if (mounted) setState(() => _isProcessingProgramAction = false);
+    }
+    if (!mounted) return;
+
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text('Audit gagal: $error')));
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Audit Member Program',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        content: SizedBox(
+          width: 560,
+          height: 440,
+          child: findings.isEmpty
+              ? Center(
+                  child: Text('Tidak ditemukan temuan audit.',
+                      style: GoogleFonts.poppins()))
+              : ListView.separated(
+                  itemCount: findings.length,
+                  separatorBuilder: (_, __) => const Divider(height: 16),
+                  itemBuilder: (_, index) {
+                    final finding = findings[index];
+                    final color = finding.severity == 'high'
+                        ? Colors.red.shade700
+                        : finding.severity == 'medium'
+                            ? Colors.orange.shade800
+                            : Colors.blueGrey;
+                    final canRetryExternal =
+                        finding.code == 'external_voucher_claim_pending';
+                    final canRetryCampaign =
+                        finding.code == 'member_program_campaign_pending';
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.warning_amber_rounded, color: color),
+                      title: Text(finding.message,
+                          style: GoogleFonts.poppins(fontSize: 12)),
+                      subtitle: Text(
+                        '${finding.severity.toUpperCase()} • ${finding.code}\n${finding.documentPath ?? ''}',
+                        style: GoogleFonts.poppins(
+                            fontSize: 10, color: Colors.grey.shade700),
+                      ),
+                      trailing: canRetryExternal || canRetryCampaign
+                          ? TextButton(
+                              onPressed: _isProcessingProgramAction
+                                  ? null
+                                  : () => canRetryExternal
+                                      ? _retryExternalClaimFromFinding(
+                                          finding,
+                                        )
+                                      : _retryCampaignFromFinding(finding),
+                              child: Text('Coba lagi',
+                                  style: GoogleFonts.poppins(fontSize: 11)),
+                            )
+                          : null,
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Tutup', style: GoogleFonts.poppins()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _retryExternalClaimFromFinding(
+      MemberProgramAuditFinding finding) async {
+    final path = finding.documentPath;
+    if (path == null || path.trim().isEmpty || _isProcessingProgramAction) {
+      return;
+    }
+    final operationId = path.split('/').last;
+    if (operationId.isEmpty) return;
+
+    setState(() => _isProcessingProgramAction = true);
+    try {
+      await MemberProgramService.retryExternalClaim(operationId);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(const SnackBar(
+            content: Text('Klaim voucher e-santren sedang dicoba ulang.'),
+            backgroundColor: Colors.green,
+          ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+            content: Text(
+                'Gagal mencoba ulang klaim e-santren: ${UserMessageService.fromError(e)}'),
+          ));
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessingProgramAction = false);
+    }
+  }
+
+  Future<void> _retryCampaignFromFinding(
+      MemberProgramAuditFinding finding) async {
+    final path = finding.documentPath;
+    if (path == null || path.trim().isEmpty || _isProcessingProgramAction) {
+      return;
+    }
+    final operationId = path.split('/').last;
+    if (operationId.isEmpty) return;
+
+    setState(() => _isProcessingProgramAction = true);
+    try {
+      await MemberProgramService.retryCampaignProgress(operationId);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(const SnackBar(
+            content: Text('Progres campaign berhasil dicoba ulang.'),
+            backgroundColor: Colors.green,
+          ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+            content: Text(
+                'Gagal mencoba ulang progres campaign: ${UserMessageService.fromError(e)}'),
+          ));
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessingProgramAction = false);
+    }
+  }
+
+  Future<void> _finalizePreviousCompetitionMonth() async {
+    if (_isProcessingProgramAction) return;
+    setState(() => _isProcessingProgramAction = true);
+    try {
+      final now = DateTime.now();
+      final previousMonth = DateTime(now.year, now.month - 1, 15);
+      final periodId = MemberProgramService.periodIdFor(previousMonth);
+      final winners = await MemberProgramService.finalizeCompetitionMonth(
+        periodId: periodId,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Kompetisi $periodId Difinalisasi',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+          content: SizedBox(
+            width: 520,
+            child: winners.isEmpty
+                ? Text('Tidak ada pemenang yang memenuhi syarat.',
+                    style: GoogleFonts.poppins())
+                : ListView(
+                    shrinkWrap: true,
+                    children: winners
+                        .map((winner) => ListTile(
+                              dense: true,
+                              leading: CircleAvatar(
+                                radius: 14,
+                                child: Text('${winner.rank}'),
+                              ),
+                              title: Text(
+                                  '${MemberProgramService.categoryLabel(winner.category)} • ${winner.memberId}',
+                                  style: GoogleFonts.poppins(fontSize: 12)),
+                              subtitle: Text(
+                                  'Rp ${NumberFormat.decimalPattern('id_ID').format(winner.prizeAmount)} • ${winner.voucherId}',
+                                  style: GoogleFonts.poppins(fontSize: 11)),
+                            ))
+                        .toList(),
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text('Tutup', style: GoogleFonts.poppins()),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+              content: Text(
+                  'Gagal finalisasi kompetisi: ${UserMessageService.fromError(e)}')));
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessingProgramAction = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1756,11 +2101,26 @@ class _MarketingScreenState extends State<MarketingScreen>
         elevation: 0,
         actions: [
           IconButton(
+            icon: const Icon(Icons.fact_check_outlined),
+            onPressed:
+                _isProcessingProgramAction ? null : _showMemberProgramAudit,
+            tooltip: 'Audit Member Program',
+          ),
+          IconButton(
+            icon: const Icon(Icons.emoji_events_outlined),
+            onPressed: _isProcessingProgramAction
+                ? null
+                : _finalizePreviousCompetitionMonth,
+            tooltip: 'Finalisasi Bulan Kompetisi',
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _handleRefreshMembers();
-              _loadCampaigns(forceRefresh: true);
-            },
+            onPressed: _isProcessingProgramAction
+                ? null
+                : () {
+                    _handleRefreshMembers();
+                    _loadCampaigns(forceRefresh: true);
+                  },
             tooltip: 'Refresh Data',
           ),
         ],
@@ -1805,9 +2165,11 @@ class _MarketingScreenState extends State<MarketingScreen>
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _tabController.index == 0
-            ? _showAddMemberDialog
-            : _showAddCampaignModal,
+        onPressed: _isProcessingProgramAction
+            ? null
+            : (_tabController.index == 0
+                ? _showAddMemberDialog
+                : _showAddCampaignModal),
         backgroundColor: const Color(0xFF2E7D32),
         icon: Icon(_tabController.index == 0 ? Icons.person_add : Icons.add,
             color: Colors.white),

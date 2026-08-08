@@ -19,6 +19,7 @@ class Col {
     'Canteens',
     'Categories',
     'competitionRecords',
+    'competitionPrizes',
     'DailyFinancialReport',
     'DailyTransaction',
     'Expenses',
@@ -26,6 +27,7 @@ class Col {
     'MonthlyFinancialReport',
     'MonthlyTransaction',
     'OrderHistory',
+    'pointTransactions',
     'RecentlyServed',
     'SelfOrders',
     'Status',
@@ -39,6 +41,8 @@ class Col {
     'voucherGroup',
     'voucherProgram',
     'voucherPrograms',
+    'memberProgramOperations',
+    'externalVoucherClaims',
     'YearlyFinancialReport',
     'YearlyTransaction',
   };
@@ -130,6 +134,7 @@ class Col {
       // Older testing-mode data may already contain the canteen copy but not
       // the B2B root collection.  Migrate that collection independently.
       await _migrateVoucherPrograms(fs);
+      await _migrateMemberProgramCollections(fs);
       return;
     }
 
@@ -144,7 +149,11 @@ class Col {
     // 3. Migrate B2B programs and their operation ledgers.
     await _migrateVoucherPrograms(fs);
 
-    // 4. Migrate Canteens + subcollections
+    // 4. Migrate member points, competition, campaign, and external outbox
+    // roots only when the corresponding testing collection is still empty.
+    await _migrateMemberProgramCollections(fs);
+
+    // 5. Migrate Canteens + subcollections
     await _migrateCanteens(fs);
 
     debugPrint('[TestingMode] Migration complete.');
@@ -195,6 +204,62 @@ class Col {
     }
     debugPrint(
         '[TestingMode]   voucherPrograms: ${source.docs.length} docs copied.');
+  }
+
+  static Future<void> _migrateMemberProgramCollections(
+      FirebaseFirestore fs) async {
+    const roots = [
+      'competitionRecords',
+      'competitionPrizes',
+      'pointTransactions',
+      'memberProgramOperations',
+      'externalVoucherClaims',
+      'voucherGroup',
+      'vouchers',
+    ];
+    for (final root in roots) {
+      final target = fs.collection('zTesting_$root');
+      if ((await target.limit(1).get()).docs.isNotEmpty) continue;
+      final source = await fs.collection(root).get();
+      for (final chunk in _chunkList(source.docs, 400)) {
+        final batch = fs.batch();
+        for (final doc in chunk) {
+          batch.set(target.doc(doc.id), doc.data());
+        }
+        await batch.commit();
+      }
+      if (root == 'competitionRecords') {
+        for (final period in source.docs) {
+          final members = await period.reference.collection('members').get();
+          for (final chunk in _chunkList(members.docs, 400)) {
+            final batch = fs.batch();
+            for (final member in chunk) {
+              batch.set(
+                target.doc(period.id).collection('members').doc(member.id),
+                member.data(),
+              );
+            }
+            await batch.commit();
+          }
+        }
+      }
+      if (root == 'competitionPrizes') {
+        for (final prize in source.docs) {
+          final winners = await prize.reference.collection('winners').get();
+          for (final chunk in _chunkList(winners.docs, 400)) {
+            final batch = fs.batch();
+            for (final winner in chunk) {
+              batch.set(
+                target.doc(prize.id).collection('winners').doc(winner.id),
+                winner.data(),
+              );
+            }
+            await batch.commit();
+          }
+        }
+      }
+      debugPrint('[TestingMode]   $root: ${source.docs.length} docs copied.');
+    }
   }
 
   /// Deep-copy Canteens/canteen375 and all its subcollections.
