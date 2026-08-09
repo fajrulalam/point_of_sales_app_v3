@@ -91,7 +91,9 @@ void main() {
   test('concurrent duplicate point award updates member and campaign once',
       () async {
     final suffix = DateTime.now().microsecondsSinceEpoch.toString();
-    final memberId = 'member_$suffix';
+    // The plus sign exercises the legacy root-map path for IDs that are not
+    // valid dotted field-path segments.
+    final memberId = 'member_${suffix}_+628123';
     final campaignId = 'campaign_$suffix';
     final operationId = 'sale_$suffix';
     final periodId = MemberProgramService.periodIdFor(DateTime.now());
@@ -156,6 +158,10 @@ void main() {
         .collection('members')
         .doc(memberId)
         .get();
+    final legacyCompetition = await firestore
+        .collection(Col.name('competitionRecords'))
+        .doc(periodId)
+        .get();
     final ledgers = await firestore
         .collection(Col.name('pointTransactions'))
         .where('operationId', isEqualTo: operationId)
@@ -170,6 +176,84 @@ void main() {
       3,
     );
     expect(competition.data()?['numberOfTransaction'], 1);
+    final legacyRecord =
+        legacyCompetition.data()?[memberId] as Map<String, dynamic>?;
+    expect(MemberProgramValues.intValue(legacyRecord?['customerPoints']), 3);
+    expect(MemberProgramValues.intValue(legacyRecord?['amountSpent']), 30000);
+    expect(
+        MemberProgramValues.intValue(legacyRecord?['numberOfTransaction']), 1);
     expect(ledgers.docs.length, 1);
+  });
+
+  test('finalization ranks cumulative root data and is idempotent', () async {
+    final suffix = DateTime.now().microsecondsSinceEpoch.toString();
+    final memberId = 'finalizer_member_$suffix';
+    final periodId = MemberProgramService.periodIdFor(
+      DateTime(MemberProgramService.nowJakarta().year,
+          MemberProgramService.nowJakarta().month - 1, 15),
+    );
+
+    await firestore.collection(Col.name('Members')).doc(memberId).set({
+      'fullName': 'Finalizer Member',
+      'uid': emulatorUid,
+      'role': 'member',
+      'category': 'Santri',
+      'points': 0,
+    });
+    await firestore
+        .collection(Col.name('competitionRecords'))
+        .doc(periodId)
+        .set({
+      'periodId': periodId,
+      'status': 'open',
+      memberId: {
+        'customerPoints': 10,
+        'amountSpent': 100000,
+        'numberOfTransaction': 4,
+        'category': 'santri',
+      },
+    });
+    await firestore
+        .collection(Col.name('competitionRecords'))
+        .doc(periodId)
+        .collection('members')
+        .doc(memberId)
+        .set({
+      'schemaVersion': 2,
+      'memberId': memberId,
+      'category': 'santri',
+      'customerPoints': 2,
+      'amountSpent': 20000,
+      'numberOfTransaction': 1,
+    });
+
+    final firstRun = await MemberProgramService.finalizeCompetitionMonth(
+      periodId: periodId,
+      actorId: emulatorUid,
+    );
+    expect(firstRun, hasLength(1));
+    expect(firstRun.single.points, 10);
+    expect(firstRun.single.prizeAmount, 50000);
+
+    final secondRun = await MemberProgramService.finalizeCompetitionMonth(
+      periodId: periodId,
+      actorId: emulatorUid,
+    );
+    expect(secondRun, hasLength(1));
+    expect(secondRun.single.memberId, memberId);
+    expect(secondRun.single.prizeAmount, 50000);
+
+    final prize = await firestore
+        .collection(Col.name('competitionPrizes'))
+        .doc(periodId)
+        .get();
+    expect(prize.data()?['status'], 'finalized');
+    final vouchers = await firestore
+        .collection(Col.name('vouchers'))
+        .where('competitionPrizePeriod', isEqualTo: periodId)
+        .where('userId', isEqualTo: memberId)
+        .get();
+    expect(vouchers.docs, hasLength(1));
+    expect(vouchers.docs.single.data()['value'], 50000);
   });
 }

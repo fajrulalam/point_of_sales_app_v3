@@ -93,7 +93,8 @@ class MemberProgramService {
         .where((record) =>
             (normalized == null || record.category == normalized) &&
             record.category.isNotEmpty &&
-            record.memberId.isNotEmpty)
+            record.memberId.isNotEmpty &&
+            record.customerPoints > 0)
         .toList()
       ..sort((a, b) {
         final points = b.customerPoints.compareTo(a.customerPoints);
@@ -180,10 +181,20 @@ class MemberProgramService {
     return 'competition_${_safeId(periodId)}_${_safeId(category)}_${rank}_${_hashId(memberId)}';
   }
 
-  static bool _isSafeLegacyMemberKey(String memberId) =>
-      RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(memberId);
-
   static DateTime? _date(dynamic value) => MemberProgramValues.dateValue(value);
+
+  static Map<String, dynamic> _recordMap(dynamic value) {
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return <String, dynamic>{};
+  }
+
+  static bool _isCompetitionRecordMap(dynamic value) {
+    if (value is! Map) return false;
+    return value.containsKey('customerPoints') ||
+        value.containsKey('points') ||
+        value.containsKey('amountSpent') ||
+        value.containsKey('numberOfTransaction');
+  }
 
   static bool _campaignDatesContain(
       Map<String, dynamic> data, DateTime eventAt) {
@@ -397,14 +408,9 @@ class MemberProgramService {
     final periodSnapshot = await transaction.get(periodRef);
     final memberSnapshot =
         memberRef == null ? null : await transaction.get(memberRef);
-    if (preparation.memberId.isNotEmpty) {
-      await transaction.get(competitionMemberRef);
-    }
-    // legacyRef and periodRef are the same document (_legacyCompetitionRef
-    // just aliases _competitionPeriodRef), so reuse periodSnapshot instead of
-    // fetching it a second time.
-    final legacySnapshot =
-        _isSafeLegacyMemberKey(preparation.memberId) ? periodSnapshot : null;
+    final competitionMemberSnapshot = preparation.memberId.isEmpty
+        ? null
+        : await transaction.get(competitionMemberRef);
     final campaignGroupSnapshot = campaignGroupRef == null
         ? null
         : await transaction.get(campaignGroupRef);
@@ -555,23 +561,40 @@ class MemberProgramService {
       });
     }
 
+    final existingCanonical = _recordMap(competitionMemberSnapshot?.data());
+    final existingLegacy =
+        _recordMap(periodSnapshot.data()?[preparation.memberId]);
+    final nextPoints = parseInt(existingCanonical['customerPoints']) +
+        preparation.points.pointsDelta;
+    final nextAmount = parseInt(existingCanonical['amountSpent']) +
+        preparation.points.eligibleAmount;
+    final nextTransactions =
+        parseInt(existingCanonical['numberOfTransaction']) + 1;
+    final canonicalData = <String, dynamic>{
+      'schemaVersion': 2,
+      'memberId': preparation.memberId,
+      if (preparation.memberName.isNotEmpty)
+        'memberName': preparation.memberName,
+      if (preparation.category.isNotEmpty) 'category': preparation.category,
+      'customerPoints': nextPoints,
+      'amountSpent': nextAmount,
+      'numberOfTransaction': nextTransactions,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
     transaction.set(
       competitionMemberRef,
-      {
-        'schemaVersion': 2,
-        'memberId': preparation.memberId,
-        if (preparation.memberName.isNotEmpty)
-          'memberName': preparation.memberName,
-        'category': preparation.category,
-        'customerPoints': FieldValue.increment(preparation.points.pointsDelta),
-        'amountSpent': FieldValue.increment(preparation.points.eligibleAmount),
-        'numberOfTransaction': FieldValue.increment(1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
+      canonicalData,
       SetOptions(merge: true),
     );
+
+    final nextLegacyPoints = parseInt(existingLegacy['customerPoints']) +
+        preparation.points.pointsDelta;
+    final nextLegacyAmount = parseInt(existingLegacy['amountSpent']) +
+        preparation.points.eligibleAmount;
+    final nextLegacyTransactions =
+        parseInt(existingLegacy['numberOfTransaction']) + 1;
     transaction.set(
-      periodRef,
+      legacyRef,
       {
         'schemaVersion': 2,
         'periodId': preparation.periodId,
@@ -579,31 +602,17 @@ class MemberProgramService {
             ? (periodSnapshot.data()?['status'] ?? 'open')
             : 'open',
         'updatedAt': FieldValue.serverTimestamp(),
+        preparation.memberId: {
+          if (preparation.memberName.isNotEmpty)
+            'memberName': preparation.memberName,
+          if (preparation.category.isNotEmpty) 'category': preparation.category,
+          'customerPoints': nextLegacyPoints,
+          'amountSpent': nextLegacyAmount,
+          'numberOfTransaction': nextLegacyTransactions,
+        },
       },
       SetOptions(merge: true),
     );
-
-    if (legacySnapshot != null &&
-        _isSafeLegacyMemberKey(preparation.memberId)) {
-      transaction.set(
-        legacyRef,
-        {
-          preparation.memberId: {
-            if (preparation.memberName.isNotEmpty)
-              'memberName': preparation.memberName,
-            'category': preparation.category,
-            'customerPoints':
-                FieldValue.increment(preparation.points.pointsDelta),
-            'amountSpent':
-                FieldValue.increment(preparation.points.eligibleAmount),
-            'numberOfTransaction': FieldValue.increment(1),
-          },
-        },
-        SetOptions(merge: true),
-      );
-    } else if (preparation.memberId.isNotEmpty) {
-      flags.add('legacy_competition_key_not_materialized');
-    }
 
     var campaignStatus = 'none';
     if (preparation.campaignLookupFailed) {
@@ -937,12 +946,8 @@ class MemberProgramService {
     }
     final periodSnapshot = await transaction.get(periodRef);
     final memberSnapshot = await transaction.get(memberRef!);
-    await transaction.get(competitionMemberRef);
-    // _legacyCompetitionRef(periodId) is the same document as periodRef here
-    // (periodId == newPreparation.periodId, checked above), so reuse
-    // periodSnapshot instead of fetching it a second time.
-    final legacySnapshot =
-        _isSafeLegacyMemberKey(newPreparation.memberId) ? periodSnapshot : null;
+    final competitionMemberSnapshot =
+        await transaction.get(competitionMemberRef);
 
     final oldCampaignGroupId = oldData['campaignGroupId']?.toString();
     final oldCampaignVoucherId = oldData['campaignVoucherId']?.toString();
@@ -1019,33 +1024,44 @@ class MemberProgramService {
         'pointsUpdatedAt': FieldValue.serverTimestamp(),
       });
     }
+    final existingCanonical = _recordMap(competitionMemberSnapshot.data());
+    final existingLegacy =
+        _recordMap(periodSnapshot.data()?[newPreparation.memberId]);
+    final canonicalData = <String, dynamic>{
+      'schemaVersion': 2,
+      'memberId': newPreparation.memberId,
+      if (newPreparation.memberName.isNotEmpty)
+        'memberName': newPreparation.memberName,
+      if (newPreparation.category.isNotEmpty)
+        'category': newPreparation.category,
+      'customerPoints':
+          parseInt(existingCanonical['customerPoints']) + newPoints - oldPoints,
+      'amountSpent': parseInt(existingCanonical['amountSpent']) +
+          newEligible -
+          oldEligible,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
     transaction.set(
       competitionMemberRef,
-      {
-        'schemaVersion': 2,
-        'memberId': newPreparation.memberId,
-        'category': newPreparation.category,
-        'customerPoints': FieldValue.increment(newPoints - oldPoints),
-        'amountSpent': FieldValue.increment(newEligible - oldEligible),
-        'updatedAt': FieldValue.serverTimestamp(),
+      canonicalData,
+      SetOptions(merge: true),
+    );
+    transaction.set(
+      _legacyCompetitionRef(periodId),
+      <String, dynamic>{
+        oldMemberId: {
+          if (newPreparation.category.isNotEmpty)
+            'category': newPreparation.category,
+          'customerPoints': parseInt(existingLegacy['customerPoints']) +
+              newPoints -
+              oldPoints,
+          'amountSpent': parseInt(existingLegacy['amountSpent']) +
+              newEligible -
+              oldEligible,
+        },
       },
       SetOptions(merge: true),
     );
-    if (legacySnapshot != null && _isSafeLegacyMemberKey(oldMemberId)) {
-      transaction.set(
-        _legacyCompetitionRef(periodId),
-        <String, dynamic>{
-          oldMemberId: {
-            'category': newPreparation.category,
-            'customerPoints': FieldValue.increment(newPoints - oldPoints),
-            'amountSpent': FieldValue.increment(newEligible - oldEligible),
-          },
-        },
-        SetOptions(merge: true),
-      );
-    } else {
-      flags.add('legacy_competition_key_not_materialized');
-    }
 
     var campaignStatus = 'none';
     final hasOldCampaignReference =
@@ -1424,13 +1440,101 @@ class MemberProgramService {
           String periodId) =>
       _fs.collection(Col.name('competitionPrizes')).doc(periodId);
 
+  /// Reconciles the cumulative legacy monthly map with the migration-era
+  /// member subcollection. The root map wins for overlapping members because
+  /// the subcollection may contain only transactions written after rollout.
+  /// Canonical-only members remain available as a fallback for records whose
+  /// legacy map entry could not previously be materialized.
+  static List<CompetitionMemberRecord> mergeCompetitionRecords({
+    required Map<String, dynamic> legacyData,
+    required Iterable<CompetitionMemberRecord> canonicalRecords,
+    Map<String, Map<String, dynamic>> memberProfiles =
+        const <String, Map<String, dynamic>>{},
+  }) {
+    final profiles = <String, Map<String, dynamic>>{
+      for (final entry in memberProfiles.entries) entry.key.trim(): entry.value,
+    };
+    final records = <String, CompetitionMemberRecord>{};
+
+    for (final entry in legacyData.entries) {
+      if (!_isCompetitionRecordMap(entry.value)) continue;
+      final memberId = entry.key.trim();
+      if (memberId.isEmpty) continue;
+      final raw = _recordMap(entry.value);
+      final profile = profiles[memberId] ?? const <String, dynamic>{};
+      final category = normalizeCategory(
+        raw['category'] ??
+            raw['memberCategory'] ??
+            profile['category'] ??
+            profile['memberCategory'] ??
+            profile['role'],
+      );
+      records[memberId] = CompetitionMemberRecord(
+        memberId: memberId,
+        category: category,
+        customerPoints: parseInt(raw['customerPoints'] ?? raw['points']),
+        amountSpent: parseInt(raw['amountSpent']),
+        numberOfTransaction: parseInt(raw['numberOfTransaction']),
+      );
+    }
+
+    for (final canonical in canonicalRecords) {
+      final memberId = canonical.memberId.trim();
+      if (memberId.isEmpty) continue;
+      final existing = records[memberId];
+      final profile = profiles[memberId] ?? const <String, dynamic>{};
+      final canonicalCategory = canonical.category.isNotEmpty
+          ? canonical.category
+          : normalizeCategory(
+              profile['category'] ??
+                  profile['memberCategory'] ??
+                  profile['role'],
+            );
+      if (existing == null) {
+        records[memberId] = CompetitionMemberRecord(
+          memberId: memberId,
+          category: canonicalCategory,
+          customerPoints: canonical.customerPoints,
+          amountSpent: canonical.amountSpent,
+          numberOfTransaction: canonical.numberOfTransaction,
+        );
+        continue;
+      }
+      records[memberId] = CompetitionMemberRecord(
+        memberId: memberId,
+        category: existing.category.isNotEmpty
+            ? existing.category
+            : canonicalCategory,
+        customerPoints: existing.customerPoints,
+        amountSpent: existing.amountSpent,
+        numberOfTransaction: existing.numberOfTransaction,
+      );
+    }
+
+    return records.values.toList();
+  }
+
   static Future<List<CompetitionMemberRecord>> loadCompetitionMembers(
       String periodId) async {
-    final snapshot =
-        await _competitionPeriodRef(periodId).collection('members').get();
-    return snapshot.docs
+    final periodRef = _competitionPeriodRef(periodId);
+    final periodFuture = periodRef.get();
+    final canonicalFuture = periodRef.collection('members').get();
+    final membersFuture = _fs.collection(Col.name('Members')).get();
+    final periodSnapshot = await periodFuture;
+    final canonicalSnapshot = await canonicalFuture;
+    final membersSnapshot = await membersFuture;
+    final profiles = <String, Map<String, dynamic>>{
+      for (final member in membersSnapshot.docs)
+        member.id.trim(): member.data(),
+    };
+    final canonicalRecords = canonicalSnapshot.docs
         .map((doc) => CompetitionMemberRecord.fromMap(doc.id, doc.data()))
         .toList();
+    return mergeCompetitionRecords(
+      legacyData: periodSnapshot.data() ?? <String, dynamic>{},
+      canonicalRecords: canonicalRecords,
+      memberProfiles: profiles,
+    );
   }
 
   /// Finalizes a completed Jakarta calendar month.  The first transaction

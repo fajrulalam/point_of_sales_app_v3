@@ -80,6 +80,13 @@ void main() {
         amountSpent: 999999,
         numberOfTransaction: 9,
       ),
+      const CompetitionMemberRecord(
+        memberId: 'zero-point',
+        category: 'santri',
+        customerPoints: 0,
+        amountSpent: 999999,
+        numberOfTransaction: 99,
+      ),
     ];
 
     final ranked = MemberProgramService.rankCompetitionMembers(
@@ -87,6 +94,52 @@ void main() {
       category: 'Santri',
     );
     expect(ranked.map((record) => record.memberId), ['a-member', 'z-member']);
+  });
+
+  test('keeps cumulative root totals over partial canonical migration records',
+      () {
+    final merged = MemberProgramService.mergeCompetitionRecords(
+      legacyData: {
+        'legacy-member': {
+          'customerPoints': 14,
+          'amountSpent': 169000,
+          'numberOfTransaction': 9,
+        },
+      },
+      canonicalRecords: const [
+        CompetitionMemberRecord(
+          memberId: 'legacy-member',
+          category: 'mahasiswa',
+          customerPoints: 4,
+          amountSpent: 52000,
+          numberOfTransaction: 3,
+        ),
+        CompetitionMemberRecord(
+          memberId: 'canonical-only',
+          category: 'santri',
+          customerPoints: 2,
+          amountSpent: 20000,
+          numberOfTransaction: 1,
+        ),
+      ],
+      memberProfiles: const {
+        'legacy-member': {'category': 'Mahasiswa'},
+      },
+    );
+
+    final legacy =
+        merged.firstWhere((record) => record.memberId == 'legacy-member');
+    expect(legacy.customerPoints, 14);
+    expect(legacy.amountSpent, 169000);
+    expect(legacy.numberOfTransaction, 9);
+    expect(legacy.category, 'mahasiswa');
+    expect(merged.any((record) => record.memberId == 'canonical-only'), isTrue);
+  });
+
+  test('default competition prizes are 50k, 25k, and 15k', () {
+    expect(PrizeConfiguration.defaults.amountFor('santri', 1), 50000);
+    expect(PrizeConfiguration.defaults.amountFor('mahasiswa', 2), 25000);
+    expect(PrizeConfiguration.defaults.amountFor('staff_guru_dosen', 3), 15000);
   });
 
   test('campaign selection chooses earliest expiry and breaks ties by ID', () {

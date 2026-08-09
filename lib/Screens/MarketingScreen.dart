@@ -2032,7 +2032,7 @@ class _MarketingScreenState extends State<MarketingScreen>
     if (_isProcessingProgramAction) return;
     setState(() => _isProcessingProgramAction = true);
     try {
-      final now = DateTime.now();
+      final now = MemberProgramService.nowJakarta();
       final previousMonth = DateTime(now.year, now.month - 1, 15);
       final periodId = MemberProgramService.periodIdFor(previousMonth);
       final winners = await MemberProgramService.finalizeCompetitionMonth(
