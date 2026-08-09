@@ -36,6 +36,13 @@ class MemberProgramService {
   static String normalizeCategory(dynamic value) =>
       MemberProgramValues.categoryValue(value);
 
+  static String _memberDisplayName(Map<String, dynamic> data) {
+    final value = (data['fullName'] ?? data['name'] ?? data['nama'] ?? '')
+        .toString()
+        .trim();
+    return value.length <= 120 ? value : value.substring(0, 120);
+  }
+
   /// Returns a wall-clock representation whose fields are Jakarta time.
   /// This is useful for calendar formatting, but it is not the original
   /// instant and must not be used for elapsed-time comparisons.
@@ -240,6 +247,7 @@ class MemberProgramService {
 
     final memberExists = memberSnapshot?.exists == true;
     final memberData = memberSnapshot?.data() ?? const <String, dynamic>{};
+    final memberName = _memberDisplayName(memberData);
     final category = normalizeCategory(
       memberData['category'] ??
           memberData['memberCategory'] ??
@@ -271,6 +279,7 @@ class MemberProgramService {
       sourceType: sourceType,
       sourceId: sourceId,
       memberId: normalizedMemberId,
+      memberName: memberName,
       periodId: periodId,
       category: category,
       eventAt: event,
@@ -551,6 +560,8 @@ class MemberProgramService {
       {
         'schemaVersion': 2,
         'memberId': preparation.memberId,
+        if (preparation.memberName.isNotEmpty)
+          'memberName': preparation.memberName,
         'category': preparation.category,
         'customerPoints': FieldValue.increment(preparation.points.pointsDelta),
         'amountSpent': FieldValue.increment(preparation.points.eligibleAmount),
@@ -578,6 +589,8 @@ class MemberProgramService {
         legacyRef,
         {
           preparation.memberId: {
+            if (preparation.memberName.isNotEmpty)
+              'memberName': preparation.memberName,
             'category': preparation.category,
             'customerPoints':
                 FieldValue.increment(preparation.points.pointsDelta),

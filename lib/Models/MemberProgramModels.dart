@@ -115,6 +115,7 @@ class MemberProgramPreparation {
   final String sourceType;
   final String sourceId;
   final String memberId;
+  final String memberName;
   final String periodId;
   final String category;
   final DateTime eventAt;
@@ -133,6 +134,7 @@ class MemberProgramPreparation {
     required this.sourceType,
     required this.sourceId,
     required this.memberId,
+    required this.memberName,
     required this.periodId,
     required this.category,
     required this.eventAt,
