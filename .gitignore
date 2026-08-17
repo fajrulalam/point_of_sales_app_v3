@@ -51,3 +51,6 @@ bugreport-*.zip
 /android/app/profile
 /android/app/release
 *.json
+
+# Never committed: local-only secrets. See docs/sdrg_stock_bridge_protocol.md.
+lib/Services/SdrgBridgeCredentials.dart

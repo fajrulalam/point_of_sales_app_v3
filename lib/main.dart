@@ -5,6 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:point_of_sales_app_v3/Screens/Home.dart';
 import 'package:point_of_sales_app_v3/Screens/LoginScreen.dart';
+import 'package:point_of_sales_app_v3/Services/SdrgAutoAcceptService.dart';
+import 'package:point_of_sales_app_v3/Services/SdrgBridgeService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'firebase_options.dart';
 
@@ -24,12 +26,22 @@ Future<void> main() async {
     name: 'e-santren',
     options: DefaultFirebaseOptions.eSantrenWeb,
   );
+  await Firebase.initializeApp(
+    name: SdrgBridgeService.appName,
+    options: DefaultFirebaseOptions.warehouseWeb,
+  );
 
   // Initialize Indonesian locale for date formatting
   await initializeDateFormatting('id_ID', null);
 
   // Load persisted testing mode preference
   await Col.init();
+
+  // Applies SDRG deliveries as they arrive, with no confirmation tap. Started
+  // here rather than lazily on tab-open, since "automatic" means it has to be
+  // watching the moment the app is running, not only when someone happens to
+  // look at the Penerimaan SDRG tab.
+  SdrgAutoAcceptService.start();
 
   runApp(const MyApp());
 }

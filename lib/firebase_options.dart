@@ -78,4 +78,16 @@ class DefaultFirebaseOptions {
     storageBucket: 'e-santren.appspot.com',
     measurementId: 'G-5RVGD6Z9H1',
   );
+
+  /// Sentra Distribusi Rejoso Gemilang, the wholesaler Canteen375 restocks
+  /// from. Read-only: the POS app never writes to this project.
+  static const FirebaseOptions warehouseWeb = FirebaseOptions(
+    apiKey: 'AIzaSyDcpA_vkk_qCOtvCk7M9DznjzblzEmwFzI',
+    appId: '1:172820556352:web:788f8236611a39c3f64da5',
+    messagingSenderId: '172820556352',
+    projectId: 'warehouse-375',
+    authDomain: 'warehouse-375.firebaseapp.com',
+    storageBucket: 'warehouse-375.firebasestorage.app',
+    measurementId: 'G-LFLLYXXM0L',
+  );
 }

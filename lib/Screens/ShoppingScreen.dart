@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Screens/InventoryScreen.dart';
+import 'package:point_of_sales_app_v3/Screens/SdrgDeliveriesView.dart';
+import 'package:point_of_sales_app_v3/Services/SdrgBridgeService.dart';
+import 'package:point_of_sales_app_v3/Services/SdrgDeliveryService.dart';
 import 'package:point_of_sales_app_v3/Services/ShoppingService.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
@@ -23,7 +26,7 @@ class _ShoppingScreenState extends State<ShoppingScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     // Warm the inventory cache so displayName() resolves linked names everywhere
     // (supplier rows, order rows, correction dialogs, shared PDFs).
     InventoryService().refreshInventoryCache().then((_) {
@@ -71,6 +74,7 @@ class _ShoppingScreenState extends State<ShoppingScreen>
               tabs: const [
                 Tab(text: 'Daftar Supplier'),
                 Tab(text: 'Pesanan Belanja'),
+                Tab(child: _SdrgTabLabel()),
               ],
             ),
           ),
@@ -81,6 +85,7 @@ class _ShoppingScreenState extends State<ShoppingScreen>
         children: const [
           SuppliersView(),
           ShoppingOrdersView(),
+          SdrgDeliveriesView(),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -105,6 +110,59 @@ class _ShoppingScreenState extends State<ShoppingScreen>
           style: TextStyle(color: Colors.white),
         ),
       ),
+    );
+  }
+}
+
+/// Tab label that carries a count of SDRG deliveries still awaiting
+/// confirmation. Nothing else in the app surfaces them, so without this the
+/// operator has no reason to open the tab.
+class _SdrgTabLabel extends StatelessWidget {
+  const _SdrgTabLabel();
+
+  @override
+  Widget build(BuildContext context) {
+    const label = Text('Penerimaan SDRG');
+    if (!SdrgBridgeService.isConfigured) return label;
+
+    return StreamBuilder<Map<String, SdrgDeliveryReceipt>>(
+      stream: SdrgDeliveryService.watchReceipts(),
+      builder: (context, receiptSnapshot) {
+        final receipts = receiptSnapshot.data ?? const {};
+        return StreamBuilder<List<SdrgDelivery>>(
+          stream: SdrgBridgeService.watchDeliveries(),
+          builder: (context, deliverySnapshot) {
+            final pending = (deliverySnapshot.data ?? const [])
+                .where((delivery) =>
+                    (receipts[delivery.orderId]?.acceptedRevision ?? 0) <
+                    delivery.revision)
+                .length;
+            if (pending == 0) return label;
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                label,
+                const SizedBox(width: 6),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2E7D32),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$pending',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
