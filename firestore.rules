@@ -278,6 +278,7 @@ service cloud.firestore {
         allow read, write, update, delete: if isAdmin();
         match /Orders/{tabOrderId} { allow read, write, update, delete: if isAdmin(); }
       }
+      match /OpenBillLocks/{memberId} { allow read, write, update, delete: if isAdmin(); }
       match /SettledBills/{billId} { allow read, write, update, delete: if isAdmin(); }
       match /Orders/{orderID} { allow read, write, update, delete: if isAdmin(); }
     }

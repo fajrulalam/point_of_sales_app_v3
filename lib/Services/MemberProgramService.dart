@@ -385,8 +385,9 @@ class MemberProgramService {
     final ledgerRef = _pointLedgerRef(operationId);
     final programOperationRef = _programOperationRef(operationId);
     final periodRef = _competitionPeriodRef(preparation.periodId);
-    final competitionMemberRef =
-        _competitionMemberRef(preparation.periodId, preparation.memberId);
+    final competitionMemberRef = preparation.memberId.isEmpty
+        ? null
+        : _competitionMemberRef(preparation.periodId, preparation.memberId);
     final memberRef =
         preparation.memberId.isEmpty ? null : _memberRef(preparation.memberId);
     final legacyRef = _legacyCompetitionRef(preparation.periodId);
@@ -408,7 +409,7 @@ class MemberProgramService {
     final periodSnapshot = await transaction.get(periodRef);
     final memberSnapshot =
         memberRef == null ? null : await transaction.get(memberRef);
-    final competitionMemberSnapshot = preparation.memberId.isEmpty
+    final competitionMemberSnapshot = competitionMemberRef == null
         ? null
         : await transaction.get(competitionMemberRef);
     final campaignGroupSnapshot = campaignGroupRef == null
@@ -582,7 +583,7 @@ class MemberProgramService {
       'updatedAt': FieldValue.serverTimestamp(),
     };
     transaction.set(
-      competitionMemberRef,
+      competitionMemberRef!,
       canonicalData,
       SetOptions(merge: true),
     );
@@ -915,10 +916,12 @@ class MemberProgramService {
         ? null
         : _memberRef(newPreparation.memberId);
     final periodRef = _competitionPeriodRef(newPreparation.periodId);
-    final competitionMemberRef = _competitionMemberRef(
-      newPreparation.periodId,
-      newPreparation.memberId,
-    );
+    final competitionMemberRef = newPreparation.memberId.isEmpty
+        ? null
+        : _competitionMemberRef(
+            newPreparation.periodId,
+            newPreparation.memberId,
+          );
     final editSnapshot = await transaction.get(editRef);
     if (editSnapshot.exists &&
         editSnapshot.data()?['status']?.toString().toLowerCase() ==
@@ -947,7 +950,7 @@ class MemberProgramService {
     final periodSnapshot = await transaction.get(periodRef);
     final memberSnapshot = await transaction.get(memberRef!);
     final competitionMemberSnapshot =
-        await transaction.get(competitionMemberRef);
+        await transaction.get(competitionMemberRef!);
 
     final oldCampaignGroupId = oldData['campaignGroupId']?.toString();
     final oldCampaignVoucherId = oldData['campaignVoucherId']?.toString();
