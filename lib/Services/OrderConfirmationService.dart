@@ -3175,13 +3175,25 @@ class OrderConfirmationService {
       if (now.isBefore(activeDate) || now.isAfter(expireDate)) {
         return {'error': 'Voucher sudah tidak berlaku'};
       }
-      if (data['isActive'] != true) return {'error': 'Voucher tidak aktif'};
-      if (data['sekaliPakai'] is! bool) {
+      if (!MemberProgramService.isVoucherActive(
+        data,
+        allowLegacyCompetitionReward: isPosVoucher,
+      )) {
+        return {'error': 'Voucher tidak aktif'};
+      }
+      final sekaliPakai = MemberProgramService.voucherSingleUse(
+        data,
+        enforceProgramType: isPosVoucher,
+        allowLegacyCompetitionReward: isPosVoucher,
+      );
+      if (sekaliPakai == null) {
         return {'error': 'Data tipe penggunaan voucher tidak valid'};
       }
-      final sekaliPakai = data['sekaliPakai'] as bool;
       final status = data['status']?.toString().toUpperCase() ?? '';
-      if (status == 'CLAIMED' || data['isClaimed'] == true) {
+      if (status == 'CLAIMED' ||
+          data['isClaimed'] == true ||
+          (sekaliPakai &&
+              MemberProgramService.parseInt(data['valueUsed']) > 0)) {
         return {'error': 'Voucher sudah digunakan'};
       }
       if (status == 'DISABLED' || status == 'EXPIRED') {
@@ -3259,7 +3271,8 @@ class OrderConfirmationService {
         }
       }
       if (isPosVoucher &&
-          data['type']?.toString() == 'competitionPrize' &&
+          (data['type']?.toString() == 'competitionPrize' ||
+              data['type']?.toString() == 'competitionReward') &&
           status != 'READY_TO_CLAIM') {
         return {'error': 'Voucher hadiah belum siap digunakan'};
       }
@@ -4580,7 +4593,6 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
       if (mounted) {
         setState(() {
           final now = DateTime.now();
-          final todayStart = DateTime(now.year, now.month, now.day);
           print(
               'DEBUG [vouchers]: Found ${snapshot.docs.length} docs from Firestore.');
           for (var doc in snapshot.docs) {
@@ -4591,12 +4603,9 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
           _redeemableVouchers = snapshot.docs
               .map((doc) => {...doc.data(), 'id': doc.id})
               .where((v) {
-            // Exclude if claimed
-            final isClaimed = v['isClaimed'] ?? false;
-            final status = v['status'] ?? '';
-            if (isClaimed || status == 'CLAIMED') {
+            if (!MemberProgramService.isVoucherStructurallyRedeemable(v)) {
               print(
-                  'DEBUG [vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
+                  'DEBUG [vouchers]: Excluded ${v['voucherName']} because its voucher data is not redeemable');
               return false;
             }
 
@@ -4608,45 +4617,13 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
               return false;
             }
 
-            final expireRaw = v['expireDate'];
-            DateTime? expireDate;
-            if (expireRaw != null) {
-              if (expireRaw is Timestamp) {
-                expireDate = expireRaw.toDate();
-              } else if (expireRaw is DateTime) {
-                expireDate = expireRaw;
-              } else if (expireRaw is String) {
-                expireDate = DateTime.tryParse(expireRaw);
-              }
-            }
-
-            if (expireDate == null) {
-              // Fallback: Try to parse from name
-              final voucherName = v['voucherName'] ?? '';
-              final regExp = RegExp(r'(\d{4})-(\d{2})');
-              final match = regExp.firstMatch(voucherName);
-              if (match != null) {
-                final year = int.tryParse(match.group(1) ?? '');
-                final month = int.tryParse(match.group(2) ?? '');
-                if (year != null && month != null) {
-                  final expiryYear = month == 12 ? year + 1 : year;
-                  final expiryMonth = month == 12 ? 1 : month + 1;
-                  expireDate =
-                      DateTime(expiryYear, expiryMonth + 1, 0, 23, 59, 59);
-                }
-              }
-            }
-
-            if (expireDate == null) {
-              print(
-                  'DEBUG [vouchers]: Showed ${v['voucherName']} (no expiry found)');
-              return true;
-            }
-            // Do not show if the voucher's expireDate is before today
-            final isValid = !expireDate.isBefore(todayStart);
+            final isValid = MemberProgramService.isVoucherDateWindowOpen(
+              v,
+              now: now,
+            );
             if (!isValid) {
               print(
-                  'DEBUG [vouchers]: Excluded ${v['voucherName']} because expired on $expireDate (todayStart: $todayStart)');
+                  'DEBUG [vouchers]: Excluded ${v['voucherName']} because its active/expiry window is invalid or closed');
             }
             return isValid;
           }).toList();
@@ -6467,7 +6444,6 @@ class _SelfOrderConfirmationDialogState
       if (mounted) {
         setState(() {
           final now = DateTime.now();
-          final todayStart = DateTime(now.year, now.month, now.day);
           print(
               'DEBUG [self-vouchers]: Found ${snapshot.docs.length} docs from Firestore.');
           for (var doc in snapshot.docs) {
@@ -6478,12 +6454,9 @@ class _SelfOrderConfirmationDialogState
           _redeemableVouchers = snapshot.docs
               .map((doc) => {...doc.data(), 'id': doc.id})
               .where((v) {
-            // Exclude if claimed
-            final isClaimed = v['isClaimed'] ?? false;
-            final status = v['status'] ?? '';
-            if (isClaimed || status == 'CLAIMED') {
+            if (!MemberProgramService.isVoucherStructurallyRedeemable(v)) {
               print(
-                  'DEBUG [self-vouchers]: Excluded ${v['voucherName']} because status=$status / isClaimed=$isClaimed');
+                  'DEBUG [self-vouchers]: Excluded ${v['voucherName']} because its voucher data is not redeemable');
               return false;
             }
 
@@ -6495,45 +6468,13 @@ class _SelfOrderConfirmationDialogState
               return false;
             }
 
-            final expireRaw = v['expireDate'];
-            DateTime? expireDate;
-            if (expireRaw != null) {
-              if (expireRaw is Timestamp) {
-                expireDate = expireRaw.toDate();
-              } else if (expireRaw is DateTime) {
-                expireDate = expireRaw;
-              } else if (expireRaw is String) {
-                expireDate = DateTime.tryParse(expireRaw);
-              }
-            }
-
-            if (expireDate == null) {
-              // Fallback: Try to parse from name
-              final voucherName = v['voucherName'] ?? '';
-              final regExp = RegExp(r'(\d{4})-(\d{2})');
-              final match = regExp.firstMatch(voucherName);
-              if (match != null) {
-                final year = int.tryParse(match.group(1) ?? '');
-                final month = int.tryParse(match.group(2) ?? '');
-                if (year != null && month != null) {
-                  final expiryYear = month == 12 ? year + 1 : year;
-                  final expiryMonth = month == 12 ? 1 : month + 1;
-                  expireDate =
-                      DateTime(expiryYear, expiryMonth + 1, 0, 23, 59, 59);
-                }
-              }
-            }
-
-            if (expireDate == null) {
-              print(
-                  'DEBUG [self-vouchers]: Showed ${v['voucherName']} (no expiry found)');
-              return true;
-            }
-            // Do not show if the voucher's expireDate is before today
-            final isValid = !expireDate.isBefore(todayStart);
+            final isValid = MemberProgramService.isVoucherDateWindowOpen(
+              v,
+              now: now,
+            );
             if (!isValid) {
               print(
-                  'DEBUG [self-vouchers]: Excluded ${v['voucherName']} because expired on $expireDate (todayStart: $todayStart)');
+                  'DEBUG [self-vouchers]: Excluded ${v['voucherName']} because its active/expiry window is invalid or closed');
             }
             return isValid;
           }).toList();

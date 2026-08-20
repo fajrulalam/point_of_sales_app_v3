@@ -256,4 +256,114 @@ void main() {
     expect(vouchers.docs, hasLength(1));
     expect(vouchers.docs.single.data()['value'], 50000);
   });
+
+  test('competition and campaign vouchers can be claimed only once', () async {
+    final suffix = DateTime.now().microsecondsSinceEpoch.toString();
+    final now = DateTime.now();
+    final activeDate = now.subtract(const Duration(minutes: 5));
+    final expireDate = now.add(const Duration(hours: 1));
+
+    Future<void> claimVoucher({
+      required String voucherId,
+      required int usedAmount,
+      required String operationId,
+    }) async {
+      await firestore.runTransaction((transaction) async {
+        final preparation =
+            await MemberProgramService.prepareLocalVoucherClaimInTransaction(
+          transaction: transaction,
+          voucherId: voucherId,
+          usedAmount: usedAmount,
+          operationId: operationId,
+        );
+        MemberProgramService.commitLocalVoucherClaimInTransaction(
+          transaction: transaction,
+          preparation: preparation,
+        );
+      });
+    }
+
+    final competitionVoucherId = 'legacy_competition_$suffix';
+    await firestore
+        .collection(Col.name('vouchers'))
+        .doc(competitionVoucherId)
+        .set({
+      'type': 'competitionReward',
+      'status': 'READY_TO_CLAIM',
+      'value': 50000,
+      'activeDate': activeDate,
+      'expireDate': expireDate,
+    });
+
+    await claimVoucher(
+      voucherId: competitionVoucherId,
+      usedAmount: 50000,
+      operationId: 'competition_claim_$suffix',
+    );
+    final claimedCompetition = await firestore
+        .collection(Col.name('vouchers'))
+        .doc(competitionVoucherId)
+        .get();
+    expect(claimedCompetition.data()?['status'], 'CLAIMED');
+    expect(claimedCompetition.data()?['isActive'], isTrue);
+    expect(claimedCompetition.data()?['isClaimed'], isTrue);
+    expect(claimedCompetition.data()?['valueRemaining'], 0);
+    expect(claimedCompetition.data()?['sekaliPakai'], isTrue);
+    await expectLater(
+      claimVoucher(
+        voucherId: competitionVoucherId,
+        usedAmount: 50000,
+        operationId: 'competition_claim_again_$suffix',
+      ),
+      throwsA(isA<MemberProgramException>()),
+    );
+
+    final campaignId = 'campaign_$suffix';
+    final campaignVoucherId = 'campaign_voucher_$suffix';
+    await firestore.collection(Col.name('voucherGroup')).doc(campaignId).set({
+      'type': 'cashbackCampaign',
+      'status': 'active',
+      'isActive': true,
+      'activeDate': activeDate,
+      'expireDate': expireDate,
+      'threshold': 1,
+      'value': 50000,
+    });
+    await firestore
+        .collection(Col.name('vouchers'))
+        .doc(campaignVoucherId)
+        .set({
+      'type': 'cashbackCampaign',
+      'voucherGroupId': campaignId,
+      'status': 'READY_TO_CLAIM',
+      'isActive': true,
+      'sekaliPakai': false,
+      'value': 50000,
+      'valueRemaining': 50000,
+      'activeDate': activeDate,
+      'expireDate': expireDate,
+    });
+
+    await claimVoucher(
+      voucherId: campaignVoucherId,
+      usedAmount: 20000,
+      operationId: 'campaign_claim_$suffix',
+    );
+    final claimedCampaign = await firestore
+        .collection(Col.name('vouchers'))
+        .doc(campaignVoucherId)
+        .get();
+    expect(claimedCampaign.data()?['status'], 'CLAIMED');
+    expect(claimedCampaign.data()?['isClaimed'], isTrue);
+    expect(claimedCampaign.data()?['valueRemaining'], 0);
+    expect(claimedCampaign.data()?['sekaliPakai'], isTrue);
+    await expectLater(
+      claimVoucher(
+        voucherId: campaignVoucherId,
+        usedAmount: 20000,
+        operationId: 'campaign_claim_again_$suffix',
+      ),
+      throwsA(isA<MemberProgramException>()),
+    );
+  });
 }

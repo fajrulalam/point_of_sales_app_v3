@@ -183,6 +183,97 @@ class MemberProgramService {
 
   static DateTime? _date(dynamic value) => MemberProgramValues.dateValue(value);
 
+  /// Older competition vouchers were written as `competitionReward` records
+  /// before the current voucher schema was introduced.  Those records have a
+  /// READY_TO_CLAIM status and valid dates/value, but omit the newer boolean
+  /// flags.  Keep this fallback deliberately narrow so a generally malformed
+  /// or explicitly disabled voucher is never treated as active.
+  static bool isLegacyCompetitionReward(Map<String, dynamic> data) {
+    final status = data['status']?.toString().toUpperCase() ?? '';
+    return data['type']?.toString() == 'competitionReward' &&
+        status == 'READY_TO_CLAIM' &&
+        !data.containsKey('isActive');
+  }
+
+  static bool isSingleUseProgramVoucherType(Map<String, dynamic> data) {
+    final type = data['type']?.toString();
+    return type == _campaignType ||
+        type == 'competitionPrize' ||
+        type == 'competitionReward';
+  }
+
+  static bool isVoucherActive(
+    Map<String, dynamic> data, {
+    bool allowLegacyCompetitionReward = true,
+  }) {
+    return data['isActive'] == true ||
+        (allowLegacyCompetitionReward &&
+            data['isActive'] == null &&
+            isLegacyCompetitionReward(data));
+  }
+
+  static bool? voucherSingleUse(
+    Map<String, dynamic> data, {
+    bool enforceProgramType = false,
+    bool allowLegacyCompetitionReward = true,
+  }) {
+    if (enforceProgramType && isSingleUseProgramVoucherType(data)) {
+      return true;
+    }
+    final value = data['sekaliPakai'];
+    if (value is bool) return value;
+    return allowLegacyCompetitionReward && isLegacyCompetitionReward(data)
+        ? true
+        : null;
+  }
+
+  /// Checks the fields that can be evaluated without the order total or the
+  /// voucher group's document.  The checkout validator and the voucher list
+  /// both use this so the UI does not advertise records checkout must reject.
+  static bool isVoucherStructurallyRedeemable(Map<String, dynamic> data) {
+    if (!isVoucherActive(data)) return false;
+    final singleUse = voucherSingleUse(data, enforceProgramType: true);
+    if (singleUse == null) return false;
+
+    final status = data['status']?.toString().toUpperCase() ?? '';
+    if (data['isClaimed'] == true ||
+        status == 'CLAIMED' ||
+        status == 'DISABLED' ||
+        status == 'EXPIRED') {
+      return false;
+    }
+    final type = data['type']?.toString();
+    if ((type == _campaignType ||
+            type == 'competitionPrize' ||
+            type == 'competitionReward') &&
+        status != 'READY_TO_CLAIM') {
+      return false;
+    }
+
+    final faceValue = parseInt(data['value']);
+    if (faceValue <= 0) return false;
+    if (singleUse && parseInt(data['valueUsed']) > 0) return false;
+    if (!singleUse && parseInt(data['valueRemaining'], faceValue) <= 0) {
+      return false;
+    }
+    return true;
+  }
+
+  static bool isVoucherDateWindowOpen(
+    Map<String, dynamic> data, {
+    DateTime? now,
+  }) {
+    final activeDate = _date(data['activeDate']);
+    final expireDate = _date(data['expireDate']);
+    if (activeDate == null ||
+        expireDate == null ||
+        expireDate.isBefore(activeDate)) {
+      return false;
+    }
+    final instant = now ?? DateTime.now();
+    return !instant.isBefore(activeDate) && !instant.isAfter(expireDate);
+  }
+
   static Map<String, dynamic> _recordMap(dynamic value) {
     if (value is Map) return Map<String, dynamic>.from(value);
     return <String, dynamic>{};
@@ -1162,7 +1253,9 @@ class MemberProgramService {
             'value': value,
             'valueRemaining': existing?['valueRemaining'] ?? value,
             'valueUsed': parseInt(existing?['valueUsed']),
-            'sekaliPakai': existing?['sekaliPakai'] ?? true,
+            // Cashback campaign vouchers are always single-use. Do not carry
+            // forward a legacy reusable flag when the campaign is updated.
+            'sekaliPakai': true,
             'isActive': true,
             'isClaimed': false,
             'status': next >= threshold ? 'READY_TO_CLAIM' : 'IN_PROGRESS',
@@ -1350,22 +1443,26 @@ class MemberProgramService {
       throw const MemberProgramException('Voucher sudah tidak berlaku.');
     }
     final status = data['status']?.toString().toUpperCase() ?? '';
-    final isActive = data['isActive'] == true;
+    final isActive = isVoucherActive(data);
     if (!isActive ||
+        data['isClaimed'] == true ||
         status == 'CLAIMED' ||
         status == 'DISABLED' ||
         status == 'EXPIRED') {
       throw const MemberProgramException(
           'Voucher tidak aktif atau sudah digunakan.');
     }
-    if (data['sekaliPakai'] is! bool) {
+    final singleUse = voucherSingleUse(data, enforceProgramType: true);
+    if (singleUse == null) {
       throw const MemberProgramException(
           'Data tipe penggunaan voucher tidak valid.');
     }
-    final singleUse = data['sekaliPakai'] as bool;
     final faceValue = parseInt(data['value']);
     if (faceValue <= 0 || usedAmount > faceValue) {
       throw const MemberProgramException('Nilai voucher tidak valid.');
+    }
+    if (singleUse && parseInt(data['valueUsed']) > 0) {
+      throw const MemberProgramException('Voucher sudah digunakan.');
     }
     final remaining = parseInt(data['valueRemaining'], faceValue);
     if (!singleUse && (remaining <= 0 || usedAmount > remaining)) {
@@ -1399,14 +1496,17 @@ class MemberProgramService {
       throw const MemberProgramException(
           'Voucher campaign belum siap digunakan.');
     }
-    if (voucherType == 'competitionPrize' &&
+    if ((voucherType == 'competitionPrize' ||
+            voucherType == 'competitionReward') &&
         data['status']?.toString().toUpperCase() != 'READY_TO_CLAIM') {
       throw const MemberProgramException(
           'Voucher hadiah kompetisi belum siap digunakan.');
     }
     final voucherUpdates = <String, dynamic>{
       'valueUsed': FieldValue.increment(usedAmount),
-      if (!singleUse) 'valueRemaining': nextRemaining,
+      'valueRemaining': singleUse ? 0 : nextRemaining,
+      if (isSingleUseProgramVoucherType(data)) 'sekaliPakai': true,
+      if (isLegacyCompetitionReward(data)) 'isActive': true,
       'lastClaimedAt': FieldValue.serverTimestamp(),
       'lastClaimOperationId': operationId ?? voucherId,
       if (claimTransition) 'status': 'CLAIMED',

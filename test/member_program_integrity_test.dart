@@ -32,6 +32,105 @@ void main() {
     expect(MemberProgramService.normalizeCategory('unknown'), isEmpty);
   });
 
+  test('accepts only the narrowly defined legacy competition voucher shape',
+      () {
+    final legacy = <String, dynamic>{
+      'type': 'competitionReward',
+      'status': 'READY_TO_CLAIM',
+      'value': 50000,
+      'activeDate': DateTime(2026, 8, 1),
+      'expireDate': DateTime(2026, 8, 31, 23, 59, 59),
+    };
+
+    expect(MemberProgramService.isLegacyCompetitionReward(legacy), isTrue);
+    expect(MemberProgramService.isVoucherActive(legacy), isTrue);
+    expect(
+      MemberProgramService.isVoucherActive(
+        legacy,
+        allowLegacyCompetitionReward: false,
+      ),
+      isFalse,
+    );
+    expect(
+      MemberProgramService.voucherSingleUse(
+        legacy,
+        enforceProgramType: true,
+      ),
+      isTrue,
+    );
+    expect(
+      MemberProgramService.voucherSingleUse(
+        legacy,
+        allowLegacyCompetitionReward: false,
+      ),
+      isNull,
+    );
+    expect(
+      MemberProgramService.isVoucherStructurallyRedeemable(legacy),
+      isTrue,
+    );
+    expect(
+      MemberProgramService.isVoucherDateWindowOpen(
+        legacy,
+        now: DateTime(2026, 8, 20),
+      ),
+      isTrue,
+    );
+
+    final explicitlyDisabled = {
+      ...legacy,
+      'isActive': false,
+    };
+    expect(
+      MemberProgramService.isVoucherStructurallyRedeemable(explicitlyDisabled),
+      isFalse,
+    );
+
+    final reusableCampaign = <String, dynamic>{
+      'type': 'cashbackCampaign',
+      'status': 'READY_TO_CLAIM',
+      'isActive': true,
+      'sekaliPakai': false,
+      'value': 50000,
+      'valueRemaining': 50000,
+      'activeDate': DateTime(2026, 8, 1),
+      'expireDate': DateTime(2026, 8, 31, 23, 59, 59),
+    };
+    expect(
+      MemberProgramService.voucherSingleUse(
+        reusableCampaign,
+        enforceProgramType: true,
+      ),
+      isTrue,
+    );
+    expect(
+      MemberProgramService.voucherSingleUse(reusableCampaign),
+      isFalse,
+    );
+    expect(
+      MemberProgramService.isVoucherStructurallyRedeemable(reusableCampaign),
+      isTrue,
+    );
+
+    final alreadyUsed = {
+      ...legacy,
+      'valueUsed': 50000,
+    };
+    expect(
+      MemberProgramService.isVoucherStructurallyRedeemable(alreadyUsed),
+      isFalse,
+    );
+
+    final malformed = {
+      ...legacy,
+      'type': 'voucher',
+    };
+    expect(
+      MemberProgramService.isVoucherStructurallyRedeemable(malformed),
+      isFalse,
+    );
+  });
+
   test('uses Jakarta calendar periods and following-month prize expiry', () {
     expect(
       MemberProgramService.periodIdFor(DateTime.utc(2026, 1, 31, 18)),
