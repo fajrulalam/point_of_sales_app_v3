@@ -516,6 +516,25 @@ class VoucherProgramService {
     );
   }
 
+  /// A program's `defaultNominal` is the institution's fixed face value per
+  /// redemption. Whenever a sale or edit would otherwise book less than that
+  /// face value against `totalRedeemed` (e.g. the bill itself was smaller
+  /// than the voucher), the ledger still books the full face value — the
+  /// institution owes the fixed amount per use regardless of how small that
+  /// sale was. A cashier combining multiple vouchers into one redemption
+  /// (amount above the face value, e.g. via the "×N" button) is recorded
+  /// as-is and is never capped down. [appliedNominal] <= 0 always stays 0:
+  /// it means "this side did not use this program at all" and must never be
+  /// floored up to the face value (this matters for edit deltas).
+  static int calculateRedemptionLedgerAmount({
+    required int appliedNominal,
+    required int defaultNominal,
+  }) {
+    if (appliedNominal <= 0) return 0;
+    if (defaultNominal <= 0) return appliedNominal;
+    return max(appliedNominal, defaultNominal);
+  }
+
   static List<Map<String, dynamic>> _mapsFromQuery(
       QuerySnapshot<Map<String, dynamic>> snap) {
     final result = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
@@ -872,7 +891,10 @@ class VoucherProgramService {
       throw const VoucherProgramException(
           'Program voucher tidak aktif dan tidak dapat digunakan.');
     }
-    final amount = min(requestedNominal, billTotal);
+    final amount = calculateRedemptionLedgerAmount(
+      appliedNominal: min(requestedNominal, billTotal),
+      defaultNominal: program.defaultNominal,
+    );
     return VoucherProgramRedemptionPreparation(
       wasAlreadyApplied: false,
       operationId: safeOperationId,
@@ -977,8 +999,14 @@ class VoucherProgramService {
         throw const VoucherProgramException(
             'Status program voucher tidak valid.');
       }
-      final oldForProgram = id == oldId ? oldNominal : 0;
-      final newForProgram = id == newId ? newNominal : 0;
+      final oldForProgram = calculateRedemptionLedgerAmount(
+        appliedNominal: id == oldId ? oldNominal : 0,
+        defaultNominal: program.defaultNominal,
+      );
+      final newForProgram = calculateRedemptionLedgerAmount(
+        appliedNominal: id == newId ? newNominal : 0,
+        defaultNominal: program.defaultNominal,
+      );
       final deltaCalculation = calculateEditDelta(
         currentRedeemed: program.totalRedeemed,
         currentSettled: program.totalSettled,

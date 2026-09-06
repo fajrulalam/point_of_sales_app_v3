@@ -163,4 +163,117 @@ void main() {
       throwsA(isA<VoucherProgramException>()),
     );
   });
+
+  test('floors a redemption below defaultNominal up to the face value', () {
+    final amount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 12000,
+      defaultNominal: 15000,
+    );
+
+    expect(amount, 15000);
+  });
+
+  test('is a no-op when the applied nominal already equals defaultNominal',
+      () {
+    final amount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 15000,
+      defaultNominal: 15000,
+    );
+
+    expect(amount, 15000);
+  });
+
+  test(
+      'does not cap a combined redemption above defaultNominal (e.g. the x2 multiplier)',
+      () {
+    final amount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 30000,
+      defaultNominal: 15000,
+    );
+
+    expect(amount, 30000);
+  });
+
+  test('a program with no defaultNominal configured is unaffected', () {
+    final amount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 12000,
+      defaultNominal: 0,
+    );
+
+    expect(amount, 12000);
+  });
+
+  test('never floors an unused side (0) up to defaultNominal', () {
+    final amount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 0,
+      defaultNominal: 15000,
+    );
+
+    expect(amount, 0);
+  });
+
+  test('a negative applied nominal stays clamped to 0', () {
+    final amount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: -5000,
+      defaultNominal: 15000,
+    );
+
+    expect(amount, 0);
+  });
+
+  test('malformed negative defaultNominal from legacy data is ignored', () {
+    final amount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 12000,
+      defaultNominal: -1,
+    );
+
+    expect(amount, 12000);
+  });
+
+  test(
+      'editing a program-paid order without changing intent nets a zero delta even though the bill grew',
+      () {
+    // Sale: bill 12000 against a 15000 program floors the ledger amount to
+    // 15000. An edit that grows the bill re-requests the same old (unfloored)
+    // nominal, so both sides floor to the same value and must cancel out.
+    final oldLedgerAmount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 12000,
+      defaultNominal: 15000,
+    );
+    final newLedgerAmount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 12000,
+      defaultNominal: 15000,
+    );
+    final delta = VoucherProgramService.calculateEditDelta(
+      currentRedeemed: 15000,
+      currentSettled: 0,
+      oldNominal: oldLedgerAmount,
+      newNominal: newLedgerAmount,
+    );
+
+    expect(delta.delta, 0);
+    expect(delta.resultingRedeemed, 15000);
+  });
+
+  test(
+      'removing a program from an edited order reverses exactly the floored amount',
+      () {
+    final oldLedgerAmount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 12000,
+      defaultNominal: 15000,
+    );
+    final newLedgerAmount = VoucherProgramService.calculateRedemptionLedgerAmount(
+      appliedNominal: 0, // program no longer used on this side of the edit
+      defaultNominal: 15000,
+    );
+    final delta = VoucherProgramService.calculateEditDelta(
+      currentRedeemed: 15000,
+      currentSettled: 0,
+      oldNominal: oldLedgerAmount,
+      newNominal: newLedgerAmount,
+    );
+
+    expect(delta.delta, -15000);
+    expect(delta.resultingRedeemed, 0);
+  });
 }
