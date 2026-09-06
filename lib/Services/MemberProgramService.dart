@@ -468,6 +468,36 @@ class MemberProgramService {
           String periodId) =>
       _competitionPeriodRef(periodId);
 
+  /// Writes the audit-only result for a non-member sale without performing
+  /// member-program idempotency reads. The enclosing sale transaction has
+  /// already checked its own operation document, so these reads cannot change
+  /// the sale outcome and only add latency for a basket with no member.
+  static MemberProgramOperationResult queueSkippedOrderInTransaction({
+    required Transaction transaction,
+    required MemberProgramPreparation preparation,
+  }) {
+    if (preparation.memberSelected) {
+      throw ArgumentError(
+        'queueSkippedOrderInTransaction requires a non-member preparation',
+      );
+    }
+
+    final flags = [...preparation.auditFlags];
+    transaction.set(
+      _programOperationRef(preparation.operationId),
+      {
+        'schemaVersion': 2,
+        'operationId': preparation.operationId,
+        'status': 'skipped',
+        'reason': 'member_not_selected',
+        'auditFlags': flags,
+        'completedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+    return MemberProgramOperationResult.skipped(flags: flags);
+  }
+
   static Future<MemberProgramOperationResult> queueOrderInTransaction({
     required Transaction transaction,
     required MemberProgramPreparation preparation,
@@ -493,22 +523,10 @@ class MemberProgramService {
             .collection(Col.name('vouchers'))
             .doc(preparation.campaign!.voucherId);
 
-    // Every read occurs before any write.  This is required because Firestore
-    // may replay a transaction callback after a concurrent update.
+    // Keep the idempotency reads before any write. This is required because
+    // Firestore may replay a transaction callback after a concurrent update.
     final ledgerSnapshot = await transaction.get(ledgerRef);
     final operationSnapshot = await transaction.get(programOperationRef);
-    final periodSnapshot = await transaction.get(periodRef);
-    final memberSnapshot =
-        memberRef == null ? null : await transaction.get(memberRef);
-    final competitionMemberSnapshot = competitionMemberRef == null
-        ? null
-        : await transaction.get(competitionMemberRef);
-    final campaignGroupSnapshot = campaignGroupRef == null
-        ? null
-        : await transaction.get(campaignGroupRef);
-    final campaignVoucherSnapshot = campaignVoucherRef == null
-        ? null
-        : await transaction.get(campaignVoucherRef);
 
     final alreadyCompleted = (ledgerSnapshot.exists &&
             ledgerSnapshot.data()?['status']?.toString().toLowerCase() ==
@@ -522,20 +540,27 @@ class MemberProgramService {
 
     final flags = [...preparation.auditFlags];
     if (!preparation.memberSelected) {
-      transaction.set(
-        programOperationRef,
-        {
-          'schemaVersion': 2,
-          'operationId': operationId,
-          'status': 'skipped',
-          'reason': 'member_not_selected',
-          'auditFlags': flags,
-          'completedAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
+      return queueSkippedOrderInTransaction(
+        transaction: transaction,
+        preparation: preparation,
       );
-      return MemberProgramOperationResult.skipped(flags: flags);
     }
+
+    // Member-program reads happen only after the idempotency checks and only
+    // for a member-selected sale.
+    final periodSnapshot = await transaction.get(periodRef);
+    final memberSnapshot =
+        memberRef == null ? null : await transaction.get(memberRef);
+    final competitionMemberSnapshot = competitionMemberRef == null
+        ? null
+        : await transaction.get(competitionMemberRef);
+    final campaignGroupSnapshot = campaignGroupRef == null
+        ? null
+        : await transaction.get(campaignGroupRef);
+    final campaignVoucherSnapshot = campaignVoucherRef == null
+        ? null
+        : await transaction.get(campaignVoucherRef);
+
     final memberIsValid = memberSnapshot?.exists == true;
     final periodStatus =
         periodSnapshot.data()?['status']?.toString().toLowerCase() ?? 'open';

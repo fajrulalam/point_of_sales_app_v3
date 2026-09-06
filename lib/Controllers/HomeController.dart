@@ -73,6 +73,7 @@ class HomeController extends ChangeNotifier {
   BluetoothDevice? selectedDevice;
   BlueThermalPrinter printer = BlueThermalPrinter.instance;
   bool printerIsConnected = false;
+  Future<void> _receiptPrintQueue = Future<void>.value();
 
   Timer? timer;
 
@@ -826,6 +827,38 @@ class HomeController extends ChangeNotifier {
     int? overrideBiayaBungkus,
     String? customerName,
     int? voucherRemaining, // Added for multi-use vouchers
+  }) {
+    // Bluetooth receipt commands must remain ordered. The normal checkout
+    // flow can now show success before printing finishes, so serialize queued
+    // receipts to prevent two sales from interleaving printer output.
+    final queuedPrint = _receiptPrintQueue.then<void>(
+      (_) => _printReceiptNow(
+        customPesananList: customPesananList,
+        overrideNomorBerikutnya: overrideNomorBerikutnya,
+        overrideTotalHarga: overrideTotalHarga,
+        overrideIsTakeAway: overrideIsTakeAway,
+        discountAmount: discountAmount,
+        originalTotal: originalTotal,
+        overrideBiayaBungkus: overrideBiayaBungkus,
+        customerName: customerName,
+        voucherRemaining: voucherRemaining,
+      ),
+    );
+    // One failed print must not prevent later receipts from being attempted.
+    _receiptPrintQueue = queuedPrint.catchError((_) {});
+    return queuedPrint;
+  }
+
+  Future<void> _printReceiptNow({
+    List<PesananObject>? customPesananList,
+    int? overrideNomorBerikutnya,
+    int? overrideTotalHarga,
+    bool? overrideIsTakeAway,
+    int discountAmount = 0,
+    int originalTotal = 0,
+    int? overrideBiayaBungkus,
+    String? customerName,
+    int? voucherRemaining,
   }) async {
     // Check actual printer connection status dynamically
     await checkIfPrinterIsConnected();

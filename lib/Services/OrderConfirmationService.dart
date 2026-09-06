@@ -354,29 +354,60 @@ class OrderConfirmationService {
     String? operationId,
   }) async {
     final firestore = FirebaseFirestore.instance;
-    final menuSnapshot = await firestore
-        .collection(Col.name('Canteens'))
-        .doc('canteen375')
-        .collection('MenuCollection')
-        .get();
-    final menuMap = _buildMenuLookup(MenuClass.getAllMenus(menuSnapshot));
-    final optionSnapshot = await firestore
-        .collection(Col.name('Canteens'))
-        .doc('canteen375')
-        .collection('OptionGroups')
-        .get();
-    final optionLookup = _buildOptionGroupLookup(optionSnapshot);
     final stableOperationId = operationId ?? 'self_order_${selfOrder.id}';
     final selfOrderRef =
         firestore.collection(Col.name('SelfOrders')).doc(selfOrder.id);
 
     if (context.mounted) {
+      // Show progress before any network read so the confirmation action has
+      // immediate feedback and the page is blocked from duplicate taps.
       LoaderWidget.showLoaderDialog(context, message: "Memproses pesanan...");
     }
     var loaderPopped = false;
     var externalVoucherReserved = false;
     var posTransactionCommitted = false;
     try {
+      final canteen =
+          firestore.collection(Col.name('Canteens')).doc('canteen375');
+      final activeOrders =
+          pesananList.where((order) => order.totalQuantity > 0).toList();
+      final menuIds = activeOrders
+          .map((order) => order.menuItemId.trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final targetedMenuRead = activeOrders.isNotEmpty &&
+          activeOrders.every((order) => order.menuItemId.trim().isNotEmpty) &&
+          menuIds.length <= _maxTargetedCatalogDocuments;
+      final selectedOptions = activeOrders
+          .expand<SelectedOption>((order) => order.selectedOptions)
+          .toList();
+      final optionGroupIds = selectedOptions
+          .map((selected) => selected.groupId.trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final targetedOptionRead = selectedOptions.isEmpty ||
+          (selectedOptions
+                  .every((selected) => selected.groupId.trim().isNotEmpty) &&
+              optionGroupIds.length <= _maxTargetedCatalogDocuments);
+      final catalogDocuments =
+          await Future.wait<List<DocumentSnapshot<Map<String, dynamic>>>>([
+        _loadCatalogDocuments(
+          collection: canteen.collection('MenuCollection'),
+          ids: menuIds,
+          targeted: targetedMenuRead,
+        ),
+        _loadCatalogDocuments(
+          collection: canteen.collection('OptionGroups'),
+          ids: optionGroupIds,
+          targeted: targetedOptionRead,
+        ),
+      ]);
+      final menuMap = _buildMenuLookup(
+        catalogDocuments[0]
+            .map(MenuClass.fromFirestore)
+            .whereType<MenuObject>(),
+      );
+      final optionLookup = _buildOptionGroupLookup(catalogDocuments[1]);
       final subTotal = totalHarga - biayaBungkus;
       final b2bPayment = voucherProgramId == null
           ? null
@@ -497,11 +528,15 @@ class OrderConfirmationService {
                   .doc(stableOperationId),
             );
           }
-          final memberProgramResult =
-              await MemberProgramService.queueOrderInTransaction(
-            transaction: transaction,
-            preparation: memberPreparation,
-          );
+          final memberProgramResult = memberPreparation.memberSelected
+              ? await MemberProgramService.queueOrderInTransaction(
+                  transaction: transaction,
+                  preparation: memberPreparation,
+                )
+              : MemberProgramService.queueSkippedOrderInTransaction(
+                  transaction: transaction,
+                  preparation: memberPreparation,
+                );
           if (isExternalVoucher) {
             MemberProgramService.queueExternalClaimInTransaction(
               transaction: transaction,
@@ -559,6 +594,8 @@ class OrderConfirmationService {
             'status': 'Serving',
             'namaCustomer': customerNameController.text,
             'total': totalHarga,
+            'discountAmount': discountAmount,
+            if (appliedVoucherCode != null) 'voucherCode': appliedVoucherCode,
             'subTotal': subTotal,
             'takeAwayFee': biayaBungkus,
             'transactionMethod': 'Self Orders',
@@ -650,20 +687,47 @@ class OrderConfirmationService {
       }
       nomorBerikutnya = result.customerNumber ?? nomorBerikutnya;
       SelfOrderService.instance.scheduleDeletion(selfOrder.id);
-      await printReceipt(
-        customPesananList: pesananList,
-        overrideNomorBerikutnya: nomorBerikutnya,
-        overrideTotalHarga: totalHarga,
-        overrideIsTakeAway: isTakeAway,
-        discountAmount: discountAmount,
-        originalTotal: originalTotal,
-        customerName: customerNameController.text,
-        voucherRemaining: voucherRemaining,
-      );
+      // Keep a snapshot since the printer may still be processing the
+      // receipt after the loader is dismissed and the success dialog opens.
+      final receiptPesananList = pesananList
+          .map(
+            (item) => PesananObject(
+              menuItemId: item.menuItemId,
+              namaPesanan: item.namaPesanan,
+              harga: item.harga,
+              dineInQuantity: item.dineInQuantity,
+              takeAwayQuantity: item.takeAwayQuantity,
+              selectedOptions: List<SelectedOption>.from(item.selectedOptions),
+              customerNote: item.customerNote,
+            ),
+          )
+          .toList();
+      final receiptCustomerName = customerNameController.text;
       if (context.mounted) {
         loaderPopped = true;
         Navigator.pop(context);
       }
+      Future<void> printCommittedReceipt() async {
+        try {
+          await printReceipt(
+            customPesananList: receiptPesananList,
+            overrideNomorBerikutnya: nomorBerikutnya,
+            overrideTotalHarga: totalHarga,
+            overrideIsTakeAway: isTakeAway,
+            discountAmount: discountAmount,
+            originalTotal: originalTotal,
+            customerName: receiptCustomerName,
+            voucherRemaining: voucherRemaining,
+          );
+        } catch (error, stackTrace) {
+          // Printing is a peripheral side effect; it must not turn a
+          // committed sale into a checkout error.
+          debugPrint('Receipt printing failed after sale commit: $error');
+          debugPrintStack(stackTrace: stackTrace);
+        }
+      }
+
+      unawaited(printCommittedReceipt());
       unawaited(finalizeExternalVoucherIfNeeded());
       final inputText = uangYangDiterimaController.text.replaceAll('.', '');
       await _showSelfOrderSuccessDialog(
@@ -794,7 +858,7 @@ class OrderConfirmationService {
         .doc('canteen375')
         .collection('OptionGroups')
         .get();
-    final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot);
+    final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot.docs);
 
     // Check availability for each item in the order
     for (var pesanan in pesananList) {
@@ -1286,6 +1350,23 @@ class OrderConfirmationService {
     return lookup;
   }
 
+  static const _maxTargetedCatalogDocuments = 10;
+
+  static Future<List<DocumentSnapshot<Map<String, dynamic>>>>
+      _loadCatalogDocuments({
+    required CollectionReference<Map<String, dynamic>> collection,
+    required Set<String> ids,
+    required bool targeted,
+  }) async {
+    if (targeted) {
+      return Future.wait(
+        ids.map((id) => collection.doc(id).get()),
+      );
+    }
+    final snapshot = await collection.get();
+    return snapshot.docs;
+  }
+
   static Future<StockTransactionPreparation> _prepareOrderStock(
     Transaction transaction, {
     required String sourceType,
@@ -1352,7 +1433,18 @@ class OrderConfirmationService {
     ) writeOperation,
   }) async {
     final firestore = FirebaseFirestore.instance;
-    await InventoryService().refreshInventoryCache();
+    final inventoryService = InventoryService();
+    if (InventoryService.orderHasLegacyInventoryReferences(
+      pesananList,
+      menuLookup: menuMap,
+      optionLookup: optionGroupLookup,
+    )) {
+      // Keep the legacy name-to-ID fallback intact, but avoid fetching the
+      // entire cache when every ingredient already carries a stable ID (or
+      // the order has no stock ingredients). Stock values are still read
+      // authoritatively inside the transaction below.
+      await inventoryService.refreshInventoryCache();
+    }
 
     return firestore
         .runTransaction<InventoryOperationResult>((transaction) async {
@@ -1497,18 +1589,6 @@ class OrderConfirmationService {
     String? operationId,
   }) async {
     final firestore = FirebaseFirestore.instance;
-    final menuSnapshot = await firestore
-        .collection(Col.name('Canteens'))
-        .doc('canteen375')
-        .collection('MenuCollection')
-        .get();
-    final menuMap = _buildMenuLookup(MenuClass.getAllMenus(menuSnapshot));
-    final optionSnapshot = await firestore
-        .collection(Col.name('Canteens'))
-        .doc('canteen375')
-        .collection('OptionGroups')
-        .get();
-    final optionLookup = _buildOptionGroupLookup(optionSnapshot);
     final stableOperationId = operationId ??
         _buildOperationId('sale', [
           nomorBerikutnya.toString(),
@@ -1521,12 +1601,56 @@ class OrderConfirmationService {
         ]);
 
     if (context.mounted) {
+      // Show progress before any network read so the confirmation action has
+      // immediate feedback and the page is blocked from duplicate taps.
       LoaderWidget.showLoaderDialog(context, message: "Mohon tunggu...");
     }
     var loaderPopped = false;
     var externalVoucherReserved = false;
     var posTransactionCommitted = false;
+
     try {
+      final canteen =
+          firestore.collection(Col.name('Canteens')).doc('canteen375');
+      final activeOrders =
+          pesananList.where((order) => order.totalQuantity > 0).toList();
+      final menuIds = activeOrders
+          .map((order) => order.menuItemId.trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final targetedMenuRead = activeOrders.isNotEmpty &&
+          activeOrders.every((order) => order.menuItemId.trim().isNotEmpty) &&
+          menuIds.length <= _maxTargetedCatalogDocuments;
+      final selectedOptions = activeOrders
+          .expand<SelectedOption>((order) => order.selectedOptions)
+          .toList();
+      final optionGroupIds = selectedOptions
+          .map((selected) => selected.groupId.trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final targetedOptionRead = selectedOptions.isEmpty ||
+          (selectedOptions
+                  .every((selected) => selected.groupId.trim().isNotEmpty) &&
+              optionGroupIds.length <= _maxTargetedCatalogDocuments);
+      final catalogDocuments =
+          await Future.wait<List<DocumentSnapshot<Map<String, dynamic>>>>([
+        _loadCatalogDocuments(
+          collection: canteen.collection('MenuCollection'),
+          ids: menuIds,
+          targeted: targetedMenuRead,
+        ),
+        _loadCatalogDocuments(
+          collection: canteen.collection('OptionGroups'),
+          ids: optionGroupIds,
+          targeted: targetedOptionRead,
+        ),
+      ]);
+      final menuMap = _buildMenuLookup(
+        catalogDocuments[0]
+            .map(MenuClass.fromFirestore)
+            .whereType<MenuObject>(),
+      );
+      final optionLookup = _buildOptionGroupLookup(catalogDocuments[1]);
       final subTotal = totalHarga - biayaBungkus;
       final b2bPayment = voucherProgramId == null
           ? null
@@ -1630,11 +1754,15 @@ class OrderConfirmationService {
                   .doc(stableOperationId),
             );
           }
-          final memberProgramResult =
-              await MemberProgramService.queueOrderInTransaction(
-            transaction: transaction,
-            preparation: memberPreparation,
-          );
+          final memberProgramResult = memberPreparation.memberSelected
+              ? await MemberProgramService.queueOrderInTransaction(
+                  transaction: transaction,
+                  preparation: memberPreparation,
+                )
+              : MemberProgramService.queueSkippedOrderInTransaction(
+                  transaction: transaction,
+                  preparation: memberPreparation,
+                );
           if (isExternalVoucher) {
             MemberProgramService.queueExternalClaimInTransaction(
               transaction: transaction,
@@ -1688,6 +1816,8 @@ class OrderConfirmationService {
             'status': 'Serving',
             'namaCustomer': customerNameController.text,
             'total': totalHarga,
+            'discountAmount': discountAmount,
+            if (appliedVoucherCode != null) 'voucherCode': appliedVoucherCode,
             'subTotal': subTotal,
             'takeAwayFee': biayaBungkus,
             'transactionMethod': 'Normal',
@@ -1777,20 +1907,48 @@ class OrderConfirmationService {
       }
       nomorBerikutnya = result.customerNumber ?? nomorBerikutnya;
 
-      await printReceipt(
-        customPesananList: pesananList,
-        overrideNomorBerikutnya: nomorBerikutnya,
-        overrideTotalHarga: totalHarga,
-        overrideIsTakeAway: isTakeAway,
-        discountAmount: discountAmount,
-        originalTotal: originalTotal,
-        customerName: customerNameController.text,
-        voucherRemaining: voucherRemaining,
-      );
+      // The transaction has committed the sale and queue number already. Keep
+      // a snapshot because the success dialog clears the live basket while
+      // the printer may still be processing the receipt.
+      final receiptPesananList = pesananList
+          .map(
+            (item) => PesananObject(
+              menuItemId: item.menuItemId,
+              namaPesanan: item.namaPesanan,
+              harga: item.harga,
+              dineInQuantity: item.dineInQuantity,
+              takeAwayQuantity: item.takeAwayQuantity,
+              selectedOptions: List<SelectedOption>.from(item.selectedOptions),
+              customerNote: item.customerNote,
+            ),
+          )
+          .toList();
+      final receiptCustomerName = customerNameController.text;
       if (context.mounted) {
         loaderPopped = true;
         Navigator.pop(context);
       }
+      Future<void> printCommittedReceipt() async {
+        try {
+          await printReceipt(
+            customPesananList: receiptPesananList,
+            overrideNomorBerikutnya: nomorBerikutnya,
+            overrideTotalHarga: totalHarga,
+            overrideIsTakeAway: isTakeAway,
+            discountAmount: discountAmount,
+            originalTotal: originalTotal,
+            customerName: receiptCustomerName,
+            voucherRemaining: voucherRemaining,
+          );
+        } catch (error, stackTrace) {
+          // Printing is a peripheral side effect; it must not turn a
+          // committed sale into a checkout error.
+          debugPrint('Receipt printing failed after sale commit: $error');
+          debugPrintStack(stackTrace: stackTrace);
+        }
+      }
+
+      unawaited(printCommittedReceipt());
       unawaited(finalizeExternalVoucherIfNeeded());
       final inputText = uangYangDiterimaController.text.replaceAll('.', '');
       final uangYangDiterima = int.tryParse(inputText) ?? 0;
@@ -1920,7 +2078,7 @@ class OrderConfirmationService {
         .doc('canteen375')
         .collection('OptionGroups')
         .get();
-    final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot);
+    final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot.docs);
 
     // Check availability for each item in the order
     for (var pesanan in pesananList) {
@@ -2215,48 +2373,11 @@ class OrderConfirmationService {
     String? operationId,
   }) async {
     final firestore = FirebaseFirestore.instance;
-    final menuSnapshot = await firestore
-        .collection(Col.name('Canteens'))
-        .doc('canteen375')
-        .collection('MenuCollection')
-        .get();
-    final menuMap = _buildMenuLookup(MenuClass.getAllMenus(menuSnapshot));
-    final optionSnapshot = await firestore
-        .collection(Col.name('Canteens'))
-        .doc('canteen375')
-        .collection('OptionGroups')
-        .get();
-    final optionLookup = _buildOptionGroupLookup(optionSnapshot);
-    final existingStatusDoc =
-        await OpenBillService.instance.getExistingOpenBill(memberId);
     final openBillLockRef = firestore
         .collection(Col.name('Canteens'))
         .doc('canteen375')
         .collection('OpenBillLocks')
         .doc(memberId);
-    try {
-      final creditLimit = await OpenBillService.instance.getCreditLimit();
-      final existingData = existingStatusDoc?.data();
-      final currentTotal = existingData is Map
-          ? InventoryService.toInt(existingData['total'])
-          : 0;
-      if (currentTotal + totalHarga > creditLimit) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context)
-            ..clearSnackBars()
-            ..showSnackBar(SnackBar(
-              content: Text(
-                  'Total tagihan melebihi batas kredit (Rp $creditLimit).'),
-              backgroundColor: Colors.red,
-            ));
-        }
-        return;
-      }
-    } catch (_) {
-      // A credit-limit read is a safeguard; stock and order integrity remain
-      // enforced by the transaction below.
-    }
-
     final stableOperationId = operationId ??
         _buildOperationId('open_bill', [
           nomorBerikutnya.toString(),
@@ -2268,11 +2389,96 @@ class OrderConfirmationService {
                   '${item.orderKey}:${item.dineInQuantity}:${item.takeAwayQuantity}:${item.harga}')
               .join('|'),
         ]);
+
     if (context.mounted) {
+      // Show progress before any network read so the confirmation action has
+      // immediate feedback and the page is blocked from duplicate taps.
       LoaderWidget.showLoaderDialog(context, message: "Menyimpan tagihan...");
     }
     var loaderPopped = false;
     try {
+      final canteen =
+          firestore.collection(Col.name('Canteens')).doc('canteen375');
+      final activeOrders =
+          pesananList.where((order) => order.totalQuantity > 0).toList();
+      final menuIds = activeOrders
+          .map((order) => order.menuItemId.trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final targetedMenuRead = activeOrders.isNotEmpty &&
+          activeOrders.every((order) => order.menuItemId.trim().isNotEmpty) &&
+          menuIds.length <= _maxTargetedCatalogDocuments;
+      final selectedOptions = activeOrders
+          .expand<SelectedOption>((order) => order.selectedOptions)
+          .toList();
+      final optionGroupIds = selectedOptions
+          .map((selected) => selected.groupId.trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final targetedOptionRead = selectedOptions.isEmpty ||
+          (selectedOptions
+                  .every((selected) => selected.groupId.trim().isNotEmpty) &&
+              optionGroupIds.length <= _maxTargetedCatalogDocuments);
+
+      Future<int?> loadCreditLimitSafely() async {
+        try {
+          return await OpenBillService.instance.getCreditLimit();
+        } catch (_) {
+          // A credit-limit read is a safeguard; stock and order integrity
+          // remain enforced by the transaction below.
+          return null;
+        }
+      }
+
+      // None of these reads depend on each other, so fetch them concurrently
+      // instead of paying for four sequential round trips before the sale
+      // transaction can even start.
+      final independentReads = await Future.wait<dynamic>([
+        _loadCatalogDocuments(
+          collection: canteen.collection('MenuCollection'),
+          ids: menuIds,
+          targeted: targetedMenuRead,
+        ),
+        _loadCatalogDocuments(
+          collection: canteen.collection('OptionGroups'),
+          ids: optionGroupIds,
+          targeted: targetedOptionRead,
+        ),
+        OpenBillService.instance.getExistingOpenBill(memberId),
+        loadCreditLimitSafely(),
+      ]);
+      final menuMap = _buildMenuLookup(
+        (independentReads[0] as List<DocumentSnapshot<Map<String, dynamic>>>)
+            .map(MenuClass.fromFirestore)
+            .whereType<MenuObject>(),
+      );
+      final optionLookup = _buildOptionGroupLookup(
+        independentReads[1] as List<DocumentSnapshot<Map<String, dynamic>>>,
+      );
+      final existingStatusDoc = independentReads[2] as DocumentSnapshot?;
+      final creditLimit = independentReads[3] as int?;
+
+      if (creditLimit != null) {
+        final existingData = existingStatusDoc?.data();
+        final currentTotal = existingData is Map
+            ? InventoryService.toInt(existingData['total'])
+            : 0;
+        if (currentTotal + totalHarga > creditLimit) {
+          if (context.mounted) {
+            loaderPopped = true;
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context)
+              ..clearSnackBars()
+              ..showSnackBar(SnackBar(
+                content: Text(
+                    'Total tagihan melebihi batas kredit (Rp $creditLimit).'),
+                backgroundColor: Colors.red,
+              ));
+          }
+          return;
+        }
+      }
+
       final orderItems = _buildSaleOrderItems(pesananList, menuMap);
       final foodSubtotal = totalHarga - biayaBungkus;
       final result = await _runIdempotentSaleTransaction(
@@ -2479,7 +2685,7 @@ class OrderConfirmationService {
         .doc('canteen375')
         .collection('OptionGroups')
         .get();
-    final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot);
+    final optionGroupLookup = _buildOptionGroupLookup(optionGroupSnapshot.docs);
 
     for (var pesanan in pesananList) {
       final menu = menuMap[pesanan.namaPesanan];
@@ -2805,11 +3011,11 @@ class OrderConfirmationService {
 
   /// Build a nested lookup: {groupId: {optionId: OptionItem}}
   static Map<String, Map<String, OptionItem>> _buildOptionGroupLookup(
-    QuerySnapshot snapshot,
+    Iterable<DocumentSnapshot> documents,
   ) {
     final lookup = <String, Map<String, OptionItem>>{};
     final ambiguousGroupNames = <String>{};
-    for (var doc in snapshot.docs) {
+    for (var doc in documents) {
       late final OptionGroup group;
       try {
         group = OptionGroup.fromFirestore(doc);
@@ -4208,20 +4414,47 @@ class OrderConfirmationService {
         return;
       }
 
-      await printReceipt(
-        customPesananList: aggregatedItems,
-        overrideTotalHarga: totalHarga,
-        overrideNomorBerikutnya: openBill.customerNumber,
-        overrideIsTakeAway: totalTakeAwayFee > 0,
-        discountAmount: discountAmount,
-        originalTotal: originalTotal,
-        customerName: openBill.memberName,
-        voucherRemaining: voucherRemaining,
-      );
+      // The transaction has committed the settlement already. Keep a
+      // snapshot because the success dialog clears aggregatedItems while the
+      // printer may still be processing the receipt.
+      final receiptItems = aggregatedItems
+          .map(
+            (item) => PesananObject(
+              menuItemId: item.menuItemId,
+              namaPesanan: item.namaPesanan,
+              harga: item.harga,
+              dineInQuantity: item.dineInQuantity,
+              takeAwayQuantity: item.takeAwayQuantity,
+              selectedOptions: List<SelectedOption>.from(item.selectedOptions),
+              customerNote: item.customerNote,
+            ),
+          )
+          .toList();
       if (context.mounted) {
         loaderPopped = true;
         Navigator.pop(context);
       }
+      Future<void> printCommittedReceipt() async {
+        try {
+          await printReceipt(
+            customPesananList: receiptItems,
+            overrideTotalHarga: totalHarga,
+            overrideNomorBerikutnya: openBill.customerNumber,
+            overrideIsTakeAway: totalTakeAwayFee > 0,
+            discountAmount: discountAmount,
+            originalTotal: originalTotal,
+            customerName: openBill.memberName,
+            voucherRemaining: voucherRemaining,
+          );
+        } catch (error, stackTrace) {
+          // Printing is a peripheral side effect; it must not turn a
+          // committed settlement into a checkout error.
+          debugPrint('Receipt printing failed after settlement commit: $error');
+          debugPrintStack(stackTrace: stackTrace);
+        }
+      }
+
+      unawaited(printCommittedReceipt());
       unawaited(finalizeExternalVoucherIfNeeded());
       await _showSuccessDialog(
         context: context,

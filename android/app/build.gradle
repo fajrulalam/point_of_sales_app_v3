@@ -29,6 +29,7 @@ if (flutterVersionName == null) {
 
 android {
     compileSdk 36
+    ndkVersion "28.2.13676358"
 
     defaultConfig {
         applicationId "com.example.point_of_sales_app_v3"

@@ -273,6 +273,64 @@ class InventoryService {
     };
   }
 
+  /// Returns whether an order contains a legacy ingredient that still needs
+  /// the cache to resolve an inventory ID from its name. Modern ingredients
+  /// carry an inventory ID and can rely on the authoritative transaction read
+  /// without refreshing the full inventory collection first.
+  static bool orderHasLegacyInventoryReferences(
+    List<PesananObject> orders, {
+    required Map<String, MenuObject> menuLookup,
+    required Map<String, Map<String, OptionItem>> optionLookup,
+  }) {
+    MenuObject? findMenu(PesananObject order) {
+      final stableId = order.menuItemId.trim();
+      if (stableId.isNotEmpty) {
+        final byId = menuLookup['__id__$stableId'];
+        if (byId != null) return byId;
+        for (final menu in menuLookup.values) {
+          if (menu.id == stableId) return menu;
+        }
+        return null;
+      }
+      return menuLookup['__name__${order.namaPesanan.trim()}'] ??
+          menuLookup[order.namaPesanan];
+    }
+
+    OptionItem? findOption(SelectedOption selected) {
+      final groupId = selected.groupId.trim();
+      final group = groupId.isNotEmpty
+          ? optionLookup[groupId]
+          : optionLookup['__name__${selected.groupName.trim()}'];
+      if (group == null) return null;
+
+      final optionId = selected.optionId.trim();
+      return optionId.isNotEmpty
+          ? group[optionId]
+          : group['__name__${selected.optionName.trim()}'];
+    }
+
+    bool hasLegacyReference(Iterable<MenuIngredient> ingredients) {
+      return ingredients.any((ingredient) =>
+          ingredient.quantityNeeded > 0 &&
+          ingredient.inventoryItemId.trim().isEmpty);
+    }
+
+    for (final order in orders) {
+      if (order.totalQuantity <= 0) continue;
+      if (hasLegacyReference(
+          findMenu(order)?.ingredients ?? const <MenuIngredient>[])) {
+        return true;
+      }
+      for (final selected in order.selectedOptions) {
+        if (hasLegacyReference(
+            findOption(selected)?.ingredients ?? const <MenuIngredient>[])) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /// Stable ID first, then exact legacy name. Unresolved components remain
   /// unresolved so callers can flag them rather than inventing inventory.
   String? resolveInventoryItemId(

@@ -32,9 +32,7 @@ class MenuObject {
 }
 
 class MenuClass {
-  static List<MenuObject> getAllMenus(QuerySnapshot<Object?> snapshot) {
-    List<MenuObject> menus = [];
-
+  static MenuObject? fromFirestore(DocumentSnapshot<Object?> element) {
     int parseInt(dynamic value, int defaultValue) {
       if (value == null) return defaultValue;
       if (value is num) return value.toInt();
@@ -42,36 +40,35 @@ class MenuClass {
       return defaultValue;
     }
 
-    for (var element in snapshot.docs) {
-      try {
-        final data = element.data() as Map<String, dynamic>;
-        menus.add(
-          MenuObject(
-            id: element.id,
-            namaMenu: data['namaMenu']?.toString() ?? 'Menu tanpa nama',
-            harga: parseInt(data['harga'], 0),
-            isMakanan: data['isMakanan'] ?? true,
-            imagePath: data['imagePath'] ?? 'tidak ada',
-            category: data['category']?.toString() ?? 'Umum',
-            unitsPerPackage: parseInt(data['unitsPerPackage'], 1),
-            isRecommended: data['isRecommended'] ?? false,
-            menuDescription: data['menuDescription']?.toString() ?? '',
-            sortOrder: parseInt(data['sortOrder'], 0),
-            imageAspectRatio: data['imageAspectRatio']?.toString() ?? '1:1',
-            ingredients:
-                data.containsKey('ingredients') && data['ingredients'] != null
-                    ? (data['ingredients'] as List<dynamic>)
-                        .map((ing) =>
-                            MenuIngredient.fromMap(ing as Map<String, dynamic>))
-                        .toList()
-                    : [],
-          ),
-        );
-      } catch (e) {
-        print('Error parsing menu item ${element.id}: $e');
-      }
+    try {
+      final data = element.data() as Map<String, dynamic>;
+      return MenuObject(
+        id: element.id,
+        namaMenu: data['namaMenu']?.toString() ?? 'Menu tanpa nama',
+        harga: parseInt(data['harga'], 0),
+        isMakanan: data['isMakanan'] ?? true,
+        imagePath: data['imagePath'] ?? 'tidak ada',
+        category: data['category']?.toString() ?? 'Umum',
+        unitsPerPackage: parseInt(data['unitsPerPackage'], 1),
+        isRecommended: data['isRecommended'] ?? false,
+        menuDescription: data['menuDescription']?.toString() ?? '',
+        sortOrder: parseInt(data['sortOrder'], 0),
+        imageAspectRatio: data['imageAspectRatio']?.toString() ?? '1:1',
+        ingredients:
+            data.containsKey('ingredients') && data['ingredients'] != null
+                ? (data['ingredients'] as List<dynamic>)
+                    .map((ing) =>
+                        MenuIngredient.fromMap(ing as Map<String, dynamic>))
+                    .toList()
+                : [],
+      );
+    } catch (e) {
+      print('Error parsing menu item ${element.id}: $e');
+      return null;
     }
+  }
 
-    return menus;
+  static List<MenuObject> getAllMenus(QuerySnapshot<Object?> snapshot) {
+    return snapshot.docs.map(fromFirestore).whereType<MenuObject>().toList();
   }
 }

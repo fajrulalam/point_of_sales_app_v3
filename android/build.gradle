@@ -1,12 +1,12 @@
 buildscript {
-    ext.kotlin_version = '2.2.20'
+    ext.kotlin_version = '2.3.20'
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.11.1'
+        classpath 'com.android.tools.build:gradle:9.0.1'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
@@ -28,6 +28,11 @@ subprojects {
 
 subprojects {
     plugins.withId('com.android.library') {
+        androidComponents {
+            finalizeDsl { extension ->
+                extension.compileSdk = 36
+            }
+        }
         if (project.name == 'blue_thermal_printer') {
             android {
                 namespace 'id.kakzaki.blue_thermal_printer'

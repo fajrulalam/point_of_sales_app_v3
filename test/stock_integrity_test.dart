@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
+import 'package:point_of_sales_app_v3/Classes/Menu.dart';
+import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
+import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
 
@@ -114,6 +117,74 @@ void main() {
 
     expect(result.single.inventoryItemId, isEmpty);
     expect(result.single.inventoryItemName, 'Legacy ingredient');
+  });
+
+  test('detects only active legacy ingredient references', () {
+    final modernMenu = MenuObject(
+      id: 'menu-modern',
+      namaMenu: 'Modern menu',
+      harga: 10000,
+      isMakanan: true,
+      imagePath: '',
+      ingredients: [
+        MenuIngredient(
+          inventoryItemId: 'inventory-1',
+          inventoryItemName: 'Ingredient 1',
+          quantityNeeded: 1,
+        ),
+      ],
+    );
+    final legacyOption = OptionItem(
+      id: 'option-legacy',
+      name: 'Legacy option',
+      ingredients: [
+        MenuIngredient(
+          inventoryItemId: '',
+          inventoryItemName: 'Legacy ingredient',
+          quantityNeeded: 1,
+        ),
+      ],
+    );
+    final order = PesananObject(
+      menuItemId: modernMenu.id,
+      namaPesanan: modernMenu.namaMenu,
+      harga: modernMenu.harga,
+      dineInQuantity: 1,
+      selectedOptions: [
+        SelectedOption(
+          groupId: 'group-1',
+          optionId: legacyOption.id,
+          groupName: 'Options',
+          optionName: legacyOption.name,
+        ),
+      ],
+    );
+
+    expect(
+      InventoryService.orderHasLegacyInventoryReferences(
+        [order],
+        menuLookup: {'__id__${modernMenu.id}': modernMenu},
+        optionLookup: {
+          'group-1': {legacyOption.id: legacyOption},
+        },
+      ),
+      isTrue,
+    );
+
+    final modernOrder = PesananObject(
+      menuItemId: modernMenu.id,
+      namaPesanan: modernMenu.namaMenu,
+      harga: modernMenu.harga,
+      dineInQuantity: 1,
+    );
+    expect(
+      InventoryService.orderHasLegacyInventoryReferences(
+        [modernOrder],
+        menuLookup: {'__id__${modernMenu.id}': modernMenu},
+        optionLookup: const {},
+      ),
+      isFalse,
+    );
   });
 
   test('uses the canonical daily log key', () {
