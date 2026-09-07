@@ -40,8 +40,7 @@ class _MarketingScreenState extends State<MarketingScreen>
 
   // Competition Points State (cached for local filtering)
   Map<String, int> _competitionPoints = {};
-  Map<String, Map<String, dynamic>> _competitionRecords = {};
-  String? _competitionCategoryFilter;
+  Map<String, int> _competitionRanks = {};
   bool _isProcessingProgramAction = false;
 
   @override
@@ -96,6 +95,8 @@ class _MarketingScreenState extends State<MarketingScreen>
       final monthDocId = MemberProgramService.periodIdFor(DateTime.now());
       final competitionMembers =
           await MemberProgramService.loadCompetitionMembers(monthDocId);
+      final ranked =
+          MemberProgramService.rankCompetitionMembers(competitionMembers);
       final pointsMap = <String, int>{};
       final recordsMap = <String, Map<String, dynamic>>{};
       for (final record in competitionMembers) {
@@ -134,7 +135,10 @@ class _MarketingScreenState extends State<MarketingScreen>
         _allMembers = sortedMembers; // Cache full sorted list
         _members = sortedMembers;
         _competitionPoints = pointsMap;
-        _competitionRecords = recordsMap; // Cache for local filtering
+        _competitionRanks = {
+          for (var index = 0; index < ranked.length; index++)
+            ranked[index].memberId: index + 1
+        };
         _isLoadingMembers = false;
       });
     } catch (e) {
@@ -792,21 +796,7 @@ class _MarketingScreenState extends State<MarketingScreen>
   }
 
   Widget _buildMembersTab() {
-    final visibleMembers = _competitionCategoryFilter == null
-        ? _members
-        : _members.where((member) {
-            final recordCategory = _competitionRecords[member.id]?['category'];
-            final category = MemberProgramService.normalizeCategory(
-              recordCategory ?? member.category,
-            );
-            return category == _competitionCategoryFilter;
-          }).toList();
-    const competitionCategories = [
-      ('', 'Semua'),
-      ('santri', 'Santri'),
-      ('mahasiswa', 'Mahasiswa'),
-      ('staff_guru_dosen', 'Staff/Guru/Dosen'),
-    ];
+    final visibleMembers = _members;
     return Column(
       children: [
         Padding(
@@ -814,35 +804,13 @@ class _MarketingScreenState extends State<MarketingScreen>
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              'Peringkat kompetisi ${MemberProgramService.periodIdFor(DateTime.now())}',
+              'Peringkat Global ${MemberProgramService.periodIdFor(DateTime.now())} • 3 Pemenang',
               style: GoogleFonts.poppins(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: Colors.grey.shade700,
               ),
             ),
-          ),
-        ),
-        SizedBox(
-          height: 48,
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            scrollDirection: Axis.horizontal,
-            itemCount: competitionCategories.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              final category = competitionCategories[index];
-              final selected = _competitionCategoryFilter ==
-                  (category.$1.isEmpty ? null : category.$1);
-              return ChoiceChip(
-                label: Text(category.$2),
-                selected: selected,
-                onSelected: (_) => setState(() {
-                  _competitionCategoryFilter =
-                      category.$1.isEmpty ? null : category.$1;
-                }),
-              );
-            },
           ),
         ),
         Padding(
@@ -889,7 +857,10 @@ class _MarketingScreenState extends State<MarketingScreen>
                                     ? '?'
                                     : member.name[0].toUpperCase()),
                               ),
-                              title: Text(member.name,
+                              title: Text(
+                                  _competitionRanks.containsKey(member.id)
+                                      ? '#${_competitionRanks[member.id]} • ${member.name}'
+                                      : member.name,
                                   style: GoogleFonts.poppins(
                                       fontWeight: FontWeight.w500)),
                               subtitle: Text(member.phoneNumber),
@@ -2059,7 +2030,7 @@ class _MarketingScreenState extends State<MarketingScreen>
                                 child: Text('${winner.rank}'),
                               ),
                               title: Text(
-                                  '${MemberProgramService.categoryLabel(winner.category)} • ${winner.memberId}',
+                                  '${winner.rankingMode == CompetitionRankingMode.global ? 'Global' : MemberProgramService.categoryLabel(winner.category)} • ${winner.memberId}',
                                   style: GoogleFonts.poppins(fontSize: 12)),
                               subtitle: Text(
                                   'Rp ${NumberFormat.decimalPattern('id_ID').format(winner.prizeAmount)} • ${winner.voucherId}',

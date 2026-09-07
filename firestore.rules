@@ -2,6 +2,41 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // BEGIN GLOBAL COMPETITION POLICY
+    function validCompetitionMetadata() {
+      let data = request.resource.data;
+      return (!data.keys().hasAny(["rankingMode"]) || data.rankingMode in ["category", "global"]) &&
+        (!data.keys().hasAny(["winnerCount"]) || (data.winnerCount is int && data.winnerCount >= 0));
+    }
+
+    function validCompetitionPrize(periodId) {
+      let data = request.resource.data;
+      return validCompetitionMetadata() && (periodId < "2026-09" ||
+        (data.rankingMode == "global" && data.winnerCount == 3 &&
+          data.winners is list && data.winners.size() <= 3 &&
+          data.configuration.amountsByRank == {"1": 50000, "2": 25000, "3": 15000}));
+    }
+
+    function validCompetitionWinner(periodId, winnerId) {
+      let data = request.resource.data;
+      return validCompetitionMetadata() && (periodId < "2026-09" ||
+        (data.rankingMode == "global" && data.rank in [1, 2, 3] &&
+          ((data.rank == 1 && winnerId == "rank_1" && data.prizeAmount == 50000) ||
+           (data.rank == 2 && winnerId == "rank_2" && data.prizeAmount == 25000) ||
+           (data.rank == 3 && winnerId == "rank_3" && data.prizeAmount == 15000))));
+    }
+
+    function validCompetitionVoucherCreate() {
+      let data = request.resource.data;
+      return data.get("type", "") != "competitionPrize" ||
+        data.get("competitionPrizePeriod", "") < "2026-09" ||
+        (data.rankingMode == "global" && data.competitionRank in [1, 2, 3] &&
+          data.value == {"1": 50000, "2": 25000, "3": 15000}[
+            data.competitionRank == 1 ? "1" : (data.competitionRank == 2 ? "2" : "3")]);
+    }
+    // END GLOBAL COMPETITION POLICY
+
     function isAuthenticated() { return request.auth != null; }
 
     function isAdmin() {
@@ -141,7 +176,8 @@ service cloud.firestore {
     }
     match /vouchers/{id} {
       allow read: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.userId));
-      allow create, update: if isAdmin();
+      allow create: if isAdmin() && validCompetitionVoucherCreate();
+      allow update: if isAdmin();
       allow delete: if false;
     }
 
@@ -196,11 +232,11 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /competitionRecords/{monthId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAdmin();
+      allow read: if true;
+      allow create, update: if isAdmin() && validCompetitionMetadata();
       allow delete: if false;
       match /members/{memberId} {
-        allow read: if isAuthenticated();
+        allow read: if true;
         allow create, update: if isAdmin();
         allow delete: if false;
       }
@@ -224,12 +260,12 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /competitionPrizes/{periodId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAdmin();
+      allow read: if true;
+      allow create, update: if isAdmin() && validCompetitionPrize(periodId);
       allow delete: if false;
       match /winners/{winnerId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAdmin();
+        allow read: if true;
+        allow create, update: if isAdmin() && validCompetitionWinner(periodId, winnerId);
         allow delete: if false;
       }
     }
@@ -312,11 +348,11 @@ service cloud.firestore {
     }
     match /zTesting_CashflowSettings/{id} { allow read, write, update, delete: if true; }
     match /zTesting_competitionRecords/{id} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAdmin();
+      allow read: if true;
+      allow create, update: if isAdmin() && validCompetitionMetadata();
       allow delete: if false;
       match /members/{memberId} {
-        allow read: if isAuthenticated();
+        allow read: if true;
         allow create, update: if isAdmin();
         allow delete: if false;
       }
@@ -328,7 +364,8 @@ service cloud.firestore {
     }
     match /zTesting_vouchers/{id} {
       allow read: if isAdmin() || (isAuthenticated() && memberIdRefersToAuthUser(resource.data.userId));
-      allow create, update: if isAdmin();
+      allow create: if isAdmin() && validCompetitionVoucherCreate();
+      allow update: if isAdmin();
       allow delete: if false;
     }
     match /zTesting_voucherGroup/{id} {
@@ -406,12 +443,12 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /zTesting_competitionPrizes/{id} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAdmin();
+      allow read: if true;
+      allow create, update: if isAdmin() && validCompetitionPrize(id);
       allow delete: if false;
       match /winners/{winnerId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAdmin();
+        allow read: if true;
+        allow create, update: if isAdmin() && validCompetitionWinner(id, winnerId);
         allow delete: if false;
       }
     }

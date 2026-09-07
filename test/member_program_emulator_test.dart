@@ -52,7 +52,7 @@ void main() {
           apiKey: 'demo-api-key',
           appId: '1:1234567890:android:member-program-emulator',
           messagingSenderId: '1234567890',
-          projectId: 'point-of-sales-app-25e2b',
+          projectId: 'demo-global-competition',
         ),
       );
     } on FirebaseException catch (error) {
@@ -185,13 +185,74 @@ void main() {
     expect(ledgers.docs.length, 1);
   });
 
+  test('sale, self-order, settlement and edit share the global pool', () async {
+    final suffix = DateTime.now().microsecondsSinceEpoch.toString();
+    final periodId = MemberProgramService.periodIdFor(DateTime.now());
+    for (final source in ['sale', 'self_order', 'open_bill_settlement']) {
+      final memberId = '${source}_$suffix';
+      final operationId = '${source}_earn_$suffix';
+      await firestore.collection(Col.name('Members')).doc(memberId).set({
+        'fullName': source,
+        'uid': emulatorUid,
+        'points': 0,
+        'category': '',
+      });
+      final preparation = await MemberProgramService.prepareOrder(
+        operationId: operationId,
+        sourceType: source,
+        sourceId: operationId,
+        memberId: memberId,
+        grossTotal: 20000,
+        finalBill: 20000,
+      );
+      await firestore.runTransaction((transaction) =>
+          MemberProgramService.queueOrderInTransaction(
+              transaction: transaction, preparation: preparation));
+      final editId = '${source}_edit_$suffix';
+      final edited = await MemberProgramService.prepareOrder(
+        operationId: editId,
+        sourceType: 'edit',
+        sourceId: operationId,
+        memberId: memberId,
+        grossTotal: 10000,
+        finalBill: 10000,
+      );
+      Future<void> edit() async {
+        await firestore.runTransaction((transaction) =>
+            MemberProgramService.queueOrderEditInTransaction(
+                transaction: transaction,
+                editOperationId: editId,
+                originalPointOperationId: operationId,
+                newPreparation: edited));
+      }
+
+      await edit();
+      await edit();
+      final period = await firestore
+          .collection(Col.name('competitionRecords'))
+          .doc(periodId)
+          .get();
+      expect(period.data()?['rankingMode'], 'global');
+      expect(period.data()?[memberId]['customerPoints'], 1);
+      expect(period.data()?[memberId]['amountSpent'], 10000);
+      expect(period.data()?[memberId]['numberOfTransaction'], 1);
+      expect(
+          (await firestore.collection(Col.name('Members')).doc(memberId).get())
+              .data()?['points'],
+          1);
+      final reverse = await firestore
+          .collection(Col.name('pointTransactions'))
+          .doc('${editId}_reverse')
+          .get();
+      expect(reverse.data()?['pointsDelta'], -2);
+    }
+  });
+
   test('finalization ranks cumulative root data and is idempotent', () async {
     final suffix = DateTime.now().microsecondsSinceEpoch.toString();
     final memberId = 'finalizer_member_$suffix';
-    final periodId = MemberProgramService.periodIdFor(
-      DateTime(MemberProgramService.nowJakarta().year,
-          MemberProgramService.nowJakarta().month - 1, 15),
-    );
+    const periodId = '2026-10';
+    final finalizationTime = DateTime.utc(2026, 11, 1);
 
     await firestore.collection(Col.name('Members')).doc(memberId).set({
       'fullName': 'Finalizer Member',
@@ -205,12 +266,31 @@ void main() {
         .doc(periodId)
         .set({
       'periodId': periodId,
+      ...CompetitionRankingMode.global.metadata,
       'status': 'open',
       memberId: {
         'customerPoints': 10,
         'amountSpent': 100000,
         'numberOfTransaction': 4,
         'category': 'santri',
+      },
+      '${memberId}_2': {
+        'customerPoints': 8,
+        'amountSpent': 80000,
+        'numberOfTransaction': 3,
+        'category': 'santri'
+      },
+      '${memberId}_3': {
+        'customerPoints': 6,
+        'amountSpent': 60000,
+        'numberOfTransaction': 2,
+        'category': 'santri'
+      },
+      '${memberId}_4': {
+        'customerPoints': 4,
+        'amountSpent': 40000,
+        'numberOfTransaction': 1,
+        'category': 'mahasiswa'
       },
     });
     await firestore
@@ -230,24 +310,32 @@ void main() {
     final firstRun = await MemberProgramService.finalizeCompetitionMonth(
       periodId: periodId,
       actorId: emulatorUid,
+      now: finalizationTime,
     );
-    expect(firstRun, hasLength(1));
-    expect(firstRun.single.points, 10);
-    expect(firstRun.single.prizeAmount, 50000);
+    expect(firstRun, hasLength(3));
+    expect(firstRun.first.points, 10);
+    expect(firstRun.map((winner) => winner.prizeAmount), [50000, 25000, 15000]);
+    expect(firstRun.map((winner) => winner.category).toSet(), {'santri'});
 
     final secondRun = await MemberProgramService.finalizeCompetitionMonth(
       periodId: periodId,
       actorId: emulatorUid,
+      now: finalizationTime,
     );
-    expect(secondRun, hasLength(1));
-    expect(secondRun.single.memberId, memberId);
-    expect(secondRun.single.prizeAmount, 50000);
+    expect(secondRun, hasLength(3));
+    expect(secondRun.first.memberId, memberId);
+    expect(secondRun.first.prizeAmount, 50000);
 
     final prize = await firestore
         .collection(Col.name('competitionPrizes'))
         .doc(periodId)
         .get();
     expect(prize.data()?['status'], 'finalized');
+    expect(prize.data()?['rankingMode'], 'global');
+    expect(prize.data()?['winnerCount'], 3);
+    final winnerDocs = await prize.reference.collection('winners').get();
+    expect(
+        winnerDocs.docs.map((doc) => doc.id), ['rank_1', 'rank_2', 'rank_3']);
     final vouchers = await firestore
         .collection(Col.name('vouchers'))
         .where('competitionPrizePeriod', isEqualTo: periodId)
@@ -255,6 +343,27 @@ void main() {
         .get();
     expect(vouchers.docs, hasLength(1));
     expect(vouchers.docs.single.data()['value'], 50000);
+  });
+
+  test('legacy periods cannot issue extra global rewards', () async {
+    final periodRef =
+        firestore.collection(Col.name('competitionRecords')).doc('2026-08');
+    await periodRef.set({
+      'status': 'open',
+      'legacy': {'customerPoints': 100}
+    });
+    await expectLater(
+        MemberProgramService.finalizeCompetitionMonth(
+            periodId: '2026-08', now: DateTime.utc(2026, 9, 7)),
+        throwsA(isA<MemberProgramException>()));
+    expect((await periodRef.get()).data()?['status'], 'open');
+    expect(
+        (await firestore
+                .collection(Col.name('competitionPrizes'))
+                .doc('2026-08')
+                .get())
+            .exists,
+        isFalse);
   });
 
   test('competition and campaign vouchers can be claimed only once', () async {
@@ -281,6 +390,60 @@ void main() {
           preparation: preparation,
         );
       });
+    }
+
+    final globalVoucherId = 'global_competition_$suffix';
+    await firestore.collection(Col.name('vouchers')).doc(globalVoucherId).set({
+      'type': 'competitionPrize',
+      'competitionPrizePeriod': '2026-09',
+      'competitionRank': 1,
+      'rankingMode': 'global',
+      'status': 'READY_TO_CLAIM',
+      'isActive': true,
+      'isClaimed': false,
+      'sekaliPakai': true,
+      'value': 50000,
+      'valueRemaining': 50000,
+      'activeDate': activeDate,
+      'expireDate': expireDate,
+    });
+    await claimVoucher(
+        voucherId: globalVoucherId,
+        usedAmount: 50000,
+        operationId: 'global_claim_$suffix');
+    expect(
+        (await firestore
+                .collection(Col.name('vouchers'))
+                .doc(globalVoucherId)
+                .get())
+            .data()?['status'],
+        'CLAIMED');
+    await expectLater(
+        claimVoucher(
+            voucherId: globalVoucherId,
+            usedAmount: 50000,
+            operationId: 'global_repeat_$suffix'),
+        throwsA(isA<MemberProgramException>()));
+
+    for (final invalid in ['EXPIRED', 'DISABLED']) {
+      final voucherId = '${invalid}_$suffix';
+      await firestore.collection(Col.name('vouchers')).doc(voucherId).set({
+        'type': 'competitionPrize',
+        'competitionPrizePeriod': '2026-09',
+        'competitionRank': 1,
+        'rankingMode': 'global',
+        'status': invalid,
+        'isActive': invalid != 'DISABLED',
+        'value': 50000,
+        'activeDate': activeDate,
+        'expireDate': invalid == 'EXPIRED' ? activeDate : expireDate,
+      });
+      await expectLater(
+          claimVoucher(
+              voucherId: voucherId,
+              usedAmount: 50000,
+              operationId: '${invalid}_claim_$suffix'),
+          throwsA(isA<MemberProgramException>()));
     }
 
     final competitionVoucherId = 'legacy_competition_$suffix';
@@ -321,6 +484,7 @@ void main() {
     final campaignId = 'campaign_$suffix';
     final campaignVoucherId = 'campaign_voucher_$suffix';
     await firestore.collection(Col.name('voucherGroup')).doc(campaignId).set({
+      'voucherGroupId': campaignId,
       'type': 'cashbackCampaign',
       'status': 'active',
       'isActive': true,
@@ -328,6 +492,10 @@ void main() {
       'expireDate': expireDate,
       'threshold': 1,
       'value': 50000,
+      'transactionRequirement': 0,
+      'totalParticipants': 1,
+      'totalClaimed': 0,
+      'totalRedemptions': 0,
     });
     await firestore
         .collection(Col.name('vouchers'))

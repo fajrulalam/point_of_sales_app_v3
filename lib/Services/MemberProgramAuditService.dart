@@ -30,7 +30,7 @@ class MemberProgramAuditService {
     _auditMembers(findings, members.docs);
     _auditPointLedger(findings, members.docs, ledgers.docs, operations.docs);
     _auditCampaigns(findings, groups.docs, vouchers.docs);
-    _auditPrizes(findings, prizes.docs, vouchers.docs);
+    await _auditPrizes(findings, prizes.docs, vouchers.docs);
     _auditExternalClaims(findings, outbox.docs);
     await _auditCompetition(findings, ledgers.docs);
     await _auditOrderMarkers(findings);
@@ -469,13 +469,74 @@ class MemberProgramAuditService {
     }
   }
 
-  void _auditPrizes(
+  /// Pure validation also used by the parity/integrity tests.
+  static List<String> globalPrizeIssues(Map<String, dynamic> data) {
+    final issues = <String>[];
+    final winners = data['winners'];
+    if (data['rankingMode'] != 'global' || data['winnerCount'] != 3) {
+      issues.add('competition_global_metadata_invalid');
+    }
+    final configuration = data['configuration'];
+    final amounts =
+        configuration is Map ? configuration['amountsByRank'] : null;
+    if (amounts is! Map ||
+        PrizeConfiguration.defaults.amountsByRank.entries
+            .any((entry) => amounts[entry.key.toString()] != entry.value)) {
+      issues.add('competition_global_configuration_invalid');
+    }
+    if (winners is! List || winners.length > 3) {
+      issues.add('competition_global_winner_count_invalid');
+      return issues;
+    }
+    final ranks = <int>{};
+    final members = <String>{};
+    final voucherIds = <String>{};
+    for (final winner in winners) {
+      if (winner is! Map) {
+        issues.add('competition_global_winner_invalid');
+        continue;
+      }
+      final rank = MemberProgramValues.intValue(winner['rank']);
+      final memberId = winner['memberId']?.toString().trim() ?? '';
+      final voucherId = winner['voucherId']?.toString() ?? '';
+      if (rank < 1 ||
+          rank > 3 ||
+          !ranks.add(rank) ||
+          memberId.isEmpty ||
+          !members.add(memberId) ||
+          voucherId.isEmpty ||
+          !voucherIds.add(voucherId) ||
+          winner['rankingMode'] != 'global' ||
+          MemberProgramValues.intValue(winner['points']) <= 0 ||
+          MemberProgramValues.intValue(winner['prizeAmount']) !=
+              PrizeConfiguration.defaults.amountsByRank[rank]) {
+        issues.add('competition_global_winner_invalid');
+      }
+    }
+    if (ranks.any((rank) => rank > winners.length)) {
+      issues.add('competition_global_rank_gap');
+    }
+    return issues;
+  }
+
+  Future<void> _auditPrizes(
     List<MemberProgramAuditFinding> findings,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> prizes,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> vouchers,
-  ) {
+  ) async {
     final voucherById = {for (final voucher in vouchers) voucher.id: voucher};
     for (final prize in prizes) {
+      final global = CompetitionRankingMode.forPeriod(prize.id, prize.data()) ==
+          CompetitionRankingMode.global;
+      if (global) {
+        for (final code in globalPrizeIssues(prize.data())) {
+          findings.add(MemberProgramAuditFinding(
+              code: code,
+              severity: 'high',
+              message: 'Data hadiah kompetisi global tidak konsisten.',
+              documentPath: prize.reference.path));
+        }
+      }
       final winners = prize.data()['winners'];
       if (winners is! List) {
         findings.add(MemberProgramAuditFinding(
@@ -486,6 +547,22 @@ class MemberProgramAuditService {
           documentPath: prize.reference.path,
         ));
         continue;
+      }
+      final nested = await prize.reference.collection('winners').get();
+      if (global &&
+          (nested.size != winners.length ||
+              nested.docs.any((doc) => !winners.whereType<Map>().any((winner) =>
+                  doc.id == 'rank_${winner['rank']}' &&
+                  doc.data()['memberId'] == winner['memberId'] &&
+                  doc.data()['voucherId'] == winner['voucherId'] &&
+                  doc.data()['rank'] == winner['rank'] &&
+                  doc.data()['prizeAmount'] == winner['prizeAmount'] &&
+                  doc.data()['rankingMode'] == 'global')))) {
+        findings.add(MemberProgramAuditFinding(
+            code: 'competition_global_winner_documents_inconsistent',
+            severity: 'high',
+            message: 'Dokumen pemenang berbeda dari hasil finalisasi.',
+            documentPath: prize.reference.path));
       }
       for (final raw in winners) {
         if (raw is! Map) continue;
@@ -503,6 +580,9 @@ class MemberProgramAuditService {
         } else {
           final data = voucher.data();
           if (data['competitionPrizePeriod']?.toString() != prize.id ||
+              (global &&
+                  (data['rankingMode'] != 'global' ||
+                      data['competitionRank'] != raw['rank'])) ||
               data['userId']?.toString() != raw['memberId']?.toString() ||
               MemberProgramValues.intValue(data['value']) !=
                   MemberProgramValues.intValue(raw['prizeAmount'])) {
@@ -526,7 +606,24 @@ class MemberProgramAuditService {
         }
       }
     }
+    final globalRanks = <String>{};
+    final globalMembers = <String>{};
     for (final voucher in vouchers) {
+      final data = voucher.data();
+      final periodId = data['competitionPrizePeriod']?.toString() ?? '';
+      if (data['type'] == 'competitionPrize' &&
+          periodId.isNotEmpty &&
+          CompetitionRankingMode.forPeriod(periodId, data) ==
+              CompetitionRankingMode.global) {
+        if (!globalRanks.add('$periodId/${data['competitionRank']}') ||
+            !globalMembers.add('$periodId/${data['userId']}')) {
+          findings.add(MemberProgramAuditFinding(
+              code: 'competition_global_voucher_duplicate',
+              severity: 'high',
+              message: 'Hadiah global memiliki rank atau member ganda.',
+              documentPath: voucher.reference.path));
+        }
+      }
       if (voucher.data()['type']?.toString() == 'competitionPrize' &&
           !winnerVoucherIds.contains(voucher.id)) {
         findings.add(MemberProgramAuditFinding(
@@ -634,7 +731,10 @@ class MemberProgramAuditService {
         if (category.isEmpty) {
           findings.add(MemberProgramAuditFinding(
             code: 'competition_category_unknown',
-            severity: 'medium',
+            severity: CompetitionRankingMode.forPeriod(period.id, rootData) ==
+                    CompetitionRankingMode.global
+                ? 'low'
+                : 'medium',
             message: 'Record kompetisi tidak memiliki kategori yang valid.',
             documentPath: member.reference.path,
           ));

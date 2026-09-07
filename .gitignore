@@ -51,6 +51,7 @@ bugreport-*.zip
 /android/app/profile
 /android/app/release
 *.json
+!test/fixtures/competition-policy.json
 
 # Never committed: local-only secrets. See docs/sdrg_stock_bridge_protocol.md.
 lib/Services/SdrgBridgeCredentials.dart

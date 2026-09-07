@@ -230,6 +230,28 @@ class MemberProgramOperationResult {
         );
 }
 
+enum CompetitionRankingMode {
+  category,
+  global;
+
+  static const globalStart = '2026-09';
+
+  static CompetitionRankingMode forPeriod(String periodId,
+      [Map<String, dynamic>? data]) {
+    if (data?['rankingMode'] == 'global') return global;
+    if (data?['rankingMode'] == 'category') return category;
+    return periodId.compareTo(globalStart) >= 0 ? global : category;
+  }
+
+  int get winnerCount => this == global ? 3 : 9;
+
+  Map<String, dynamic> get metadata => {
+        'schemaVersion': this == global ? 3 : 2,
+        'rankingMode': name,
+        'winnerCount': winnerCount,
+      };
+}
+
 class CompetitionMemberRecord {
   final String memberId;
   final String category;
@@ -268,6 +290,7 @@ class CompetitionMemberRecord {
 }
 
 class CompetitionWinner {
+  final CompetitionRankingMode rankingMode;
   final String periodId;
   final String category;
   final int rank;
@@ -279,6 +302,7 @@ class CompetitionWinner {
   final String voucherId;
 
   const CompetitionWinner({
+    this.rankingMode = CompetitionRankingMode.category,
     required this.periodId,
     required this.category,
     required this.rank,
@@ -290,8 +314,13 @@ class CompetitionWinner {
     required this.voucherId,
   });
 
+  String get documentId => rankingMode == CompetitionRankingMode.global
+      ? 'rank_$rank'
+      : '${category}_$rank';
+
   Map<String, dynamic> toMap() => {
-        'schemaVersion': 2,
+        'schemaVersion': rankingMode == CompetitionRankingMode.global ? 3 : 2,
+        'rankingMode': rankingMode.name,
         'periodId': periodId,
         'category': category,
         'rank': rank,
@@ -306,14 +335,20 @@ class CompetitionWinner {
 
 class PrizeConfiguration {
   final Map<String, Map<int, int>> amountsByCategory;
+  final Map<int, int> amountsByRank;
   final int? validityMonths;
 
   const PrizeConfiguration({
-    required this.amountsByCategory,
+    this.amountsByCategory = const {},
+    this.amountsByRank = const {},
     this.validityMonths,
   });
 
   static const defaults = PrizeConfiguration(
+    amountsByRank: {1: 50000, 2: 25000, 3: 15000},
+  );
+
+  static const legacy = PrizeConfiguration(
     amountsByCategory: {
       'santri': {1: 50000, 2: 25000, 3: 15000},
       'mahasiswa': {1: 50000, 2: 25000, 3: 15000},
@@ -322,17 +357,21 @@ class PrizeConfiguration {
   );
 
   int amountFor(String category, int rank) =>
-      amountsByCategory[category]?[rank] ?? 0;
+      amountsByRank[rank] ?? amountsByCategory[category]?[rank] ?? 0;
 
   Map<String, dynamic> toMap() => {
-        'schemaVersion': 1,
+        'schemaVersion': amountsByRank.isNotEmpty ? 2 : 1,
         'validityMonths': validityMonths,
-        'amountsByCategory': amountsByCategory.map(
-          (category, ranks) => MapEntry(
-            category,
-            ranks.map((rank, amount) => MapEntry(rank.toString(), amount)),
+        if (amountsByRank.isNotEmpty)
+          'amountsByRank': amountsByRank
+              .map((rank, amount) => MapEntry(rank.toString(), amount)),
+        if (amountsByCategory.isNotEmpty)
+          'amountsByCategory': amountsByCategory.map(
+            (category, ranks) => MapEntry(
+              category,
+              ranks.map((rank, amount) => MapEntry(rank.toString(), amount)),
+            ),
           ),
-        ),
       };
 }
 

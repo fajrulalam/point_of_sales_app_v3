@@ -92,8 +92,7 @@ class MemberProgramService {
     final result = records
         .where((record) =>
             (normalized == null || record.category == normalized) &&
-            record.category.isNotEmpty &&
-            record.memberId.isNotEmpty &&
+            record.memberId.trim().isNotEmpty &&
             record.customerPoints > 0)
         .toList()
       ..sort((a, b) {
@@ -178,7 +177,66 @@ class MemberProgramService {
 
   static String prizeVoucherId(
       String periodId, String category, int rank, String memberId) {
-    return 'competition_${_safeId(periodId)}_${_safeId(category)}_${rank}_${_hashId(memberId)}';
+    // Shift/add keeps FNV multiplication exact on Dart's JavaScript target.
+    // Preserve the old hash path for legacy category voucher identifiers.
+    var globalHash = 2166136261;
+    if (category == 'global') {
+      for (final unit in memberId.codeUnits) {
+        globalHash ^= unit;
+        globalHash = (globalHash +
+                (globalHash << 1) +
+                (globalHash << 4) +
+                (globalHash << 7) +
+                (globalHash << 8) +
+                (globalHash << 24)) &
+            0x7fffffff;
+      }
+    }
+    final memberHash =
+        category == 'global' ? globalHash.toRadixString(16) : _hashId(memberId);
+    return 'competition_${_safeId(periodId)}_${_safeId(category)}_${rank}_$memberHash';
+  }
+
+  static List<CompetitionWinner> buildCompetitionWinners(
+    String periodId,
+    Iterable<CompetitionMemberRecord> records, {
+    CompetitionRankingMode? rankingMode,
+  }) {
+    final mode = rankingMode ?? CompetitionRankingMode.forPeriod(periodId);
+    final configuration = mode == CompetitionRankingMode.global
+        ? PrizeConfiguration.defaults
+        : PrizeConfiguration.legacy;
+    final groups = mode == CompetitionRankingMode.global
+        ? <String?>[null]
+        : configuration.amountsByCategory.keys.toList();
+    final winners = <CompetitionWinner>[];
+    for (final category in groups) {
+      final ranked =
+          rankCompetitionMembers(records, category: category).take(3).toList();
+      for (var index = 0; index < ranked.length; index++) {
+        final record = ranked[index];
+        final rank = index + 1;
+        winners.add(CompetitionWinner(
+          periodId: periodId,
+          rankingMode: mode,
+          category: record.category,
+          rank: rank,
+          memberId: record.memberId,
+          points: record.customerPoints,
+          amountSpent: record.amountSpent,
+          numberOfTransaction: record.numberOfTransaction,
+          prizeAmount: configuration.amountFor(record.category, rank),
+          voucherId: prizeVoucherId(
+              periodId,
+              mode == CompetitionRankingMode.global
+                  ? 'global'
+                  : record.category,
+              rank,
+              record.memberId),
+        ));
+      }
+    }
+    return winners;
   }
 
   static DateTime? _date(dynamic value) => MemberProgramValues.dateValue(value);
@@ -713,7 +771,9 @@ class MemberProgramService {
     transaction.set(
       legacyRef,
       {
-        'schemaVersion': 2,
+        ...CompetitionRankingMode.forPeriod(
+                preparation.periodId, periodSnapshot.data())
+            .metadata,
         'periodId': preparation.periodId,
         'status': periodSnapshot.exists
             ? (periodSnapshot.data()?['status'] ?? 'open')
@@ -1108,8 +1168,9 @@ class MemberProgramService {
       throw const MemberProgramException(
           'Member pesanan tidak ditemukan. Edit diblokir.');
     }
-    if (periodSnapshot.data()?['status']?.toString().toLowerCase() ==
-            'finalized' ||
+    if ((periodSnapshot.data()?['status']?.toString().toLowerCase() ??
+                'open') !=
+            'open' ||
         isPeriodEnded(periodId)) {
       throw const MemberProgramException(
           'Periode kompetisi sudah ditutup. Edit memerlukan penyesuaian administrator.');
@@ -1168,6 +1229,8 @@ class MemberProgramService {
     transaction.set(
       _legacyCompetitionRef(periodId),
       <String, dynamic>{
+        ...CompetitionRankingMode.forPeriod(periodId, periodSnapshot.data())
+            .metadata,
         oldMemberId: {
           if (newPreparation.category.isNotEmpty)
             'category': newPreparation.category,
@@ -1671,10 +1734,12 @@ class MemberProgramService {
   /// voucher set under deterministic IDs, so a retry cannot issue duplicates.
   static Future<List<CompetitionWinner>> finalizeCompetitionMonth({
     required String periodId,
-    PrizeConfiguration configuration = PrizeConfiguration.defaults,
     String? actorId,
+    DateTime? now,
   }) async {
-    if (!isPeriodEnded(periodId)) {
+    final finalizationTime = now ?? DateTime.now();
+    if (!RegExp(r'^\d{4}-(0[1-9]|1[0-2])$').hasMatch(periodId) ||
+        !isPeriodEnded(periodId, now: finalizationTime)) {
       throw const MemberProgramException(
           'Bulan kompetisi belum berakhir di zona waktu Jakarta.');
     }
@@ -1683,9 +1748,25 @@ class MemberProgramService {
     final finalizationOperationId = 'finalize_$periodId';
     final lockResult = await _fs.runTransaction<String>((transaction) async {
       final snapshot = await transaction.get(periodRef);
+      final prizeSnapshot = await transaction.get(prizeRef);
       final data = snapshot.data() ?? <String, dynamic>{};
       final status = data['status']?.toString().toLowerCase() ?? 'open';
-      if (status == 'finalized') return 'already_finalized';
+      if (status == 'finalized' ||
+          prizeSnapshot.data()?['status'] == 'finalized') {
+        return 'already_finalized';
+      }
+      if (periodId.compareTo(CompetitionRankingMode.globalStart) < 0 ||
+          CompetitionRankingMode.forPeriod(periodId, data) !=
+              CompetitionRankingMode.global) {
+        throw const MemberProgramException(
+            'Periode ini menggunakan hadiah per kategori. Hadiah lama tetap berlaku; penerbitan tambahan memerlukan rekonsiliasi administrator.');
+      }
+      if (!finalizationTime
+          .toUtc()
+          .isBefore(prizeExpiryFor(periodId).toUtc())) {
+        throw const MemberProgramException(
+            'Masa penerbitan hadiah untuk periode ini sudah berakhir.');
+      }
       final existingOperation = data['finalizationOperationId']?.toString();
       if (status == 'finalizing' &&
           existingOperation != null &&
@@ -1696,7 +1777,7 @@ class MemberProgramService {
       transaction.set(
         periodRef,
         {
-          'schemaVersion': 2,
+          ...CompetitionRankingMode.global.metadata,
           'periodId': periodId,
           'status': 'finalizing',
           'finalizationOperationId': finalizationOperationId,
@@ -1713,46 +1794,20 @@ class MemberProgramService {
     }
 
     final records = await loadCompetitionMembers(periodId);
-    final winners = <CompetitionWinner>[];
-    for (final category in configuration.amountsByCategory.keys) {
-      final ranked = rankCompetitionMembers(records, category: category);
-      for (var index = 0; index < ranked.length && index < 3; index++) {
-        final rank = index + 1;
-        final record = ranked[index];
-        final amount = configuration.amountFor(category, rank);
-        if (amount <= 0) continue;
-        winners.add(
-          CompetitionWinner(
-            periodId: periodId,
-            category: category,
-            rank: rank,
-            memberId: record.memberId,
-            points: record.customerPoints,
-            amountSpent: record.amountSpent,
-            numberOfTransaction: record.numberOfTransaction,
-            prizeAmount: amount,
-            voucherId: prizeVoucherId(
-              periodId,
-              category,
-              rank,
-              record.memberId,
-            ),
-          ),
-        );
-      }
-    }
+    final winners = buildCompetitionWinners(periodId, records,
+        rankingMode: CompetitionRankingMode.global);
 
     final expiry = prizeExpiryFor(periodId);
-    if (!DateTime.now().toUtc().isBefore(expiry.toUtc())) {
-      throw const MemberProgramException(
-          'Masa penerbitan hadiah untuk periode ini sudah berakhir.');
-    }
     await _fs.runTransaction((transaction) async {
       final periodSnapshot = await transaction.get(periodRef);
       final prizeSnapshot = await transaction.get(prizeRef);
       final status = periodSnapshot.data()?['status']?.toString().toLowerCase();
-      if (status == 'finalized' || prizeSnapshot.exists) return;
+      if (status == 'finalized' ||
+          prizeSnapshot.data()?['status'] == 'finalized') {
+        return;
+      }
       if (status != 'finalizing' ||
+          periodSnapshot.data()?['rankingMode'] != 'global' ||
           periodSnapshot.data()?['finalizationOperationId'] !=
               finalizationOperationId) {
         throw const MemberProgramException(
@@ -1764,20 +1819,39 @@ class MemberProgramService {
           _fs.collection(Col.name('vouchers')).doc(winner.voucherId),
       ];
       final voucherSnapshots = <DocumentSnapshot<Map<String, dynamic>>>[];
+      final winnerRefs = [
+        for (final winner in winners)
+          prizeRef.collection('winners').doc(winner.documentId)
+      ];
+      final winnerSnapshots = <DocumentSnapshot<Map<String, dynamic>>>[];
+      for (final winnerRef in winnerRefs) {
+        winnerSnapshots.add(await transaction.get(winnerRef));
+      }
       for (final voucherRef in voucherRefs) {
         voucherSnapshots.add(await transaction.get(voucherRef));
       }
 
       for (var winnerIndex = 0; winnerIndex < winners.length; winnerIndex++) {
         final winner = winners[winnerIndex];
-        final winnerRef = prizeRef
-            .collection('winners')
-            .doc('${winner.category}_${winner.rank}');
+        final winnerRef = winnerRefs[winnerIndex];
+        final existingWinner = winnerSnapshots[winnerIndex];
+        if (existingWinner.exists &&
+            (existingWinner.data()?['memberId'] != winner.memberId ||
+                parseInt(existingWinner.data()?['prizeAmount']) !=
+                    winner.prizeAmount ||
+                existingWinner.data()?['voucherId'] != winner.voucherId ||
+                existingWinner.data()?['rankingMode'] != 'global')) {
+          throw const MemberProgramException(
+              'Data pemenang tersimpan berbeda dari hasil finalisasi.');
+        }
         final voucherRef = voucherRefs[winnerIndex];
         final existingVoucher = voucherSnapshots[winnerIndex];
         if (existingVoucher.exists) {
           final existingData = existingVoucher.data() ?? <String, dynamic>{};
           if (existingData['competitionPrizePeriod'] != periodId ||
+              existingData['rankingMode'] != 'global' ||
+              existingData['type'] != 'competitionPrize' ||
+              parseInt(existingData['competitionRank']) != winner.rank ||
               existingData['userId'] != winner.memberId ||
               parseInt(existingData['value']) != winner.prizeAmount) {
             throw const MemberProgramException(
@@ -1808,7 +1882,8 @@ class MemberProgramService {
           transaction.set(
             voucherRef,
             {
-              'schemaVersion': 2,
+              'schemaVersion': 3,
+              'rankingMode': 'global',
               'voucherId': winner.voucherId,
               'type': 'competitionPrize',
               'competitionPrizePeriod': periodId,
@@ -1822,10 +1897,10 @@ class MemberProgramService {
               'isActive': true,
               'isClaimed': false,
               'status': 'READY_TO_CLAIM',
-              'activeDate': Timestamp.fromDate(DateTime.now()),
+              'activeDate': Timestamp.fromDate(finalizationTime),
               'expireDate': Timestamp.fromDate(expiry),
-              'voucherName':
-                  'Hadiah Kompetisi ${categoryLabel(winner.category)} #${winner.rank}',
+              'voucherName': 'Hadiah Kompetisi Global #${winner.rank}',
+              'transactionRequirement': 10000,
               'issuedByOperationId': finalizationOperationId,
               'updatedAt': FieldValue.serverTimestamp(),
               'createdAt': FieldValue.serverTimestamp(),
@@ -1837,14 +1912,14 @@ class MemberProgramService {
       transaction.set(
         prizeRef,
         {
-          'schemaVersion': 2,
+          ...CompetitionRankingMode.global.metadata,
           'periodId': periodId,
           'status': 'finalized',
           'finalizationOperationId': finalizationOperationId,
           'actorId': actorId,
           'finalizedAt': FieldValue.serverTimestamp(),
           'prizeExpiry': Timestamp.fromDate(expiry),
-          'configuration': configuration.toMap(),
+          'configuration': PrizeConfiguration.defaults.toMap(),
           'winners': winners.map((winner) => winner.toMap()).toList(),
         },
         SetOptions(merge: true),
@@ -1855,7 +1930,7 @@ class MemberProgramService {
         'finalizationOperationId': finalizationOperationId,
       });
     });
-    return winners;
+    return _readStoredWinners(periodId);
   }
 
   static Future<List<CompetitionWinner>> _readStoredWinners(
@@ -1866,6 +1941,7 @@ class MemberProgramService {
     return raw.whereType<Map>().map((item) {
       final data = Map<String, dynamic>.from(item);
       return CompetitionWinner(
+        rankingMode: CompetitionRankingMode.forPeriod(periodId, data),
         periodId: data['periodId']?.toString() ?? periodId,
         category: data['category']?.toString() ?? '',
         rank: parseInt(data['rank']),

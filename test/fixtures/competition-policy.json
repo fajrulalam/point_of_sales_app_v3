@@ -1,0 +1,230 @@
+[
+  {
+    "name": "mixed categories and deterministic ties",
+    "periodId": "2026-09",
+    "records": [
+      {
+        "memberId": "z-member",
+        "memberName": "",
+        "category": "santri",
+        "customerPoints": 10,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      },
+      {
+        "memberId": "a-member",
+        "memberName": "",
+        "category": "mahasiswa",
+        "customerPoints": 10,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      },
+      {
+        "memberId": "top+6281",
+        "memberName": "",
+        "category": "staff_guru_dosen",
+        "customerPoints": 99,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      },
+      {
+        "memberId": "zero",
+        "memberName": "",
+        "category": "santri",
+        "customerPoints": 0,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      },
+      {
+        "memberId": "",
+        "memberName": "",
+        "category": "mahasiswa",
+        "customerPoints": 100,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      },
+      {
+        "memberId": "negative",
+        "memberName": "",
+        "category": "",
+        "customerPoints": -1,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      }
+    ],
+    "expected": [
+      {
+        "memberId": "top+6281",
+        "rank": 1,
+        "prizeAmount": 50000,
+        "voucherId": "competition_2026-09_global_1_1506418e",
+        "documentId": "rank_1"
+      },
+      {
+        "memberId": "a-member",
+        "rank": 2,
+        "prizeAmount": 25000,
+        "voucherId": "competition_2026-09_global_2_16d7eb1",
+        "documentId": "rank_2"
+      },
+      {
+        "memberId": "z-member",
+        "rank": 3,
+        "prizeAmount": 15000,
+        "voucherId": "competition_2026-09_global_3_1ef6a272",
+        "documentId": "rank_3"
+      }
+    ]
+  },
+  {
+    "name": "all winners may have the same category",
+    "periodId": "2026-09",
+    "records": [
+      {
+        "memberId": "one",
+        "memberName": "",
+        "category": "santri",
+        "customerPoints": 30,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      },
+      {
+        "memberId": "two",
+        "memberName": "",
+        "category": "santri",
+        "customerPoints": 20,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      },
+      {
+        "memberId": "three",
+        "memberName": "",
+        "category": "santri",
+        "customerPoints": 10,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      },
+      {
+        "memberId": "four",
+        "memberName": "",
+        "category": "mahasiswa",
+        "customerPoints": 1,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      }
+    ],
+    "expected": [
+      {
+        "memberId": "one",
+        "rank": 1,
+        "prizeAmount": 50000,
+        "voucherId": "competition_2026-09_global_1_3a2719ef",
+        "documentId": "rank_1"
+      },
+      {
+        "memberId": "two",
+        "rank": 2,
+        "prizeAmount": 25000,
+        "voucherId": "competition_2026-09_global_2_3e248829",
+        "documentId": "rank_2"
+      },
+      {
+        "memberId": "three",
+        "rank": 3,
+        "prizeAmount": 15000,
+        "voucherId": "competition_2026-09_global_3_88603c3",
+        "documentId": "rank_3"
+      }
+    ]
+  },
+  {
+    "name": "unknown category and UTF16 IDs",
+    "periodId": "2026-09",
+    "records": [
+      {
+        "memberId": "member-😀",
+        "memberName": "",
+        "category": "",
+        "customerPoints": 5,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      }
+    ],
+    "expected": [
+      {
+        "memberId": "member-😀",
+        "rank": 1,
+        "prizeAmount": 50000,
+        "voucherId": "competition_2026-09_global_1_fff26ef",
+        "documentId": "rank_1"
+      }
+    ]
+  },
+  {
+    "name": "spending and transaction tie breakers",
+    "periodId": "2026-09",
+    "records": [
+      {
+        "memberId": "a",
+        "memberName": "",
+        "category": "santri",
+        "customerPoints": 10,
+        "amountSpent": 90000,
+        "numberOfTransaction": 9
+      },
+      {
+        "memberId": "b",
+        "memberName": "",
+        "category": "mahasiswa",
+        "customerPoints": 10,
+        "amountSpent": 100000,
+        "numberOfTransaction": 1
+      },
+      {
+        "memberId": "c",
+        "memberName": "",
+        "category": "",
+        "customerPoints": 10,
+        "amountSpent": 100000,
+        "numberOfTransaction": 2
+      },
+      {
+        "memberId": "d",
+        "memberName": "",
+        "category": "staff_guru_dosen",
+        "customerPoints": 11,
+        "amountSpent": 1,
+        "numberOfTransaction": 1
+      }
+    ],
+    "expected": [
+      {
+        "memberId": "d",
+        "rank": 1,
+        "prizeAmount": 50000,
+        "voucherId": "competition_2026-09_global_1_610c2473",
+        "documentId": "rank_1"
+      },
+      {
+        "memberId": "c",
+        "rank": 2,
+        "prizeAmount": 25000,
+        "voucherId": "competition_2026-09_global_2_660c2c52",
+        "documentId": "rank_2"
+      },
+      {
+        "memberId": "b",
+        "rank": 3,
+        "prizeAmount": 15000,
+        "voucherId": "competition_2026-09_global_3_670c2de5",
+        "documentId": "rank_3"
+      }
+    ]
+  },
+  {
+    "name": "empty period",
+    "periodId": "2026-09",
+    "records": [],
+    "expected": []
+  }
+]
