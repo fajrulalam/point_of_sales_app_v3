@@ -26,6 +26,15 @@ import 'package:point_of_sales_app_v3/Models/MemberProgramModels.dart';
 import 'package:point_of_sales_app_v3/Services/MemberProgramService.dart';
 
 class OrderConfirmationService {
+  static bool _lastIsMemberSelection = true;
+  static String? _lastPaymentMethod;
+  static String? _savedCashInput;
+
+  static void showTopError(BuildContext context, String message) =>
+      _showTopError(context, message);
+
+  static void dismissTopError() => _dismissTopError();
+
   static Future<void> showOrderConfirmationDialog({
     required BuildContext context,
     required List<PesananObject> pesananList,
@@ -57,6 +66,8 @@ class OrderConfirmationService {
     bool printerIsConnected = false,
     Member? initialSelectedMember,
     void Function(Member?)? onSelectedMemberChanged,
+    bool? initialIsMember,
+    void Function(bool)? onIsMemberChanged,
   }) async {
     final activePesananList =
         pesananList.where((p) => p.totalQuantity > 0).toList();
@@ -92,6 +103,8 @@ class OrderConfirmationService {
           printerIsConnected: printerIsConnected,
           initialSelectedMember: initialSelectedMember,
           onSelectedMemberChanged: onSelectedMemberChanged,
+          initialIsMember: initialIsMember,
+          onIsMemberChanged: onIsMemberChanged,
         );
       },
     );
@@ -118,6 +131,7 @@ class OrderConfirmationService {
         memberName: result['memberName'],
         memberPhone: result['memberPhone'],
         onSelectedMemberChanged: onSelectedMemberChanged,
+        onIsMemberChanged: onIsMemberChanged,
         operationId: _buildOperationId('open_bill', [
           nomorBerikutnya.toString(),
           result['memberId']?.toString() ?? '',
@@ -169,6 +183,7 @@ class OrderConfirmationService {
         programExtraPaymentMethod: result['programExtraPaymentMethod'],
         programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
         onSelectedMemberChanged: onSelectedMemberChanged,
+        onIsMemberChanged: onIsMemberChanged,
         operationId: _buildOperationId('sale', [
           nomorBerikutnya.toString(),
           memberId ?? '',
@@ -187,8 +202,6 @@ class OrderConfirmationService {
               .join('|'),
         ]),
       );
-    } else {
-      uangYangDiterimaController.clear();
     }
   }
 
@@ -303,8 +316,6 @@ class OrderConfirmationService {
         programExtraSplitQrisAmount: result['programExtraSplitQrisAmount'] ?? 0,
         operationId: 'self_order_${selfOrder.id}',
       );
-    } else {
-      uangYangDiterimaController.clear();
     }
   }
 
@@ -1293,6 +1304,8 @@ class OrderConfirmationService {
     customerNameController.clear();
     setJumlahItem(0);
     getTotal();
+    _lastPaymentMethod = null;
+    _savedCashInput = null;
   }
 
   /// Generate recommendations based on the current order
@@ -1586,6 +1599,7 @@ class OrderConfirmationService {
     String? programExtraPaymentMethod,
     int programExtraSplitQrisAmount = 0,
     void Function(Member?)? onSelectedMemberChanged,
+    void Function(bool)? onIsMemberChanged,
     String? operationId,
   }) async {
     final firestore = FirebaseFirestore.instance;
@@ -1973,6 +1987,7 @@ class OrderConfirmationService {
         programNominal: b2bPayment?.nominal ?? 0,
         voucherRemaining: voucherRemaining,
         onSelectedMemberChanged: onSelectedMemberChanged,
+        onIsMemberChanged: onIsMemberChanged,
       );
     } catch (error) {
       if (externalVoucherReserved && !posTransactionCommitted) {
@@ -2370,6 +2385,7 @@ class OrderConfirmationService {
     required String memberName,
     required String? memberPhone,
     void Function(Member?)? onSelectedMemberChanged,
+    void Function(bool)? onIsMemberChanged,
     String? operationId,
   }) async {
     final firestore = FirebaseFirestore.instance;
@@ -2606,6 +2622,7 @@ class OrderConfirmationService {
         getTotal: getTotal,
         setJumlahItem: setJumlahItem,
         onSelectedMemberChanged: onSelectedMemberChanged,
+        onIsMemberChanged: onIsMemberChanged,
       );
     } catch (error) {
       if (context.mounted && !loaderPopped) Navigator.pop(context);
@@ -2899,6 +2916,7 @@ class OrderConfirmationService {
     int programNominal = 0,
     int? voucherRemaining,
     void Function(Member?)? onSelectedMemberChanged,
+    void Function(bool)? onIsMemberChanged,
   }) async {
     await showDialog(
       context: context,
@@ -2984,6 +3002,8 @@ class OrderConfirmationService {
     setJumlahItem(0);
     getTotal();
     onSelectedMemberChanged?.call(null);
+    _lastPaymentMethod = null;
+    _savedCashInput = null;
   }
 
   static Future<int> _assignCustomerNumber() async {
@@ -4739,6 +4759,8 @@ class _OrderConfirmationDialog extends StatefulWidget {
   final bool printerIsConnected;
   final Member? initialSelectedMember;
   final void Function(Member?)? onSelectedMemberChanged;
+  final bool? initialIsMember;
+  final void Function(bool)? onIsMemberChanged;
 
   const _OrderConfirmationDialog({
     required this.totalHarga,
@@ -4754,6 +4776,8 @@ class _OrderConfirmationDialog extends StatefulWidget {
     this.printerIsConnected = false,
     this.initialSelectedMember,
     this.onSelectedMemberChanged,
+    this.initialIsMember,
+    this.onIsMemberChanged,
   });
 
   @override
@@ -4872,6 +4896,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   }
 
   String? _selectedPaymentMethod;
+  String? _savedCashInput;
   bool _isSplitPayment = false;
   int _splitQrisAmount = 0;
   TextEditingController _splitQrisController = TextEditingController();
@@ -4945,8 +4970,15 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
   void _updateSelectedMember(Member? member) {
     setState(() {
       _selectedMember = member;
+      if (member != null) {
+        isMember = true;
+      }
     });
     widget.onSelectedMemberChanged?.call(member);
+    if (member != null) {
+      widget.onIsMemberChanged?.call(true);
+      OrderConfirmationService._lastIsMemberSelection = true;
+    }
   }
 
   @override
@@ -4957,6 +4989,32 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
     voucherFocusNode = FocusNode();
     currentTotal = widget.totalHarga; // Initialize with the starting total
     _selectedMember = widget.initialSelectedMember;
+    if (_selectedMember != null) {
+      isMember = true;
+    } else if (widget.initialIsMember != null) {
+      isMember = widget.initialIsMember!;
+    } else {
+      isMember = OrderConfirmationService._lastIsMemberSelection;
+    }
+    if (widget.uangYangDiterimaController.text.isNotEmpty &&
+        OrderConfirmationService._lastPaymentMethod == null) {
+      _selectedPaymentMethod = 'Cash';
+      OrderConfirmationService._lastPaymentMethod = 'Cash';
+    } else {
+      _selectedPaymentMethod = OrderConfirmationService._lastPaymentMethod;
+    }
+    if (_selectedPaymentMethod == 'Cash + QRIS') {
+      _isSplitPayment = true;
+    }
+    _savedCashInput = OrderConfirmationService._savedCashInput;
+    if (_selectedPaymentMethod == 'Cash') {
+      if (_savedCashInput != null && _savedCashInput!.isNotEmpty) {
+        widget.uangYangDiterimaController.text = _savedCashInput!;
+      } else if (widget.uangYangDiterimaController.text.isNotEmpty) {
+        _savedCashInput = widget.uangYangDiterimaController.text;
+        OrderConfirmationService._savedCashInput = _savedCashInput;
+      }
+    }
     if (_selectedMember != null) {
       _fetchRedeemableVouchers(_selectedMember!.id);
     }
@@ -4982,6 +5040,7 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
 
   @override
   void dispose() {
+    _dismissTopError();
     customerNameFocusNode.dispose();
     uangFocusNode.dispose();
     voucherFocusNode.dispose();
@@ -5191,14 +5250,18 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                             Checkbox(
                               value: isMember,
                               onChanged: (value) {
+                                final newIsMember = value ?? true;
                                 setState(() {
-                                  isMember = value ?? true;
+                                  isMember = newIsMember;
                                   if (!isMember) {
                                     _selectedMember = null;
                                     _memberError = null;
                                     widget.onSelectedMemberChanged?.call(null);
                                   }
                                 });
+                                widget.onIsMemberChanged?.call(newIsMember);
+                                OrderConfirmationService._lastIsMemberSelection =
+                                    newIsMember;
                               },
                             ),
                             Text(
@@ -5321,6 +5384,11 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                                   .text = _selectedMember!.name;
                                               widget.onSelectedMemberChanged
                                                   ?.call(_selectedMember);
+                                              widget.onIsMemberChanged
+                                                  ?.call(true);
+                                              OrderConfirmationService
+                                                  ._lastIsMemberSelection =
+                                                  true;
                                               print(
                                                   "✅ Linked to member: ${_selectedMember!.name}");
                                             } catch (e) {
@@ -5395,12 +5463,16 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                             onSelected: (Member selection) {
                               setState(() {
                                 _selectedMember = selection;
+                                isMember = true;
                                 _memberError = null;
                                 widget.customerNameController.text =
                                     selection.name;
                               });
                               _fetchRedeemableVouchers(selection.id);
                               widget.onSelectedMemberChanged?.call(selection);
+                              widget.onIsMemberChanged?.call(true);
+                              OrderConfirmationService._lastIsMemberSelection =
+                                  true;
                             },
                             fieldViewBuilder: (context, controller, focusNode,
                                 onFieldSubmitted) {
@@ -5662,7 +5734,16 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                           ),
                           onSelected: (selected) {
                             setState(() {
+                              final prevMethod = _selectedPaymentMethod;
+                              if (prevMethod == 'Cash') {
+                                _savedCashInput =
+                                    widget.uangYangDiterimaController.text;
+                                OrderConfirmationService._savedCashInput =
+                                    _savedCashInput;
+                              }
                               _selectedPaymentMethod = selected ? method : null;
+                              OrderConfirmationService._lastPaymentMethod =
+                                  _selectedPaymentMethod;
                               if (selected && method == 'Cash + QRIS') {
                                 _isSplitPayment = true;
                                 widget.uangYangDiterimaController.clear();
@@ -5675,7 +5756,11 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                   widget.uangYangDiterimaController.text =
                                       format.format(displayTotal);
                                 } else if (selected && method == 'Cash') {
-                                  widget.uangYangDiterimaController.clear();
+                                  widget.uangYangDiterimaController.text =
+                                      _savedCashInput ??
+                                          OrderConfirmationService
+                                              ._savedCashInput ??
+                                          '';
                                 }
                               }
                             });
@@ -6266,6 +6351,12 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                 }),
                               ],
                               controller: widget.uangYangDiterimaController,
+                              onChanged: (val) {
+                                if (_selectedPaymentMethod == 'Cash') {
+                                  _savedCashInput = val;
+                                  OrderConfirmationService._savedCashInput = val;
+                                }
+                              },
                               decoration: InputDecoration(
                                 labelText: 'Uang yang diterima (Rp)',
                                 border: OutlineInputBorder(
@@ -6514,6 +6605,7 @@ class _SelfOrderConfirmationDialogState
   List<Map<String, dynamic>> _redeemableVouchers = [];
   bool _isLoadingVouchers = false;
   String? voucherDocId;
+  String? _savedCashInput;
 
   late FocusNode uangFocusNode;
   late FocusNode voucherFocusNode;
@@ -6532,13 +6624,19 @@ class _SelfOrderConfirmationDialogState
 
     // Pre-select payment method based on self-order selection
     final selfPaymentMethod = widget.selfOrder.paymentMethod;
+    _savedCashInput = OrderConfirmationService._savedCashInput;
     if (selfPaymentMethod == 'QRIS') {
       _selectedPaymentMethod = 'QRIS';
       final format = NumberFormat("#,###", "id_ID");
       widget.uangYangDiterimaController.text = format.format(currentTotal);
     } else if (selfPaymentMethod == 'CASH') {
       _selectedPaymentMethod = 'Cash';
-      widget.uangYangDiterimaController.clear();
+      if (_savedCashInput != null && _savedCashInput!.isNotEmpty) {
+        widget.uangYangDiterimaController.text = _savedCashInput!;
+      } else if (widget.uangYangDiterimaController.text.isNotEmpty) {
+        _savedCashInput = widget.uangYangDiterimaController.text;
+        OrderConfirmationService._savedCashInput = _savedCashInput;
+      }
     }
   }
 
@@ -6610,6 +6708,7 @@ class _SelfOrderConfirmationDialogState
 
   @override
   void dispose() {
+    _dismissTopError();
     uangFocusNode.dispose();
     voucherFocusNode.dispose();
     _splitQrisController.dispose();
@@ -7226,7 +7325,16 @@ class _SelfOrderConfirmationDialogState
                           ),
                           onSelected: (selected) {
                             setState(() {
+                              final prevMethod = _selectedPaymentMethod;
+                              if (prevMethod == 'Cash') {
+                                _savedCashInput =
+                                    widget.uangYangDiterimaController.text;
+                                OrderConfirmationService._savedCashInput =
+                                    _savedCashInput;
+                              }
                               _selectedPaymentMethod = selected ? method : null;
+                              OrderConfirmationService._lastPaymentMethod =
+                                  _selectedPaymentMethod;
                               if (selected && method == 'Cash + QRIS') {
                                 _isSplitPayment = true;
                                 widget.uangYangDiterimaController.clear();
@@ -7239,7 +7347,11 @@ class _SelfOrderConfirmationDialogState
                                   widget.uangYangDiterimaController.text =
                                       format.format(displayTotal);
                                 } else if (selected && method == 'Cash') {
-                                  widget.uangYangDiterimaController.clear();
+                                  widget.uangYangDiterimaController.text =
+                                      _savedCashInput ??
+                                          OrderConfirmationService
+                                              ._savedCashInput ??
+                                          '';
                                 }
                               }
                             });
@@ -7770,6 +7882,12 @@ class _SelfOrderConfirmationDialogState
                           }),
                         ],
                         controller: widget.uangYangDiterimaController,
+                        onChanged: (val) {
+                          if (_selectedPaymentMethod == 'Cash') {
+                            _savedCashInput = val;
+                            OrderConfirmationService._savedCashInput = val;
+                          }
+                        },
                         decoration: InputDecoration(
                             labelText: 'Uang yang diterima (Rp)',
                             border: OutlineInputBorder(
@@ -7954,6 +8072,7 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
   bool _isProgramExtraSplit = false;
   TextEditingController _programExtraQrisController = TextEditingController();
   int _programExtraQrisAmount = 0;
+  String? _savedCashInput;
 
   late FocusNode uangFocusNode;
   late FocusNode voucherFocusNode;
@@ -7989,6 +8108,7 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
 
   @override
   void dispose() {
+    _dismissTopError();
     uangFocusNode.dispose();
     voucherFocusNode.dispose();
     _splitQrisController.dispose();
@@ -8229,6 +8349,11 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                     ),
                     onSelected: (val) {
                       setState(() {
+                        final prevMethod = _selectedPaymentMethod;
+                        if (prevMethod == 'Cash') {
+                          _savedCashInput =
+                              widget.uangYangDiterimaController.text;
+                        }
                         _selectedPaymentMethod = val ? method : null;
                         if (val && method == 'Cash + QRIS') {
                           _isSplitPayment = true;
@@ -8242,7 +8367,8 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                                 NumberFormat("#,###", "id_ID")
                                     .format(displayTotal);
                           } else if (val && method == 'Cash') {
-                            widget.uangYangDiterimaController.clear();
+                            widget.uangYangDiterimaController.text =
+                                _savedCashInput ?? '';
                           }
                         }
                       });
@@ -8595,6 +8721,11 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
                 TextField(
                   controller: widget.uangYangDiterimaController,
                   focusNode: uangFocusNode,
+                  onChanged: (val) {
+                    if (_selectedPaymentMethod == 'Cash') {
+                      _savedCashInput = val;
+                    }
+                  },
                   keyboardType: TextInputType.number,
                   inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly,
@@ -8750,7 +8881,23 @@ class _OpenBillSettlementDialogState extends State<_OpenBillSettlementDialog> {
   }
 }
 
+OverlayEntry? _currentTopErrorEntry;
+Timer? _topErrorTimer;
+
+void _dismissTopError() {
+  _topErrorTimer?.cancel();
+  _topErrorTimer = null;
+  if (_currentTopErrorEntry != null) {
+    if (_currentTopErrorEntry!.mounted) {
+      _currentTopErrorEntry!.remove();
+    }
+    _currentTopErrorEntry = null;
+  }
+}
+
 void _showTopError(BuildContext context, String message) {
+  _dismissTopError();
+
   final localizedMessage = UserMessageService.fromText(
     message,
     fallback: 'Terjadi kesalahan. Silakan coba lagi.',
@@ -8761,41 +8908,58 @@ void _showTopError(BuildContext context, String message) {
   late OverlayEntry overlayEntry;
   overlayEntry = OverlayEntry(
     builder: (context) => SafeArea(
-      child: Material(
-        color: Colors.transparent,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: Container(
-            margin: const EdgeInsets.only(top: 10, left: 20, right: 20),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.redAccent,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: const [
-                BoxShadow(
-                    color: Colors.black26, blurRadius: 10, offset: Offset(0, 4))
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.error_outline, color: Colors.white),
-                const SizedBox(width: 12),
-                Flexible(
-                  child: Text(
-                    localizedMessage,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14),
-                  ),
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 10, left: 20, right: 20),
+          child: TapRegion(
+            onTapOutside: (event) {
+              if (overlayEntry.mounted) {
+                _dismissTopError();
+              }
+            },
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: const [
+                    BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 10,
+                        offset: Offset(0, 4))
+                  ],
                 ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () => overlayEntry.remove(),
-                  child: const Icon(Icons.close, color: Colors.white, size: 20),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline, color: Colors.white),
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: Text(
+                        localizedMessage,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () {
+                        if (overlayEntry.mounted) {
+                          _dismissTopError();
+                        }
+                      },
+                      child: const Icon(Icons.close,
+                          color: Colors.white, size: 20),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -8803,8 +8967,11 @@ void _showTopError(BuildContext context, String message) {
     ),
   );
 
+  _currentTopErrorEntry = overlayEntry;
   overlay.insert(overlayEntry);
-  Future.delayed(const Duration(seconds: 4), () {
-    if (overlayEntry.mounted) overlayEntry.remove();
+  _topErrorTimer = Timer(const Duration(seconds: 4), () {
+    if (_currentTopErrorEntry == overlayEntry) {
+      _dismissTopError();
+    }
   });
 }

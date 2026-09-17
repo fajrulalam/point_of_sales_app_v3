@@ -49,6 +49,7 @@ class _HomeState extends State<Home> {
   TextEditingController uangYangDiterimaController = TextEditingController();
   TextEditingController customerNameController = TextEditingController();
   Member? selectedMember;
+  bool isMember = true;
   String _activeRoute = 'pos_order';
   bool _sidebarMinimized = false;
 
@@ -747,6 +748,12 @@ class _HomeState extends State<Home> {
         onSelectedMemberChanged: (member) {
           setState(() {
             selectedMember = member;
+          });
+        },
+        initialIsMember: isMember,
+        onIsMemberChanged: (memberStatus) {
+          setState(() {
+            isMember = memberStatus;
           });
         },
       );
