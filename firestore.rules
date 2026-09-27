@@ -303,6 +303,24 @@ service cloud.firestore {
       // are denied in production while still working under zTesting_Canteens.
       match /SdrgProductLinks/{sdrgProductId} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
       match /SdrgDeliveries/{sdrgOrderId} { allow read: if isAuthenticated(); allow write: if isAdmin(); }
+      // Named menu groups for the kitchen display's filter (e.g. "Telur", "Gorengan"),
+      // shared by every kitchen tablet. Written by the KDS app (orders-to-be-served),
+      // whose tablets sign in with non-admin staff accounts.
+      match /KdsMenuGroups/{groupId} {
+        allow read, delete: if isAuthenticated();
+        allow create, update: if isAuthenticated()
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 60
+          && request.resource.data.menuItemIds is list
+          && request.resource.data.menuNames is list;
+      }
+      // Back-kitchen ingredient progress per Status order (doc id = Status doc id), shared by
+      // every kitchen tablet. KDS-only; it never touches Status or the POS order data.
+      match /KdsIngredientProgress/{statusDocId} {
+        allow read, delete: if isAuthenticated();
+        allow create, update: if isAuthenticated() && request.resource.data.progress is map;
+      }
       match /Status/{orderId} { allow read, write, update, delete: if true; }
       match /RecentlyServed/{orderId} { allow read, write, update, delete: if true; }
       match /SelfOrders/{orderId} {
