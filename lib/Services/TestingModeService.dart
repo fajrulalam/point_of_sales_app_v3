@@ -75,52 +75,76 @@ class Col {
 
   // ── Data migration ────────────────────────────────────────────────
 
-  /// Manually migrate MenuCollection from Production to Testing.
+  /// Manually migrate MenuCollection, Inventory, OptionGroups, StockCollection,
+  /// and MenuConfig metadata from Production to Testing.
   /// Deletes existing test items before copying from production.
   static Future<void> migrateMenuCollection() async {
     final fs = FirebaseFirestore.instance;
     const docId = 'canteen375';
-    const sub = 'MenuCollection';
+    const subcollections = [
+      'MenuCollection',
+      'Inventory',
+      'OptionGroups',
+      'StockCollection',
+    ];
 
-    // 1. Delete existing test data
-    final testSnap = await fs
-        .collection('zTesting_Canteens')
-        .doc(docId)
-        .collection(sub)
-        .get();
+    for (final sub in subcollections) {
+      // 1. Delete existing test data
+      final testSnap = await fs
+          .collection('zTesting_Canteens')
+          .doc(docId)
+          .collection(sub)
+          .get();
 
-    if (testSnap.docs.isNotEmpty) {
-      final deleteChunks = _chunkList(testSnap.docs, 400);
-      for (final chunk in deleteChunks) {
-        final batch = fs.batch();
-        for (final doc in chunk) {
-          batch.delete(doc.reference);
+      if (testSnap.docs.isNotEmpty) {
+        final deleteChunks = _chunkList(testSnap.docs, 400);
+        for (final chunk in deleteChunks) {
+          final batch = fs.batch();
+          for (final doc in chunk) {
+            batch.delete(doc.reference);
+          }
+          await batch.commit();
         }
-        await batch.commit();
+      }
+
+      // 2. Fetch production data
+      final prodSnap =
+          await fs.collection('Canteens').doc(docId).collection(sub).get();
+
+      // 3. Copy to test
+      if (prodSnap.docs.isNotEmpty) {
+        final copyChunks = _chunkList(prodSnap.docs, 400);
+        for (final chunk in copyChunks) {
+          final batch = fs.batch();
+          for (final doc in chunk) {
+            batch.set(
+              fs
+                  .collection('zTesting_Canteens')
+                  .doc(docId)
+                  .collection(sub)
+                  .doc(doc.id),
+              doc.data(),
+            );
+          }
+          await batch.commit();
+        }
       }
     }
 
-    // 2. Fetch production data
-    final prodSnap =
-        await fs.collection('Canteens').doc(docId).collection(sub).get();
-
-    // 3. Copy to test
-    if (prodSnap.docs.isNotEmpty) {
-      final copyChunks = _chunkList(prodSnap.docs, 400);
-      for (final chunk in copyChunks) {
-        final batch = fs.batch();
-        for (final doc in chunk) {
-          batch.set(
-            fs
-                .collection('zTesting_Canteens')
-                .doc(docId)
-                .collection(sub)
-                .doc(doc.id),
-            doc.data(),
-          );
-        }
-        await batch.commit();
-      }
+    // Also sync MenuConfig metadata (category order and recommended items)
+    final prodMenuConfig = await fs
+        .collection('Canteens')
+        .doc(docId)
+        .collection('Metadata')
+        .doc('MenuConfig')
+        .get();
+    if (prodMenuConfig.exists && prodMenuConfig.data() != null) {
+      await fs
+          .collection('zTesting_Canteens')
+          .doc(docId)
+          .collection('Metadata')
+          .doc('MenuConfig')
+          .set(prodMenuConfig.data()!);
     }
   }
 

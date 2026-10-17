@@ -177,11 +177,11 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-          'Konfirmasi Migrasi Menu',
+          'Konfirmasi Migrasi Menu & Stok',
           style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
         ),
         content: Text(
-          'Aksi ini akan MENGHAPUS SEMUA menu di mode testing dan menyalin semua menu dari production ke testing. Apakah Anda yakin?',
+          'Aksi ini akan MENGHAPUS SEMUA menu, stok, dan grup opsi di mode testing dan menyalin semua data terbaru dari production ke testing. Apakah Anda yakin?',
           style: GoogleFonts.poppins(),
         ),
         actions: [
@@ -234,7 +234,7 @@ class _MenuManagementWidgetState extends State<MenuManagementWidget>
           ..showSnackBar(
             SnackBar(
               content: Text(
-                'Migrasi menu berhasil diselesaikan',
+                'Migrasi menu, stok, dan opsi berhasil diselesaikan',
                 style: GoogleFonts.poppins(),
               ),
               backgroundColor: Colors.green.shade700,
