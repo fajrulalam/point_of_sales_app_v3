@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:point_of_sales_app_v3/Services/SdrgAutoAcceptService.dart';
 import 'package:point_of_sales_app_v3/Services/SdrgBridgeService.dart';
 import 'package:point_of_sales_app_v3/Services/SdrgDeliveryService.dart';
 import 'package:point_of_sales_app_v3/Services/SdrgProductLinkService.dart';
@@ -251,6 +252,18 @@ void main() {
           'sdrg_2026-08-14-0001_r1');
       expect(SdrgDeliveryService.ledgerId('2026-08-14-0001', 2),
           isNot(SdrgDeliveryService.ledgerId('2026-08-14-0001', 1)));
+    });
+  });
+
+  group('auto-accept service auth guard', () {
+    test('does not run without authenticated user', () {
+      SdrgAutoAcceptService.start();
+      expect(SdrgAutoAcceptService.isRunning, isFalse);
+    });
+
+    test('stop resets running flag cleanly', () async {
+      await SdrgAutoAcceptService.stop();
+      expect(SdrgAutoAcceptService.isRunning, isFalse);
     });
   });
 }

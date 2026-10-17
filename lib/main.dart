@@ -38,10 +38,8 @@ Future<void> main() async {
   await Col.init();
 
   // Applies SDRG deliveries as they arrive, with no confirmation tap. Started
-  // here rather than lazily on tab-open, since "automatic" means it has to be
-  // watching the moment the app is running, not only when someone happens to
-  // look at the Penerimaan SDRG tab.
-  SdrgAutoAcceptService.start();
+  // via auth-state listener so it only watches when an authenticated user is active.
+  SdrgAutoAcceptService.initialize();
 
   runApp(const MyApp());
 }

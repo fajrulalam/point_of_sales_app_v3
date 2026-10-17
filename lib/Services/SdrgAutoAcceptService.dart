@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/SdrgBridgeService.dart';
@@ -18,6 +19,7 @@ import 'package:point_of_sales_app_v3/Services/SdrgProductLinkService.dart';
 class SdrgAutoAcceptService {
   SdrgAutoAcceptService._();
 
+  static StreamSubscription<User?>? _authSub;
   static StreamSubscription<List<SdrgDelivery>>? _deliverySub;
   static StreamSubscription<Map<String, SdrgDeliveryReceipt>>? _receiptSub;
 
@@ -25,14 +27,43 @@ class SdrgAutoAcceptService {
   static Map<String, SdrgDeliveryReceipt> _receipts = const {};
   static final Set<String> _inFlight = {};
   static bool _running = false;
-
   static bool get isRunning => _running;
+
+  static User? get _currentUser {
+    try {
+      return FirebaseAuth.instance.currentUser;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Starts listening to Firebase Auth state. Automatically starts auto-accept
+  /// when an authenticated POS user is active, and pauses when signed out.
+  static void initialize() {
+    try {
+      _authSub ??= FirebaseAuth.instance.authStateChanges().listen((User? user) {
+        if (user != null && !user.isAnonymous) {
+          start();
+        } else {
+          stop();
+        }
+      });
+    } catch (_) {
+      // In test harness or when Firebase is not initialized yet.
+    }
+  }
 
   /// Starts watching. Safe to call more than once -- only one pair of
   /// subscriptions is ever active. Never throws or blocks: a failure to
   /// connect is logged and simply retried on the next change, the same way a
   /// single delivery's failure never stops the others.
   static void start() {
+    initialize();
+    final user = _currentUser;
+    if (user == null || user.isAnonymous) {
+      // Defer starting until an authenticated POS user is available.
+      return;
+    }
     if (_running || !SdrgBridgeService.isConfigured) return;
     _running = true;
 
@@ -49,8 +80,12 @@ class SdrgAutoAcceptService {
         _receipts = receipts;
         _reconcile();
       },
-      onError: (Object error) =>
-          debugPrint('SDRG auto-accept: receipt stream error: $error'),
+      onError: (Object error) {
+        debugPrint('SDRG auto-accept: receipt stream error: $error');
+        if (error.toString().contains('permission-denied')) {
+          stop();
+        }
+      },
     );
   }
 
