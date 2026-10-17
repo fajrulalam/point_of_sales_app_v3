@@ -4996,13 +4996,8 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
     } else {
       isMember = OrderConfirmationService._lastIsMemberSelection;
     }
-    if (widget.uangYangDiterimaController.text.isNotEmpty &&
-        OrderConfirmationService._lastPaymentMethod == null) {
-      _selectedPaymentMethod = 'Cash';
-      OrderConfirmationService._lastPaymentMethod = 'Cash';
-    } else {
-      _selectedPaymentMethod = OrderConfirmationService._lastPaymentMethod;
-    }
+    _selectedPaymentMethod = OrderConfirmationService._lastPaymentMethod ?? 'Cash';
+    OrderConfirmationService._lastPaymentMethod = _selectedPaymentMethod;
     if (_selectedPaymentMethod == 'Cash + QRIS') {
       _isSplitPayment = true;
     }
@@ -5733,6 +5728,11 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                 : Colors.black87,
                           ),
                           onSelected: (selected) {
+                            // A payment method must always be selected, so a
+                            // tap on the already-selected chip is a no-op
+                            // rather than a deselect: only switching to a
+                            // different method has an effect.
+                            if (_selectedPaymentMethod == method) return;
                             setState(() {
                               final prevMethod = _selectedPaymentMethod;
                               if (prevMethod == 'Cash') {
@@ -5741,21 +5741,21 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                 OrderConfirmationService._savedCashInput =
                                     _savedCashInput;
                               }
-                              _selectedPaymentMethod = selected ? method : null;
+                              _selectedPaymentMethod = method;
                               OrderConfirmationService._lastPaymentMethod =
                                   _selectedPaymentMethod;
-                              if (selected && method == 'Cash + QRIS') {
+                              if (method == 'Cash + QRIS') {
                                 _isSplitPayment = true;
                                 widget.uangYangDiterimaController.clear();
                                 _splitQrisController.clear();
                                 _splitQrisAmount = 0;
                               } else {
                                 _isSplitPayment = false;
-                                if (selected && method != 'Cash') {
+                                if (method != 'Cash') {
                                   final format = NumberFormat("#,###", "id_ID");
                                   widget.uangYangDiterimaController.text =
                                       format.format(displayTotal);
-                                } else if (selected && method == 'Cash') {
+                                } else {
                                   widget.uangYangDiterimaController.text =
                                       _savedCashInput ??
                                           OrderConfirmationService
