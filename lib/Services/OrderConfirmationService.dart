@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
+import 'package:point_of_sales_app_v3/Services/BasketPersistenceService.dart';
 import 'package:point_of_sales_app_v3/Models/RecommendationModels.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 import 'package:point_of_sales_app_v3/Services/LoaderWidget.dart';
@@ -150,13 +151,25 @@ class OrderConfirmationService {
       String? memberId = result['memberId'];
       String? paymentMethod = result['paymentMethod'];
 
+      if (paymentMethod == 'Online') {
+        for (final item in activePesananList) {
+          item.takeAwayQuantity = item.totalQuantity;
+          item.dineInQuantity = 0;
+        }
+        for (final item in pesananList) {
+          item.takeAwayQuantity = item.totalQuantity;
+          item.dineInQuantity = 0;
+        }
+        isTakeAway = true;
+      }
+
       await _processOrder(
         context: context,
         pesananList: activePesananList,
         basketToClear: pesananList,
         totalHarga: finalTotal,
         originalTotal: totalHarga,
-        isTakeAway: isTakeAway,
+        isTakeAway: paymentMethod == 'Online' ? true : isTakeAway,
         biayaBungkus: biayaBungkus,
         customerNameController: customerNameController,
         uangYangDiterimaController: uangYangDiterimaController,
@@ -690,6 +703,7 @@ class OrderConfirmationService {
         }
         unawaited(finalizeExternalVoucherIfNeeded());
         basketToClear.clear();
+        BasketPersistenceService.clearDraft();
         uangYangDiterimaController.clear();
         customerNameController.clear();
         setJumlahItem(0);
@@ -1913,6 +1927,7 @@ class OrderConfirmationService {
         }
         unawaited(finalizeExternalVoucherIfNeeded());
         basketToClear.clear();
+        BasketPersistenceService.clearDraft();
         uangYangDiterimaController.clear();
         customerNameController.clear();
         setJumlahItem(0);
@@ -2597,6 +2612,7 @@ class OrderConfirmationService {
           Navigator.pop(context);
         }
         basketToClear.clear();
+        BasketPersistenceService.clearDraft();
         uangYangDiterimaController.clear();
         customerNameController.clear();
         setJumlahItem(0);
@@ -2997,6 +3013,7 @@ class OrderConfirmationService {
     );
 
     basketToClear.clear();
+    BasketPersistenceService.clearDraft();
     uangYangDiterimaController.clear();
     customerNameController.clear();
     setJumlahItem(0);
@@ -5001,6 +5018,13 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
     if (_selectedPaymentMethod == 'Cash + QRIS') {
       _isSplitPayment = true;
     }
+    if (_selectedPaymentMethod == 'Online') {
+      isMember = false;
+      if (!const ['GoFood', 'Grab', 'ShopeeFood']
+          .contains(widget.customerNameController.text)) {
+        widget.customerNameController.text = 'GoFood';
+      }
+    }
     _savedCashInput = OrderConfirmationService._savedCashInput;
     if (_selectedPaymentMethod == 'Cash') {
       if (_savedCashInput != null && _savedCashInput!.isNotEmpty) {
@@ -5243,26 +5267,32 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                         Row(
                           children: [
                             Checkbox(
-                              value: isMember,
-                              onChanged: (value) {
-                                final newIsMember = value ?? true;
-                                setState(() {
-                                  isMember = newIsMember;
-                                  if (!isMember) {
-                                    _selectedMember = null;
-                                    _memberError = null;
-                                    widget.onSelectedMemberChanged?.call(null);
-                                  }
-                                });
-                                widget.onIsMemberChanged?.call(newIsMember);
-                                OrderConfirmationService._lastIsMemberSelection =
-                                    newIsMember;
-                              },
+                              value: _selectedPaymentMethod == 'Online'
+                                  ? false
+                                  : isMember,
+                              onChanged: _selectedPaymentMethod == 'Online'
+                                  ? null
+                                  : (value) {
+                                      final newIsMember = value ?? true;
+                                      setState(() {
+                                        isMember = newIsMember;
+                                        if (!isMember) {
+                                          _selectedMember = null;
+                                          _memberError = null;
+                                          widget.onSelectedMemberChanged?.call(null);
+                                        }
+                                      });
+                                      widget.onIsMemberChanged?.call(newIsMember);
+                                      OrderConfirmationService._lastIsMemberSelection =
+                                          newIsMember;
+                                    },
                             ),
                             Text(
                               'Pelanggan Member',
                               style: GoogleFonts.poppins(
-                                color: Colors.black87,
+                                color: _selectedPaymentMethod == 'Online'
+                                    ? Colors.grey
+                                    : Colors.black87,
                                 fontWeight: FontWeight.w500,
                                 fontSize: 14,
                               ),
@@ -5426,7 +5456,91 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                       ),
                     ],
                     const SizedBox(height: 16),
-                    if (isMember)
+                    if (_selectedPaymentMethod == 'Online')
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          DropdownButtonFormField<String>(
+                            value: const ['GoFood', 'Grab', 'ShopeeFood']
+                                    .contains(widget.customerNameController.text)
+                                ? widget.customerNameController.text
+                                : 'GoFood',
+                            decoration: InputDecoration(
+                              labelText: 'Nama Customer (Platform Online)',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(4.0),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 14),
+                            ),
+                            items: const ['GoFood', 'Grab', 'ShopeeFood']
+                                .map((platform) {
+                              return DropdownMenuItem<String>(
+                                value: platform,
+                                child: Text(
+                                  platform,
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() {
+                                  widget.customerNameController.text = val;
+                                });
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: const ['GoFood', 'Grab', 'ShopeeFood']
+                                .map((platform) {
+                              final isSelected =
+                                  widget.customerNameController.text == platform;
+                              Color chipColor = const Color(0xFFC8E6C9);
+                              Color textColor = const Color(0xFF2E7D32);
+                              if (platform == 'GoFood') {
+                                chipColor = const Color(0xFFE8F5E9);
+                                textColor = const Color(0xFF00880C);
+                              } else if (platform == 'Grab') {
+                                chipColor = const Color(0xFFE0F2F1);
+                                textColor = const Color(0xFF00B14F);
+                              } else if (platform == 'ShopeeFood') {
+                                chipColor = const Color(0xFFFFF3E0);
+                                textColor = const Color(0xFFEE4D2D);
+                              }
+
+                              return ChoiceChip(
+                                label: Text(platform),
+                                selected: isSelected,
+                                selectedColor: chipColor,
+                                labelStyle: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color:
+                                      isSelected ? textColor : Colors.black87,
+                                ),
+                                onSelected: (selected) {
+                                  if (selected) {
+                                    setState(() {
+                                      widget.customerNameController.text =
+                                          platform;
+                                    });
+                                  }
+                                },
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      )
+                    else if (isMember)
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -5761,6 +5875,24 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                           OrderConfirmationService
                                               ._savedCashInput ??
                                           '';
+                                }
+                              }
+
+                              if (method == 'Online') {
+                                isMember = false;
+                                _selectedMember = null;
+                                widget.onSelectedMemberChanged?.call(null);
+                                widget.onIsMemberChanged?.call(false);
+                                OrderConfirmationService._lastIsMemberSelection =
+                                    false;
+                                if (!const ['GoFood', 'Grab', 'ShopeeFood']
+                                    .contains(widget.customerNameController.text)) {
+                                  widget.customerNameController.text = 'GoFood';
+                                }
+                              } else if (prevMethod == 'Online') {
+                                if (const ['GoFood', 'Grab', 'ShopeeFood']
+                                    .contains(widget.customerNameController.text)) {
+                                  widget.customerNameController.clear();
                                 }
                               }
                             });
@@ -6424,6 +6556,12 @@ class _OrderConfirmationDialogState extends State<_OrderConfirmationDialog> {
                                           ? displayTotal - _splitQrisAmount
                                           : displayTotal;
                                       if (uangYangDiterima >= cashNeeded) {
+                                        if (_selectedPaymentMethod == 'Online') {
+                                          for (final item in widget.pesananList) {
+                                            item.takeAwayQuantity = item.totalQuantity;
+                                            item.dineInQuantity = 0;
+                                          }
+                                        }
                                         setState(() => _isConfirming = true);
                                         Navigator.pop(context, {
                                           'confirmed': true,
@@ -7942,6 +8080,12 @@ class _SelfOrderConfirmationDialogState
                                           ? displayTotal - _splitQrisAmount
                                           : displayTotal;
                                       if (uangYangDiterima >= cashNeeded) {
+                                        if (_selectedPaymentMethod == 'Online') {
+                                          for (final item in widget.pesananList) {
+                                            item.takeAwayQuantity = item.totalQuantity;
+                                            item.dineInQuantity = 0;
+                                          }
+                                        }
                                         setState(() => _isConfirming = true);
                                         Navigator.pop(context, {
                                           'confirmed': true,

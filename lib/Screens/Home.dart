@@ -44,7 +44,7 @@ class Home extends StatefulWidget {
   State<Home> createState() => _HomeState();
 }
 
-class _HomeState extends State<Home> {
+class _HomeState extends State<Home> with WidgetsBindingObserver {
   late HomeController controller;
   TextEditingController uangYangDiterimaController = TextEditingController();
   TextEditingController customerNameController = TextEditingController();
@@ -64,6 +64,10 @@ class _HomeState extends State<Home> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    customerNameController.addListener(_onCustomerInfoChanged);
+    uangYangDiterimaController.addListener(_onCustomerInfoChanged);
+
     controller = HomeController();
     controller.addListener(_onControllerUpdate);
 
@@ -100,7 +104,28 @@ class _HomeState extends State<Home> {
         );
     };
 
-    controller.initialize();
+    controller.initialize().then((_) {
+      if (mounted && controller.restoredDraft != null) {
+        final draft = controller.restoredDraft!;
+        if (draft.customerName.isNotEmpty) {
+          customerNameController.text = draft.customerName;
+        }
+        if (draft.uangYangDiterima.isNotEmpty) {
+          uangYangDiterimaController.text = draft.uangYangDiterima;
+        }
+        if (draft.selectedMemberId != null &&
+            draft.selectedMemberId!.isNotEmpty) {
+          final foundMember =
+              MemberService.instance.getMemberById(draft.selectedMemberId!);
+          if (foundMember != null) {
+            setState(() {
+              selectedMember = foundMember;
+              isMember = true;
+            });
+          }
+        }
+      }
+    });
 
     // Initialize members cache
     MemberService.instance.initializeCache();
@@ -115,6 +140,30 @@ class _HomeState extends State<Home> {
         VoucherProgramService.checkAndPromptPendingVouchers(context);
       }
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Returning to app: check thermal printer and auto-reconnect if needed
+      controller.autoReconnectPrinter();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      // Going to background: flush draft to disk immediately
+      controller.saveCurrentBasketDraft(
+        customerName: customerNameController.text,
+        uangYangDiterima: uangYangDiterimaController.text,
+        selectedMemberId: selectedMember?.id,
+      );
+    }
+  }
+
+  void _onCustomerInfoChanged() {
+    controller.saveCurrentBasketDraft(
+      customerName: customerNameController.text,
+      uangYangDiterima: uangYangDiterimaController.text,
+      selectedMemberId: selectedMember?.id,
+    );
   }
 
   void _initBadgeSubscriptions() {
@@ -161,6 +210,9 @@ class _HomeState extends State<Home> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    customerNameController.removeListener(_onCustomerInfoChanged);
+    uangYangDiterimaController.removeListener(_onCustomerInfoChanged);
     controller.removeListener(_onControllerUpdate);
     controller.dispose();
     uangYangDiterimaController.dispose();

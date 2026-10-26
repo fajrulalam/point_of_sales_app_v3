@@ -15,12 +15,14 @@ import 'package:point_of_sales_app_v3/Classes/Inventory.dart';
 import 'package:point_of_sales_app_v3/Classes/Menu.dart';
 import 'package:point_of_sales_app_v3/Classes/OptionGroup.dart';
 import 'package:point_of_sales_app_v3/Classes/Pesanan.dart';
+import 'package:point_of_sales_app_v3/Services/BasketPersistenceService.dart';
 import 'package:point_of_sales_app_v3/Services/InventoryService.dart';
 import 'package:point_of_sales_app_v3/Services/LiveBasketService.dart';
 import 'package:point_of_sales_app_v3/Services/EndOfDayService.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Models/SelfOrder.dart';
 import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomeController extends ChangeNotifier {
   final List<StreamSubscription> _subscriptions = [];
@@ -77,6 +79,12 @@ class HomeController extends ChangeNotifier {
 
   Timer? timer;
 
+  // Persisted Draft & Caches
+  BasketDraft? restoredDraft;
+  String _cachedCustomerName = '';
+  String _cachedUangYangDiterima = '';
+  String? _cachedSelectedMemberId;
+
   // Initialize controller
   Future<void> initialize() async {
     // Wait for authentication if not ready
@@ -86,15 +94,81 @@ class HomeController extends ChangeNotifier {
       authAttempts++;
     }
 
+    // Restore any draft basket that was in progress before the app was backgrounded/restarted
+    await restoreBasketDraft();
+
     getMenu();
     getListGambar();
 
     // Check for missed perishable resets from previous days
     EndOfDayService.checkAndAutoResetPerishables();
 
-    // Publish the (empty) basket on startup so the customer-facing tablet
-    // never keeps showing a stale order left over from a previous session.
+    // Recalculate totals and publish to customer-facing tablet
     getTotal();
+
+    // Attempt auto-reconnecting to thermal printer in background
+    unawaited(autoReconnectPrinter());
+  }
+
+  Future<BasketDraft?> restoreBasketDraft() async {
+    try {
+      final draft = await BasketPersistenceService.loadDraft();
+      if (draft != null) {
+        restoredDraft = draft;
+        pesananList = List<PesananObject>.from(draft.items);
+        isTakeAway = draft.isTakeAway;
+        isEditMode = draft.isEditMode;
+        editDocumentId = draft.editDocumentId;
+        editOriginalData = draft.editOriginalData;
+        isSelfOrderMode = draft.isSelfOrderMode;
+        _cachedCustomerName = draft.customerName;
+        _cachedUangYangDiterima = draft.uangYangDiterima;
+        _cachedSelectedMemberId = draft.selectedMemberId;
+
+        if (draft.currentSelfOrder != null) {
+          currentSelfOrder = SelfOrder.fromMap(draft.currentSelfOrder!);
+        }
+        notifyListeners();
+        return draft;
+      }
+    } catch (e) {
+      print('⚠️ Error restoring basket draft: $e');
+    }
+    return null;
+  }
+
+  void saveCurrentBasketDraft({
+    String? customerName,
+    String? uangYangDiterima,
+    String? selectedMemberId,
+  }) {
+    if (customerName != null) _cachedCustomerName = customerName;
+    if (uangYangDiterima != null) _cachedUangYangDiterima = uangYangDiterima;
+    if (selectedMemberId != null) _cachedSelectedMemberId = selectedMemberId;
+
+    if (pesananList.isNotEmpty || isEditMode || isSelfOrderMode) {
+      BasketPersistenceService.saveDraft(
+        BasketDraft(
+          items: pesananList,
+          isTakeAway: isTakeAway,
+          customerName: _cachedCustomerName,
+          uangYangDiterima: _cachedUangYangDiterima,
+          selectedMemberId: _cachedSelectedMemberId,
+          isEditMode: isEditMode,
+          editDocumentId: editDocumentId,
+          editOriginalData: editOriginalData,
+          isSelfOrderMode: isSelfOrderMode,
+          currentSelfOrder: currentSelfOrder?.toMap(),
+          savedAt: DateTime.now(),
+        ),
+      );
+    } else {
+      BasketPersistenceService.clearDraft();
+    }
+  }
+
+  void _persistBasketDraft() {
+    saveCurrentBasketDraft();
   }
 
   // Menu Management
@@ -262,6 +336,7 @@ class HomeController extends ChangeNotifier {
     editDocumentId = null;
     editOriginalData = null;
     pesananList.clear();
+    BasketPersistenceService.clearDraft();
     getTotal();
     notifyListeners();
   }
@@ -298,6 +373,7 @@ class HomeController extends ChangeNotifier {
     isSelfOrderMode = false;
     currentSelfOrder = null;
     pesananList.clear();
+    BasketPersistenceService.clearDraft();
     getTotal();
     notifyListeners();
   }
@@ -673,6 +749,8 @@ class HomeController extends ChangeNotifier {
       isTakeAway: isTakeAway,
     );
 
+    _persistBasketDraft();
+
     notifyListeners();
   }
 
@@ -691,10 +769,96 @@ class HomeController extends ChangeNotifier {
       selectedDevice = device;
       await printer.connect(device);
       await checkIfPrinterIsConnected();
+      if (printerIsConnected) {
+        await savePrinterPreference(device);
+      }
     } catch (e) {
       print('Error connecting to printer: $e');
       rethrow;
     }
+  }
+
+  Future<void> savePrinterPreference(BluetoothDevice device) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('saved_printer_address', device.address ?? '');
+      await prefs.setString('saved_printer_name', device.name ?? '');
+    } catch (e) {
+      print('⚠️ Failed to save printer preference: $e');
+    }
+  }
+
+  Future<void> clearPrinterPreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('saved_printer_address');
+      await prefs.remove('saved_printer_name');
+    } catch (e) {
+      print('⚠️ Failed to clear printer preference: $e');
+    }
+  }
+
+  bool _isAutoReconnecting = false;
+
+  Future<bool> autoReconnectPrinter() async {
+    if (_isAutoReconnecting) return false;
+    _isAutoReconnecting = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedAddress = prefs.getString('saved_printer_address');
+      final savedName = prefs.getString('saved_printer_name');
+
+      if (savedAddress == null || savedAddress.isEmpty) {
+        return false;
+      }
+
+      final isAlreadyConnected = (await printer.isConnected) ?? false;
+      if (isAlreadyConnected) {
+        printerIsConnected = true;
+        if (selectedDevice == null) {
+          selectedDevice = BluetoothDevice(savedName, savedAddress);
+        }
+        notifyListeners();
+        return true;
+      }
+
+      List<BluetoothDevice> bondedDevices = [];
+      try {
+        bondedDevices = await printer.getBondedDevices();
+      } catch (e) {
+        print('⚠️ Error getting bonded devices for auto-reconnect: $e');
+        return false;
+      }
+
+      final match = bondedDevices.cast<BluetoothDevice?>().firstWhere(
+            (d) => d?.address == savedAddress,
+            orElse: () => null,
+          );
+
+      if (match != null) {
+        print('🔄 Auto-reconnecting to thermal printer ${match.name} ($savedAddress)...');
+        try {
+          await printer.disconnect();
+        } catch (_) {}
+        await Future.delayed(const Duration(milliseconds: 300));
+        await printer.connect(match);
+        final connected = (await printer.isConnected) ?? false;
+        printerIsConnected = connected;
+        selectedDevice = connected ? match : null;
+        notifyListeners();
+        if (connected) {
+          print('✅ Successfully auto-reconnected to thermal printer: ${match.name}');
+        }
+        return connected;
+      }
+    } catch (e) {
+      print('⚠️ Failed to auto-reconnect to printer: $e');
+      printerIsConnected = false;
+      notifyListeners();
+    } finally {
+      _isAutoReconnecting = false;
+    }
+    return false;
   }
 
   Future<ui.Image> _loadUiImage(String assetPath) async {
@@ -864,6 +1028,10 @@ class HomeController extends ChangeNotifier {
     await checkIfPrinterIsConnected();
 
     if (!printerIsConnected) {
+      await autoReconnectPrinter();
+    }
+
+    if (!printerIsConnected) {
       print('⚠️ Printer not connected - skipping receipt print');
       return;
     }
@@ -980,6 +1148,10 @@ class HomeController extends ChangeNotifier {
   /// Reprint a receipt from a previously stored order (Status or RecentlyServed collection)
   Future<void> reprintFromOrder(Map<String, dynamic> orderData) async {
     await checkIfPrinterIsConnected();
+
+    if (!printerIsConnected) {
+      await autoReconnectPrinter();
+    }
 
     if (!printerIsConnected) {
       print('⚠️ Printer not connected - cannot reprint');
@@ -1137,6 +1309,10 @@ class HomeController extends ChangeNotifier {
     await checkIfPrinterIsConnected();
 
     if (!printerIsConnected) {
+      await autoReconnectPrinter();
+    }
+
+    if (!printerIsConnected) {
       print('⚠️ Printer not connected - cannot reprint');
       return;
     }
@@ -1291,6 +1467,9 @@ class HomeController extends ChangeNotifier {
 
   Future<void> testPrinter(String invoice) async {
     await checkIfPrinterIsConnected();
+    if (!printerIsConnected) {
+      await autoReconnectPrinter();
+    }
     if (printerIsConnected) {
       try {
         await Future.delayed(const Duration(milliseconds: 500));

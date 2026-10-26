@@ -195,8 +195,59 @@ class SelfOrder {
     }
   }
 
+  factory SelfOrder.fromMap(Map<String, dynamic> data, {String? id}) {
+    DateTime parsedWaktuPesan;
+    if (data['waktuPesan'] is Timestamp) {
+      parsedWaktuPesan = (data['waktuPesan'] as Timestamp).toDate();
+    } else if (data['waktuPesan'] is String) {
+      parsedWaktuPesan =
+          DateTime.tryParse(data['waktuPesan']) ?? DateTime.now();
+    } else {
+      parsedWaktuPesan = DateTime.now();
+    }
+
+    List<SelfOrderItem> items = [];
+    if (data['orderItems'] != null && data['orderItems'] is List) {
+      items = (data['orderItems'] as List)
+          .map((item) {
+            if (item is Map) {
+              return SelfOrderItem.fromMap(Map<String, dynamic>.from(item));
+            }
+            return null;
+          })
+          .whereType<SelfOrderItem>()
+          .toList();
+    }
+
+    return SelfOrder(
+      id: id ?? data['id']?.toString() ?? '',
+      canteenId: data['canteenId']?.toString() ?? '',
+      orderCode: data['orderCode']?.toString() ?? '',
+      customerPhone: data['customerPhone']?.toString() ?? '',
+      isMember: data['isMember'] == true,
+      memberId: (data['memberId'] ?? data['userId'])?.toString() ?? '',
+      namaCustomer:
+          (data['namaCustomer'] ?? data['memberName'])?.toString() ?? '',
+      status: data['status']?.toString() ?? 'Pending',
+      orderItems: items,
+      total: int.tryParse(data['total']?.toString() ?? '0') ?? 0,
+      directSubTotal: int.tryParse(data['subTotal']?.toString() ?? '0') ?? 0,
+      directTakeAwayFee:
+          int.tryParse(data['takeAwayFee']?.toString() ?? '0') ?? 0,
+      transactionMethod: data['transactionMethod']?.toString() ?? 'SelfOrder',
+      waktuPengambilan:
+          data['waktuPengambilan']?.toString() ?? 'Tidak Memesan',
+      waktuPesan: parsedWaktuPesan,
+      declineReason: data['declineReason']?.toString(),
+      paymentMethod: data['paymentMethod']?.toString() ?? 'CASH',
+      paymentStatus: data['paymentStatus']?.toString() ?? 'UNPAID_CASH',
+      paymentProof: data['paymentProof']?.toString() ?? '',
+    );
+  }
+
   Map<String, dynamic> toMap() {
     return {
+      'id': id,
       'canteenId': canteenId,
       'orderCode': orderCode,
       'customerPhone': customerPhone,
@@ -210,7 +261,7 @@ class SelfOrder {
       'takeAwayFee': directTakeAwayFee,
       'transactionMethod': transactionMethod,
       'waktuPengambilan': waktuPengambilan,
-      'waktuPesan': Timestamp.fromDate(waktuPesan),
+      'waktuPesan': waktuPesan.toIso8601String(),
       'declineReason': declineReason,
       'paymentMethod': paymentMethod,
       'paymentStatus': paymentStatus,

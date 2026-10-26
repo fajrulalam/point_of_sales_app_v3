@@ -88,4 +88,30 @@ class PesananObject {
       ..sort();
     return '$base|${optionKeys.join(',')}';
   }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'menuItemId': menuItemId,
+      'namaPesanan': namaPesanan,
+      'harga': harga,
+      'dineInQuantity': dineInQuantity,
+      'takeAwayQuantity': takeAwayQuantity,
+      'selectedOptions': selectedOptions.map((o) => o.toMap()).toList(),
+      'customerNote': customerNote,
+    };
+  }
+
+  factory PesananObject.fromMap(Map<String, dynamic> map) {
+    return PesananObject(
+      menuItemId: map['menuItemId']?.toString() ?? '',
+      namaPesanan: map['namaPesanan']?.toString() ?? '',
+      harga: int.tryParse(map['harga']?.toString() ?? '0') ?? 0,
+      dineInQuantity: int.tryParse(map['dineInQuantity']?.toString() ?? '0') ?? 0,
+      takeAwayQuantity: int.tryParse(map['takeAwayQuantity']?.toString() ?? '0') ?? 0,
+      selectedOptions: (map['selectedOptions'] as List<dynamic>? ?? [])
+          .map((o) => SelectedOption.fromMap(Map<String, dynamic>.from(o as Map)))
+          .toList(),
+      customerNote: map['customerNote']?.toString(),
+    );
+  }
 }

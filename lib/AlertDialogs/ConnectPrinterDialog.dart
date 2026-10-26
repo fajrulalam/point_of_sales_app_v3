@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Controllers/HomeController.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 import 'package:point_of_sales_app_v3/Services/UserMessageService.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ConnectPrinterDialog extends StatefulWidget {
   final HomeController controller;
@@ -812,6 +813,9 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
       });
       widget.controller.printerIsConnected = true;
       widget.controller.selectedDevice = selectedDevice;
+      if (selectedDevice != null) {
+        await widget.controller.savePrinterPreference(selectedDevice!);
+      }
     } else {
       print("Printer is not connected");
       setState(() {
@@ -867,15 +871,20 @@ class _ConnectPrinterDialogState extends State<ConnectPrinterDialog>
     setState(() => _isLoadingPrinters = true);
     try {
       devices = await printer.getBondedDevices();
-      // Match the previously selected device to the new list by address,
-      // since getPrinters() returns new BluetoothDevice object instances.
-      if (selectedDevice != null && devices.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      final targetAddress =
+          selectedDevice?.address ?? prefs.getString('saved_printer_address');
+
+      if (targetAddress != null && targetAddress.isNotEmpty && devices.isNotEmpty) {
         final match = devices.cast<BluetoothDevice?>().firstWhere(
-              (d) => d?.address == selectedDevice!.address,
+              (d) => d?.address == targetAddress,
               orElse: () => null,
             );
         if (match != null) {
           selectedDevice = match;
+          if (widget.controller.selectedDevice == null) {
+            widget.controller.selectedDevice = match;
+          }
         }
       }
     } catch (e) {
