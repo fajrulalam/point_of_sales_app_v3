@@ -97,6 +97,38 @@ class MemberService {
     print('👤 Updated cache for member: ${member.name}');
   }
 
+  // Get a member by ID (from local cache first, then Firestore fallback)
+  Future<Member?> getMemberById(String id) async {
+    try {
+      final cachedMember = await _dbHelper.getMemberById(id);
+      if (cachedMember != null) return cachedMember;
+
+      // Fallback to Firestore by document ID
+      final doc = await _firestore.collection(Col.name('Members')).doc(id).get();
+      if (doc.exists && doc.data() != null) {
+        final member = Member.fromFirestore(doc.id, doc.data()!);
+        await _dbHelper.insertMember(member);
+        return member;
+      }
+
+      // Fallback to Firestore by custom memberId field
+      final query = await _firestore
+          .collection(Col.name('Members'))
+          .where('memberId', isEqualTo: id)
+          .limit(1)
+          .get();
+      if (query.docs.isNotEmpty) {
+        final firstDoc = query.docs.first;
+        final member = Member.fromFirestore(firstDoc.id, firstDoc.data());
+        await _dbHelper.insertMember(member);
+        return member;
+      }
+    } catch (e) {
+      print('❌ Error getting member by id ($id): $e');
+    }
+    return null;
+  }
+
   // Force sync (manually triggered)
   Future<void> forceSync() async {
     await fetchAndCacheMembers();

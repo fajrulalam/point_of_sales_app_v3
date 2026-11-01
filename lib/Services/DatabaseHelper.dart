@@ -240,4 +240,18 @@ class DatabaseHelper {
     );
     return result.map((map) => Member.fromMap(map)).toList();
   }
+
+  Future<Member?> getMemberById(String id) async {
+    final db = await database;
+    final result = await db.query(
+      'members',
+      where: 'id = ? OR memberId = ?',
+      whereArgs: [id, id],
+      limit: 1,
+    );
+    if (result.isNotEmpty) {
+      return Member.fromMap(result.first);
+    }
+    return null;
+  }
 }

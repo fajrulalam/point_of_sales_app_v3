@@ -104,7 +104,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         );
     };
 
-    controller.initialize().then((_) {
+    controller.initialize().then((_) async {
       if (mounted && controller.restoredDraft != null) {
         final draft = controller.restoredDraft!;
         if (draft.customerName.isNotEmpty) {
@@ -116,8 +116,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         if (draft.selectedMemberId != null &&
             draft.selectedMemberId!.isNotEmpty) {
           final foundMember =
-              MemberService.instance.getMemberById(draft.selectedMemberId!);
-          if (foundMember != null) {
+              await MemberService.instance.getMemberById(draft.selectedMemberId!);
+          if (foundMember != null && mounted) {
             setState(() {
               selectedMember = foundMember;
               isMember = true;

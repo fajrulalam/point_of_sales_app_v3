@@ -80,7 +80,7 @@ class OrderSummaryWidget extends StatelessWidget {
                       'Biaya Bungkus',
                       style: GoogleFonts.poppins(
                         color: Colors.grey,
-                        fontWeight: FontWeight.w300,
+                        fontWeight: FontWeight.normal,
                         letterSpacing: 0.1,
                         fontSize: 18,
                       ),
@@ -90,7 +90,7 @@ class OrderSummaryWidget extends StatelessWidget {
                       'Rp ${NumberFormat.decimalPattern().format(biayaBungkus).replaceAll(',', '.')}',
                       style: GoogleFonts.poppins(
                         color: Colors.grey,
-                        fontWeight: FontWeight.w300,
+                        fontWeight: FontWeight.normal,
                         letterSpacing: 0.1,
                         fontSize: 18,
                       ),

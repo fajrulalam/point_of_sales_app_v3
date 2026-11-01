@@ -61,7 +61,7 @@ class _AddMenuBottomSheetState extends State<AddMenuBottomSheet> {
   static final _currencyFormat = NumberFormat("#,###", "id_ID");
 
   static final _titleStyle = GoogleFonts.poppins(
-      fontSize: 28, fontWeight: FontWeight.w800, color: Colors.black87);
+      fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87);
   static final _labelStyle = GoogleFonts.poppins(fontSize: 14);
   static final _buttonTextStyle = GoogleFonts.poppins(
       color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16);
