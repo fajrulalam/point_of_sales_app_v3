@@ -3481,7 +3481,17 @@ class OrderConfirmationService {
               now.isAfter(groupExpiry)) {
             return {'error': 'Kampanye voucher ini sedang tidak aktif'};
           }
-        } catch (_) {
+        } catch (error) {
+          // Do not mask the cause: an e-santren rules denial is a deployment
+          // problem the cashier cannot fix and looks nothing like a flaky
+          // network. See docs/e_santren_voucher_claim_protocol.md.
+          print('Voucher group lookup failed for $code: $error');
+          if (error is FirebaseException && error.code == 'permission-denied') {
+            return {
+              'error':
+                  'POS belum punya izin membaca kampanye voucher e-santren. Hubungi admin.',
+            };
+          }
           return {'error': 'Kampanye voucher tidak dapat diverifikasi'};
         }
       }
@@ -3539,7 +3549,14 @@ class OrderConfirmationService {
         'voucherGroupId': groupId,
         'voucherSource': isPosVoucher ? 'local' : 'e_santren',
       };
-    } catch (_) {
+    } catch (error) {
+      print('Voucher validation failed for $code: $error');
+      if (error is FirebaseException && error.code == 'permission-denied') {
+        return {
+          'error':
+              'POS belum punya izin membaca voucher e-santren. Hubungi admin.',
+        };
+      }
       return {'error': 'Terjadi kesalahan saat memvalidasi voucher'};
     }
   }

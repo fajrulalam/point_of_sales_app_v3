@@ -42,20 +42,33 @@ menggunakan `operationId` yang sama dan harus idempoten.
 
 ## Persyaratan rules e-santren
 
-Aturan Firestore di proyek e-santren harus menjamin bahwa:
+POS tidak login ke proyek e-santren, sehingga POS mengaksesnya sebagai klien
+anonim. Rules e-santren (`firebase-rules/transition/firestore.rules` dan
+`firebase-rules/lockdown/firestore.rules` di repo e-santren, diuji di
+`tests/security-rules.emulator.cjs`) mengizinkan klien anonim hanya untuk
+langkah-langkah protokol ini:
 
-- Hanya identitas POS administrator yang dapat menulis voucher,
-  `operationClaims`, dan counter campaign.
-- `operationClaims/{operationId}` hanya dapat dibuat/diperbarui dengan
-  `operationId` yang sama dengan ID dokumen.
-- Marker `completed` tidak dapat dikembalikan ke `reserved`, `pending`, atau
-  `failed`.
-- Voucher sekali pakai hanya dapat difinalisasi oleh operation ID yang sedang
-  dicadangkan.
-- Voucher multi-pakai hanya dapat mengurangi reservation milik operation ID
-  tersebut dan tidak boleh menghasilkan saldo negatif.
-- Penghapusan voucher, marker operasi, dan riwayat klaim ditolak.
+- `voucherGroup/{id}`: `get` saja (cek kampanye aktif) dan menaikkan
+  `totalRedemptions` / `totalClaimed` tepat satu. `list`, membuat, dan menghapus
+  hanya untuk super admin.
+- `operationClaims/{operationId}`: `get`; dibuat dengan `operationId` sama dengan
+  ID dokumen, status `reserved`, jumlah bulat > 0 yang tidak melebihi saldo
+  voucher, dan voucher harus ada. Transisi yang diizinkan hanya
+  `reserved -> completed | released` dan `released -> reserved` (retry). Marker
+  `completed` tidak dapat berubah lagi dan penghapusan selalu ditolak.
+- `vouchers/{code}`: hanya field reservasi dan klaim yang boleh berubah, dan
+  hanya pada voucher yang belum `CLAIMED` / `DISABLED` / `EXPIRED`. Saldo hanya
+  boleh turun dan tidak boleh negatif; status hanya boleh menjadi `CLAIMED`.
+  Setiap klaim harus menyebut marker `reserved` yang belum kedaluwarsa untuk
+  voucher yang sama, marker itu harus menjadi `completed` pada commit yang sama
+  (satu reservasi hanya untuk satu klaim), dan penurunan saldo harus sama
+  dengan `amount` marker. Membuat dan menghapus voucher hanya untuk super admin.
 
-File ini adalah kontrak deployment untuk proyek e-santren. Rules proyek POS
-berada di `firestore.rules`; rules e-santren harus diterapkan di proyek
-eksternal setelah skema field dan daftar administrator dikonfirmasi.
+Batasan yang diterima: karena klien anonim, siapa pun yang memegang konfigurasi
+web publik proyek e-santren dapat mengirim urutan tulis yang sama. Rules menjaga
+konsistensi data (voucher hanya berkurang lewat reservasi yang cocok), tetapi
+tidak membuktikan bahwa pemanggilnya adalah POS. Jika POS kelak memakai
+identitas login, ubah `isPosClient()` di rules e-santren.
+
+Setelah mengubah rules di repo e-santren, rules harus dipublikasikan ke proyek
+e-santren dengan `firebase deploy --only firestore:rules`.
