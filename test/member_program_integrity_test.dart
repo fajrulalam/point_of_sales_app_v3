@@ -1,8 +1,65 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:point_of_sales_app_v3/Models/MemberProgramModels.dart';
 import 'package:point_of_sales_app_v3/Services/MemberProgramService.dart';
 
 void main() {
+  group('checkout voucher campaign eligibility', () {
+    final now = DateTime.utc(2026, 11, 20);
+    final asramaCampaign = <String, dynamic>{
+      'isActive': true,
+      'activeDate': Timestamp.fromDate(DateTime.utc(2026, 11, 8)),
+      'expireDate': Timestamp.fromDate(DateTime.utc(2026, 12, 31)),
+    };
+
+    bool isEligible(Map<String, dynamic>? data, {bool external = true}) =>
+        MemberProgramService.isVoucherGroupActiveForCheckout(
+          data,
+          external: external,
+          now: now,
+        );
+
+    test('accepts an active e-santren campaign without a status field', () {
+      expect(isEligible(asramaCampaign), isTrue);
+      expect(isEligible(asramaCampaign, external: false), isFalse);
+    });
+
+    test('respects campaign status when present in either project', () {
+      for (final external in [true, false]) {
+        expect(
+          isEligible({...asramaCampaign, 'status': 'ACTIVE'}, external: external),
+          isTrue,
+        );
+        for (final status in ['paused', 'archived', '', null]) {
+          expect(
+            isEligible({...asramaCampaign, 'status': status}, external: external),
+            isFalse,
+          );
+        }
+      }
+    });
+
+    test('rejects unavailable campaigns even without a status field', () {
+      expect(isEligible(null), isFalse);
+      expect(isEligible({...asramaCampaign, 'isActive': false}), isFalse);
+      expect(isEligible({...asramaCampaign, 'activeDate': null}), isFalse);
+      expect(
+        isEligible({
+          ...asramaCampaign,
+          'expireDate': now.subtract(const Duration(days: 1)),
+        }),
+        isFalse,
+      );
+      expect(
+        isEligible({
+          ...asramaCampaign,
+          'activeDate': now.add(const Duration(days: 1)),
+        }),
+        isFalse,
+      );
+    });
+  });
+
   test('calculates points after ordinary vouchers and excludes B2B nominal',
       () {
     final result = MemberProgramService.calculatePoints(

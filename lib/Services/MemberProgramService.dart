@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:intl/intl.dart';
 import 'package:point_of_sales_app_v3/Models/MemberProgramModels.dart';
+import 'package:point_of_sales_app_v3/Services/ExternalVoucherClock.dart';
 import 'package:point_of_sales_app_v3/Services/TestingModeService.dart';
 
 class MemberProgramException implements Exception {
@@ -330,6 +331,19 @@ class MemberProgramService {
     }
     final instant = now ?? DateTime.now();
     return !instant.isBefore(activeDate) && !instant.isAfter(expireDate);
+  }
+
+  static bool isVoucherGroupActiveForCheckout(
+    Map<String, dynamic>? data, {
+    required bool external,
+    required DateTime now,
+  }) {
+    if (data == null || data['isActive'] != true) return false;
+    final status = data['status']?.toString().toLowerCase();
+    // e-santren records campaign activity with isActive and dates.
+    final hasActiveStatus = status == _activeCampaignStatus ||
+        (external && !data.containsKey('status'));
+    return hasActiveStatus && isVoucherDateWindowOpen(data, now: now);
   }
 
   static Map<String, dynamic> _recordMap(dynamic value) {
@@ -1958,6 +1972,27 @@ class MemberProgramService {
   static FirebaseFirestore _externalFirestore() =>
       FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
 
+  static Future<DateTime> externalVoucherServerTime(String voucherCode) async {
+    final firestore = _externalFirestore();
+    final database =
+        'projects/${firestore.app.options.projectId}/databases/${firestore.databaseId}';
+    final path = '/v1/$database/documents:batchGet';
+    final host = firestore.settings.host ?? 'firestore.googleapis.com';
+    final endpoint = firestore.settings.sslEnabled == false
+        ? Uri.http(host, path)
+        : Uri.https(host, path);
+    final collection = Col.name('vouchers');
+    try {
+      return await ExternalVoucherClock.read(
+        endpoint,
+        '$database/documents/$collection/$voucherCode',
+      );
+    } on Exception {
+      throw const MemberProgramException(
+          'Waktu server e-santren tidak dapat diverifikasi. Coba lagi.');
+    }
+  }
+
   static DateTime _requiredVoucherDate(
       Map<String, dynamic> data, String field) {
     final value = _date(data[field]);
@@ -2000,7 +2035,6 @@ class MemberProgramService {
     required String operationId,
     required String voucherCode,
     required int amount,
-    Duration reservationDuration = const Duration(minutes: 15),
   }) async {
     if (operationId.trim().isEmpty ||
         voucherCode.trim().isEmpty ||
@@ -2010,25 +2044,27 @@ class MemberProgramService {
     final fs = _externalFirestore();
     final operationRef = fs.collection('operationClaims').doc(operationId);
     final voucherRef = fs.collection(Col.name('vouchers')).doc(voucherCode);
-    final expiresAt = DateTime.now().add(reservationDuration);
+    final now = await externalVoucherServerTime(voucherCode);
+    final expiresAt = now.add(const Duration(minutes: 15));
     await fs.runTransaction((transaction) async {
       final operationSnapshot = await transaction.get(operationRef);
       final existingOperation = operationSnapshot.data();
       final existingStatus =
           existingOperation?['status']?.toString().toLowerCase();
+      if (existingOperation != null &&
+          (existingOperation['voucherCode'] != voucherCode ||
+              parseInt(existingOperation['amount']) != amount)) {
+        throw const MemberProgramException(
+            'Reservasi voucher tidak cocok dengan transaksi ini.');
+      }
       if (existingStatus == 'completed') return;
       if (existingStatus == 'reserved') {
-        final existingAmount = parseInt(existingOperation?['amount']);
         final existingExpiry =
             _date(existingOperation?['reservationExpiresAt']);
-        if (existingOperation?['voucherCode'] == voucherCode &&
-            existingAmount == amount &&
-            existingExpiry != null &&
-            existingExpiry.isAfter(DateTime.now())) {
-          return;
+        if (existingExpiry == null) {
+          throw const MemberProgramException('Masa reservasi voucher tidak valid.');
         }
-        throw const MemberProgramException(
-            'Voucher eksternal sudah sedang dicadangkan oleh transaksi lain.');
+        if (existingExpiry.isAfter(now)) return;
       }
       final voucherSnapshot = await transaction.get(voucherRef);
       if (!voucherSnapshot.exists) {
@@ -2038,7 +2074,6 @@ class MemberProgramService {
       final data = voucherSnapshot.data() ?? <String, dynamic>{};
       final activeDate = _requiredVoucherDate(data, 'activeDate');
       final expireDate = _requiredVoucherDate(data, 'expireDate');
-      final now = DateTime.now();
       if (expireDate.isBefore(activeDate) ||
           now.isBefore(activeDate) ||
           now.isAfter(expireDate)) {
@@ -2146,13 +2181,18 @@ class MemberProgramService {
     final fs = _externalFirestore();
     final operationRef = fs.collection('operationClaims').doc(operationId);
     final voucherRef = fs.collection(Col.name('vouchers')).doc(voucherCode);
+    final now = await externalVoucherServerTime(voucherCode);
     await fs.runTransaction((transaction) async {
       final operationSnapshot = await transaction.get(operationRef);
       final operation = operationSnapshot.data();
-      if (operation?['status']?.toString().toLowerCase() == 'completed') return;
-      if (operation?['status']?.toString().toLowerCase() != 'reserved' ||
-          parseInt(operation?['amount']) != amount ||
+      if (parseInt(operation?['amount']) != amount ||
           operation?['voucherCode'] != voucherCode) {
+        throw const MemberProgramException(
+            'Reservasi voucher tidak cocok dengan transaksi ini.');
+      }
+      final status = operation?['status']?.toString().toLowerCase();
+      if (status == 'completed') return;
+      if (status != 'reserved') {
         throw const MemberProgramException(
             'Reservasi voucher e-santren tidak ditemukan atau sudah kedaluwarsa.');
       }
@@ -2163,12 +2203,12 @@ class MemberProgramService {
       }
       final data = voucherSnapshot.data() ?? <String, dynamic>{};
       final operationExpiry = _date(operation?['reservationExpiresAt']);
-      if (operationExpiry == null || !operationExpiry.isAfter(DateTime.now())) {
+      if (operationExpiry == null || !operationExpiry.isAfter(now)) {
         throw const MemberProgramException(
             'Reservasi voucher e-santren sudah kedaluwarsa.');
       }
       final expiry = _requiredVoucherDate(data, 'expireDate');
-      if (DateTime.now().isAfter(expiry)) {
+      if (now.isAfter(expiry)) {
         throw const MemberProgramException(
             'Voucher e-santren sudah kedaluwarsa.');
       }
@@ -2189,12 +2229,6 @@ class MemberProgramService {
           amount > remaining) {
         throw const MemberProgramException(
             'Saldo voucher e-santren sudah berubah.');
-      }
-      final reservationExpiry = _date(data['reservationExpiresAt']);
-      if (reservationExpiry == null ||
-          !reservationExpiry.isAfter(DateTime.now())) {
-        throw const MemberProgramException(
-            'Reservasi voucher e-santren sudah kedaluwarsa.');
       }
       final reservations = _reservationAmounts(data['reservationAmounts']);
       if (singleUse) {

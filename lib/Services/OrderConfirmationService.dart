@@ -3383,39 +3383,42 @@ class OrderConfirmationService {
     }
     try {
       final localFs = FirebaseFirestore.instance;
-      DocumentSnapshot<Map<String, dynamic>>? localSnapshot =
-          await localFs.collection(Col.name('vouchers')).doc(code).get();
-      var isPosVoucher = localSnapshot.exists;
-      var actualDocId = code;
-      Map<String, dynamic>? data = localSnapshot.data();
+      final localVouchers = localFs.collection(Col.name('vouchers'));
+      final uppercaseCode = code.toUpperCase();
+      DocumentSnapshot<Map<String, dynamic>>? voucherSnapshot;
 
-      if (!isPosVoucher) {
-        final byField = await localFs
-            .collection(Col.name('vouchers'))
-            .where('voucherId', isEqualTo: code)
+      // Keep exact matches for existing POS document IDs and voucherId fields.
+      for (final candidate in {code, uppercaseCode, code.toLowerCase()}) {
+        final byId = await localVouchers.doc(candidate).get();
+        if (byId.exists) {
+          voucherSnapshot = byId;
+          break;
+        }
+        final byField = await localVouchers
+            .where('voucherId', isEqualTo: candidate)
             .limit(1)
             .get();
         if (byField.docs.isNotEmpty) {
-          localSnapshot = byField.docs.first;
-          actualDocId = localSnapshot.id;
-          data = localSnapshot.data();
-          isPosVoucher = true;
+          voucherSnapshot = byField.docs.first;
+          break;
         }
       }
 
-      if (data == null) {
-        final externalFs =
-            FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'));
-        final externalSnapshot =
-            await externalFs.collection(Col.name('vouchers')).doc(code).get();
-        if (externalSnapshot.exists) {
-          data = externalSnapshot.data();
-          actualDocId = externalSnapshot.id;
-        }
-      }
+      final isPosVoucher = voucherSnapshot != null;
+      // e-santren issues uppercase voucher codes as Firestore document IDs.
+      final matchedVoucher = voucherSnapshot ??
+          await FirebaseFirestore.instanceFor(app: Firebase.app('e-santren'))
+              .collection(Col.name('vouchers'))
+              .doc(uppercaseCode)
+              .get();
+      final data = matchedVoucher.data();
       if (data == null) return {'error': 'Voucher tidak ditemukan'};
 
-      final now = DateTime.now();
+      final now = isPosVoucher
+          ? DateTime.now()
+          : await MemberProgramService.externalVoucherServerTime(
+              matchedVoucher.id,
+            );
       final activeDate = MemberProgramValues.dateValue(data['activeDate']);
       final expireDate = MemberProgramValues.dateValue(data['expireDate']);
       if (activeDate == null ||
@@ -3470,23 +3473,11 @@ class OrderConfirmationService {
               .collection(Col.name('voucherGroup'))
               .doc(groupId)
               .get();
-          final groupData = groupSnapshot.data();
-          final groupActive = MemberProgramValues.dateValue(
-            groupData?['activeDate'],
-          );
-          final groupExpiry = MemberProgramValues.dateValue(
-            groupData?['expireDate'],
-          );
-          final groupStatus =
-              groupData?['status']?.toString().toLowerCase() ?? '';
-          if (groupData == null ||
-              groupData['isActive'] != true ||
-              groupStatus != 'active' ||
-              groupActive == null ||
-              groupExpiry == null ||
-              groupExpiry.isBefore(groupActive) ||
-              now.isBefore(groupActive) ||
-              now.isAfter(groupExpiry)) {
+          if (!MemberProgramService.isVoucherGroupActiveForCheckout(
+            groupSnapshot.data(),
+            external: !isPosVoucher,
+            now: now,
+          )) {
             return {'error': 'Kampanye voucher ini sedang tidak aktif'};
           }
         } catch (error) {
@@ -3553,10 +3544,12 @@ class OrderConfirmationService {
         'isPosVoucher': isPosVoucher,
         'sekaliPakai': sekaliPakai,
         'userId': data['userId'],
-        'docId': actualDocId,
+        'docId': matchedVoucher.id,
         'voucherGroupId': groupId,
         'voucherSource': isPosVoucher ? 'local' : 'e_santren',
       };
+    } on MemberProgramException catch (error) {
+      return {'error': error.message};
     } catch (error) {
       print('Voucher validation failed for $code: $error');
       if (error is FirebaseException && error.code == 'permission-denied') {

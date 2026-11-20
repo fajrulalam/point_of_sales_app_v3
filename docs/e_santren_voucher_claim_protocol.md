@@ -13,7 +13,8 @@ Sebelum transaksi POS dimulai, POS menjalankan transaksi di proyek e-santren:
 - Membuat atau membaca marker idempoten
   `operationClaims/{operationId}`.
 - Menyimpan `status: reserved`, `voucherCode`, `amount`, dan
-  `reservationExpiresAt` (15 menit).
+  `reservationExpiresAt` (15 menit dari `readTime` Firestore e-santren).
+  Pemeriksaan masa berlaku voucher dan reservasi juga memakai waktu Firestore.
 - Untuk voucher sekali pakai, menyimpan `reservedOperationId`.
 - Untuk voucher multi-pakai, menyimpan `reservedAmount` dan
   `reservationAmounts.{operationId}`, serta
@@ -54,7 +55,10 @@ langkah-langkah protokol ini:
 - `operationClaims/{operationId}`: `get`; dibuat dengan `operationId` sama dengan
   ID dokumen, status `reserved`, jumlah bulat > 0 yang tidak melebihi saldo
   voucher, dan voucher harus ada. Transisi yang diizinkan hanya
-  `reserved -> completed | released` dan `released -> reserved` (retry). Marker
+  `reserved -> completed | released` dan `released -> reserved` (retry).
+  Reservasi `reserved` yang kedaluwarsa dapat diperbarui dengan kode voucher
+  dan nominal yang sama. Rules memeriksa bahwa waktu kedaluwarsa baru masih
+  di depan dengan toleransi maksimal 20 menit dari waktu server. Marker
   `completed` tidak dapat berubah lagi dan penghapusan selalu ditolak.
 - `vouchers/{code}`: hanya field reservasi dan klaim yang boleh berubah, dan
   hanya pada voucher yang belum `CLAIMED` / `DISABLED` / `EXPIRED`. Saldo hanya
