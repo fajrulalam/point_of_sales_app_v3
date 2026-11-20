@@ -1086,11 +1086,7 @@ class HomeController extends ChangeNotifier {
         int effectivePrice = element.harga + optionsAdj;
 
         void printItemLine(String name, int qty, int sub) {
-          String displayName = name;
-          if (displayName.length > 25) {
-            displayName = displayName.substring(0, 25) + "..";
-          }
-          print2ColumnSmall("($qty) $displayName", sub.toString());
+          print2ColumnSmall("($qty) $name", sub.toString());
           for (var opt in element.selectedOptions) {
             String optLine = '  + ${opt.optionName}';
             String optPrice = '+${opt.priceAdjustment}';
@@ -1225,12 +1221,8 @@ class HomeController extends ChangeNotifier {
         int effectivePrice = harga + optionsAdj;
 
         void printReprintLine(String name, int qty) {
-          String displayName = name;
-          if (displayName.length > 25) {
-            displayName = displayName.substring(0, 25) + "..";
-          }
           print2ColumnSmall(
-              "($qty) $displayName", (effectivePrice * qty).toString());
+              "($qty) $name", (effectivePrice * qty).toString());
           for (var opt in selectedOpts) {
             String optName = opt['optionName'] ?? '';
             int adj = ((opt['priceAdjustment'] ?? 0) as num).toInt();
@@ -1553,37 +1545,48 @@ class HomeController extends ChangeNotifier {
     super.dispose();
   }
 
+  /// Formats two strings to align on the left and right of a single printed line.
+  /// Guarantees that the resulting line does not exceed [maxChars], truncating
+  /// the left string with '..' if necessary so that it never wraps to a new line.
+  static String format2Column({
+    required String left,
+    required String right,
+    int maxChars = 32,
+  }) {
+    String rightFinal = right;
+    if (rightFinal.length > maxChars) {
+      rightFinal = rightFinal.substring(0, maxChars);
+    }
+
+    int spaceBetween = (left.isNotEmpty && rightFinal.isNotEmpty) ? 1 : 0;
+    int maxLeftWidth = maxChars - rightFinal.length - spaceBetween;
+
+    String leftFinal = left;
+    if (leftFinal.length > maxLeftWidth) {
+      if (maxLeftWidth > 2) {
+        leftFinal = "${leftFinal.substring(0, maxLeftWidth - 2).trimRight()}..";
+      } else if (maxLeftWidth > 0) {
+        leftFinal = leftFinal.substring(0, maxLeftWidth);
+      } else {
+        leftFinal = "";
+      }
+    }
+
+    int spaces = maxChars - leftFinal.length - rightFinal.length;
+    if (spaces < spaceBetween) spaces = spaceBetween;
+
+    return leftFinal + (" " * spaces) + rightFinal;
+  }
+
   void print2Column(String left, String right, int size) {
-    // 58mm printers usually have 32 characters per line.
-    // 80mm printers usually have 42-48.
-    int maxChars = 32;
-
-    // Calculate how many spaces we need between the two strings
-    int spaces = maxChars - left.length - right.length;
-
-    // Ensure we have at least one space
-    if (spaces < 1) spaces = 1;
-
-    String fullLine = left + (" " * spaces) + right;
-
-    // printCustom(String text, int size, int align)
-    // align: 0 = Left, 1 = Center, 2 = Right
+    // 58mm thermal printers (e.g. WOYA WP583 / RPP02) have 32 characters per line.
+    String fullLine = format2Column(left: left, right: right, maxChars: 32);
     printer.printCustom(fullLine, size, 0);
   }
 
   void print2ColumnSmall(String left, String right) {
-    // Small font (size 0) - allows for more characters
-    // Standard 58mm with size 0 = ~42 chars.
-    int maxChars = 42;
-
-    int spaces = maxChars - left.length - right.length;
-
-    // Safety check: if the text is too long, ensure at least one space
-    if (spaces < 1) spaces = 1;
-
-    String fullLine = left + (" " * spaces) + right;
-
-    // Use size 0 for smallest text
+    // 58mm thermal printers (e.g. WOYA WP583 / RPP02) have 32 characters per line.
+    String fullLine = format2Column(left: left, right: right, maxChars: 32);
     printer.printCustom(fullLine, 0, 0);
   }
 
@@ -1594,11 +1597,12 @@ class HomeController extends ChangeNotifier {
     int fontType = 0, // 0: Normal, 1: Bold (if supported)
   }) {
     // 1. Determine max characters based on font size (for 58mm printers)
-    // Size 0 = 42 chars | Size 1 = 32 chars | Size 2 = 21 chars | Size 3 = 14 chars
+    // 58mm printers print 32 chars for size 0 and 1.
+    // Size 0 = 32 chars | Size 1 = 32 chars | Size 2 = 21 chars | Size 3 = 14 chars
     int maxChars;
     switch (size) {
       case 0:
-        maxChars = 42;
+        maxChars = 32;
         break;
       case 1:
         maxChars = 32;
@@ -1613,21 +1617,7 @@ class HomeController extends ChangeNotifier {
         maxChars = 32;
     }
 
-    // 2. Ensure right side (the value/price) is never cut off
-    // We reserve enough space for the right string + 1 space
-    int maxLeftWidth = maxChars - right.length - 1;
-
-    // 3. Truncate left side if it's too long
-    String leftFinal = (left.length > maxLeftWidth)
-        ? "${left.substring(0, maxLeftWidth - 3)}.."
-        : left;
-
-    // 4. Calculate exact spacing
-    int spacesCount = maxChars - leftFinal.length - right.length;
-    if (spacesCount < 1) spacesCount = 1;
-
-    // 5. Build and print the line
-    String line = leftFinal + (" " * spacesCount) + right;
+    String line = format2Column(left: left, right: right, maxChars: maxChars);
     printer.printCustom(line, size, 0);
   }
 }
