@@ -248,7 +248,7 @@ class EditOrderService {
           'dineInQuantity': order.dineInQuantity,
           'takeAwayQuantity': order.takeAwayQuantity,
           'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
-          'isMakanan': menu?.isMakanan ?? false,
+          'isMakanan': menu?.isMakanan ?? (oldItem?['isMakanan'] is bool ? oldItem!['isMakanan'] as bool : true),
           'customerNote': order.customerNote ?? '',
           // Preserve kitchen progress for items that already existed;
           // new items start at zero.
@@ -310,14 +310,16 @@ class EditOrderService {
 
   static MenuObject? _findMenu(
       PesananObject pesanan, Map<String, MenuObject> menuMap) {
-    final stableId = pesanan.menuItemId.trim();
-    if (stableId.isNotEmpty) {
-      final byId = menuMap['__id__$stableId'];
+    final rawId = pesanan.menuItemId;
+    final stableId = rawId.trim();
+    if (rawId.isNotEmpty) {
+      final byId = menuMap['__id__$rawId'] ?? menuMap['__id__$stableId'];
       if (byId != null) return byId;
       for (final menu in menuMap.values) {
-        if (menu.id == stableId) return menu;
+        if (menu.id == rawId || menu.id == stableId || menu.id.trim() == stableId) {
+          return menu;
+        }
       }
-      return null;
     }
     final byName = menuMap['__name__${pesanan.namaPesanan.trim()}'] ??
         menuMap[pesanan.namaPesanan];
@@ -686,7 +688,7 @@ class EditOrderService {
             'takeAwayQuantity': order.takeAwayQuantity,
             'selectedOptions':
                 order.selectedOptions.map((o) => o.toMap()).toList(),
-            'isMakanan': menu?.isMakanan ?? false,
+            'isMakanan': menu?.isMakanan ?? (old?['isMakanan'] is bool ? old!['isMakanan'] as bool : true),
             'customerNote': order.customerNote ?? '',
             'status': old?['status'] ?? '',
             'dineInPreparedQuantity': old?['dineInPreparedQuantity'] ?? 0,

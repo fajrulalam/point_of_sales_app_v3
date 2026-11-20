@@ -396,7 +396,7 @@ class OrderConfirmationService {
       final activeOrders =
           pesananList.where((order) => order.totalQuantity > 0).toList();
       final menuIds = activeOrders
-          .map((order) => order.menuItemId.trim())
+          .expand((order) => [order.menuItemId, order.menuItemId.trim()])
           .where((id) => id.isNotEmpty)
           .toSet();
       final targetedMenuRead = activeOrders.isNotEmpty &&
@@ -985,15 +985,16 @@ class OrderConfirmationService {
     batch.set(yearlyTransaction, map, SetOptions(merge: true));
 
     List<Map<String, dynamic>> orderItems = pesananList.map((order) {
-      final menu = menuMap[order.namaPesanan];
+      final menu = _findMenu(order, menuMap);
       return {
-        'menuItemId': order.menuItemId,
+        'menuItemId':
+            order.menuItemId.isNotEmpty ? order.menuItemId : (menu?.id ?? ''),
         'namaPesanan': order.namaPesanan,
         'harga': order.harga,
         'dineInQuantity': order.dineInQuantity,
         'takeAwayQuantity': order.takeAwayQuantity,
         'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
-        'isMakanan': menu?.isMakanan ?? false,
+        'isMakanan': menu?.isMakanan ?? true,
         'customerNote': order.customerNote ?? '',
         'status': '',
         'dineInPreparedQuantity': 0,
@@ -1345,14 +1346,16 @@ class OrderConfirmationService {
 
   static MenuObject? _findMenu(
       PesananObject pesanan, Map<String, MenuObject> menuMap) {
-    final stableId = pesanan.menuItemId.trim();
-    if (stableId.isNotEmpty) {
-      final byId = menuMap['__id__$stableId'];
+    final rawId = pesanan.menuItemId;
+    final stableId = rawId.trim();
+    if (rawId.isNotEmpty) {
+      final byId = menuMap['__id__$rawId'] ?? menuMap['__id__$stableId'];
       if (byId != null) return byId;
       for (final menu in menuMap.values) {
-        if (menu.id == stableId) return menu;
+        if (menu.id == rawId || menu.id == stableId || menu.id.trim() == stableId) {
+          return menu;
+        }
       }
-      return null;
     }
     return menuMap['__name__${pesanan.namaPesanan.trim()}'] ??
         menuMap[pesanan.namaPesanan];
@@ -1362,7 +1365,10 @@ class OrderConfirmationService {
     final lookup = <String, MenuObject>{};
     final menusByName = <String, List<MenuObject>>{};
     for (final menu in menus) {
-      if (menu.id.isNotEmpty) lookup['__id__${menu.id}'] = menu;
+      if (menu.id.isNotEmpty) {
+        lookup['__id__${menu.id}'] = menu;
+        lookup['__id__${menu.id.trim()}'] = menu;
+      }
       final name = menu.namaMenu.trim();
       if (name.isNotEmpty) {
         menusByName.putIfAbsent(name, () => []).add(menu);
@@ -1561,7 +1567,7 @@ class OrderConfirmationService {
         'dineInQuantity': order.dineInQuantity,
         'takeAwayQuantity': order.takeAwayQuantity,
         'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
-        'isMakanan': menu?.isMakanan ?? false,
+        'isMakanan': menu?.isMakanan ?? true,
         'customerNote': order.customerNote ?? '',
         'status': '',
         'dineInPreparedQuantity': 0,
@@ -1643,7 +1649,7 @@ class OrderConfirmationService {
       final activeOrders =
           pesananList.where((order) => order.totalQuantity > 0).toList();
       final menuIds = activeOrders
-          .map((order) => order.menuItemId.trim())
+          .expand((order) => [order.menuItemId, order.menuItemId.trim()])
           .where((id) => id.isNotEmpty)
           .toSet();
       final targetedMenuRead = activeOrders.isNotEmpty &&
@@ -2209,15 +2215,16 @@ class OrderConfirmationService {
     batch.set(yearlyTransaction, map, SetOptions(merge: true));
 
     List<Map<String, dynamic>> orderItems = pesananList.map((order) {
-      final menu = menuMap[order.namaPesanan];
+      final menu = _findMenu(order, menuMap);
       return {
-        'menuItemId': order.menuItemId,
+        'menuItemId':
+            order.menuItemId.isNotEmpty ? order.menuItemId : (menu?.id ?? ''),
         'namaPesanan': order.namaPesanan,
         'harga': order.harga,
         'dineInQuantity': order.dineInQuantity,
         'takeAwayQuantity': order.takeAwayQuantity,
         'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
-        'isMakanan': menu?.isMakanan ?? false,
+        'isMakanan': menu?.isMakanan ?? true,
         'customerNote': order.customerNote ?? '',
         'status': '',
         'dineInPreparedQuantity': 0,
@@ -2433,7 +2440,7 @@ class OrderConfirmationService {
       final activeOrders =
           pesananList.where((order) => order.totalQuantity > 0).toList();
       final menuIds = activeOrders
-          .map((order) => order.menuItemId.trim())
+          .expand((order) => [order.menuItemId, order.menuItemId.trim()])
           .where((id) => id.isNotEmpty)
           .toSet();
       final targetedMenuRead = activeOrders.isNotEmpty &&
@@ -2776,15 +2783,16 @@ class OrderConfirmationService {
 
     // ── Build orderItems for the Status doc ──
     List<Map<String, dynamic>> orderItems = pesananList.map((order) {
-      final menu = menuMap[order.namaPesanan];
+      final menu = _findMenu(order, menuMap);
       return {
-        'menuItemId': order.menuItemId,
+        'menuItemId':
+            order.menuItemId.isNotEmpty ? order.menuItemId : (menu?.id ?? ''),
         'namaPesanan': order.namaPesanan,
         'harga': order.harga,
         'dineInQuantity': order.dineInQuantity,
         'takeAwayQuantity': order.takeAwayQuantity,
         'selectedOptions': order.selectedOptions.map((o) => o.toMap()).toList(),
-        'isMakanan': menu?.isMakanan ?? false,
+        'isMakanan': menu?.isMakanan ?? true,
         'customerNote': order.customerNote ?? '',
         'status': '',
         'dineInPreparedQuantity': 0,

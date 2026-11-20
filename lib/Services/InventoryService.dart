@@ -283,14 +283,16 @@ class InventoryService {
     required Map<String, Map<String, OptionItem>> optionLookup,
   }) {
     MenuObject? findMenu(PesananObject order) {
-      final stableId = order.menuItemId.trim();
-      if (stableId.isNotEmpty) {
-        final byId = menuLookup['__id__$stableId'];
+      final rawId = order.menuItemId;
+      final stableId = rawId.trim();
+      if (rawId.isNotEmpty) {
+        final byId = menuLookup['__id__$rawId'] ?? menuLookup['__id__$stableId'];
         if (byId != null) return byId;
         for (final menu in menuLookup.values) {
-          if (menu.id == stableId) return menu;
+          if (menu.id == rawId || menu.id == stableId || menu.id.trim() == stableId) {
+            return menu;
+          }
         }
-        return null;
       }
       return menuLookup['__name__${order.namaPesanan.trim()}'] ??
           menuLookup[order.namaPesanan];
@@ -449,22 +451,20 @@ class InventoryService {
     final flags = <InventoryAuditFlag>[];
 
     MenuObject? findMenu(PesananObject order) {
-      final stableId = order.menuItemId.trim();
-      if (stableId.isNotEmpty) {
-        final byId = menuLookup['__id__$stableId'];
+      final rawId = order.menuItemId;
+      final stableId = rawId.trim();
+      if (rawId.isNotEmpty) {
+        final byId = menuLookup['__id__$rawId'] ?? menuLookup['__id__$stableId'];
         if (byId != null) return byId;
         for (final menu in menuLookup.values) {
-          if (menu.id == stableId) return menu;
+          if (menu.id == rawId || menu.id == stableId || menu.id.trim() == stableId) {
+            return menu;
+          }
         }
-        // A populated menu ID is authoritative. Do not redirect a broken
-        // reference to a different menu that happens to share its name.
-        return null;
       }
 
       // Exact-name lookup is retained only for legacy order records that do
-      // not carry a stable menu ID. Callers may provide __name__ keys that
-      // suppress ambiguous duplicate names; the direct key preserves
-      // compatibility with older callers that only have a name map.
+      // not carry a stable menu ID or if ID lookup failed due to whitespace/formatting.
       return menuLookup['__name__${order.namaPesanan.trim()}'] ??
           menuLookup[order.namaPesanan];
     }

@@ -225,4 +225,46 @@ void main() {
       contains('Koneksi aman ke server gagal'),
     );
   });
+
+  test('resolves menu items even with trailing whitespace in menu document ID', () {
+    final whitespaceMenu = MenuObject(
+      id: 'Tahu Krispy ',
+      namaMenu: 'Tahu Krispy',
+      harga: 6000,
+      isMakanan: true,
+      imagePath: '',
+      ingredients: [
+        MenuIngredient(
+          inventoryItemId: '',
+          inventoryItemName: 'Legacy Tahu',
+          quantityNeeded: 1,
+        ),
+      ],
+    );
+
+    final lookup = {
+      '__id__Tahu Krispy ': whitespaceMenu,
+      '__id__Tahu Krispy': whitespaceMenu,
+      '__name__Tahu Krispy': whitespaceMenu,
+      'Tahu Krispy': whitespaceMenu,
+    };
+
+    final orderTrimmedId = PesananObject(
+      menuItemId: 'Tahu Krispy',
+      namaPesanan: 'Tahu Krispy',
+      harga: 6000,
+      dineInQuantity: 1,
+    );
+
+    final hasLegacy = InventoryService.orderHasLegacyInventoryReferences(
+      [orderTrimmedId],
+      menuLookup: lookup,
+      optionLookup: const {},
+    );
+
+    // If findMenu failed, it would return null and hasLegacy would be false.
+    // Because whitespaceMenu has an ingredient with empty inventoryItemId,
+    // successfully finding it returns true.
+    expect(hasLegacy, isTrue);
+  });
 }
